@@ -1,0 +1,7 @@
+# Missing the entire [meta] table. Loader must reject with
+# `GlossaryError::MissingSchemaVersion`.
+
+[[term]]
+source = "Open"
+[term.translations]
+de_DE = "Öffnen"

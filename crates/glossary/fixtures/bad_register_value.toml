@@ -1,0 +1,8 @@
+# `register` value not in {formal, informal, neutral}. Loader must reject
+# with `GlossaryError::InvalidRegister` naming the locale and the bad value.
+
+[meta]
+schema_version = 1
+
+[locale.de_DE]
+register = "casual"

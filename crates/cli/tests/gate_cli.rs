@@ -14,13 +14,19 @@ fn harness() -> Command {
 }
 
 fn tempdir() -> std::path::PathBuf {
+    // process::id + nanos alone can clash under parallel test execution.
+    // The atomic counter is the trustworthy source of uniqueness within a
+    // process; nanos + pid disambiguate across runs.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "i18n-harness-cli-{}-{}",
+        "i18n-harness-cli-{}-{}-{seq}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
     ));
     fs::create_dir_all(&dir).expect("create tempdir");
     dir

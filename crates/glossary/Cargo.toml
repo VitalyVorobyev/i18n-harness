@@ -13,6 +13,10 @@ workspace = true
 
 [dependencies]
 i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
