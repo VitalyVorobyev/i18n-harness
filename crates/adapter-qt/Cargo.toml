@@ -17,3 +17,6 @@ i18n-harness-locales.workspace = true
 i18n-harness-gate.workspace = true
 quick-xml.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
