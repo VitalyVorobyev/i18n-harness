@@ -1,0 +1,24 @@
+[package]
+name = "i18n-harness-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "TranslationBackend trait and backend implementations (manual, ollama, openai-compatible)."
+
+[lints]
+workspace = true
+
+[features]
+default = ["manual"]
+manual = []
+# `ollama` and `openai-compatible` features (with their HTTP + serde deps) land
+# in M2 / M4 respectively. Adding features here without deps keeps the surface
+# stable so callers can opt in without breaking changes later.
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-glossary.workspace = true
+thiserror.workspace = true

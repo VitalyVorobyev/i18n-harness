@@ -1,0 +1,19 @@
+[package]
+name = "i18n-harness-adapter-qt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Qt Linguist .ts adapter: byte-stable round-trip + ICU placeholder normalizer."
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
+i18n-harness-gate.workspace = true
+quick-xml.workspace = true
+thiserror.workspace = true

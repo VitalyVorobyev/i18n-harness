@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  check:
+    name: ${{ matrix.cmd.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cmd:
+          - { name: "fmt",    run: "cargo fmt --all -- --check" }
+          - { name: "clippy", run: "cargo clippy --workspace --all-targets -- -D warnings" }
+          - { name: "test",   run: "cargo test --workspace --all-targets" }
+          - { name: "doc",    run: "cargo doc --workspace --no-deps --document-private-items" }
+    steps:
+      # TODO: pin third-party actions to commit SHAs before any public release tag.
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: ${{ matrix.cmd.name }}
+        run: ${{ matrix.cmd.run }}
+        env:
+          RUSTDOCFLAGS: -D warnings

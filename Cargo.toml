@@ -1,0 +1,71 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/locales",
+    "crates/gate",
+    "crates/glossary",
+    "crates/backend",
+    "crates/catalog",
+    "crates/adapter-qt",
+    "crates/adapter-react",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/VitalyVorobyev/i18n-harness"
+authors = ["i18n-harness contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "warn"
+
+[workspace.dependencies]
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Qt .ts adapter
+quick-xml = "0.38"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Testing
+insta = "1"
+proptest = "1"
+
+# Internal crates
+i18n-harness-core = { path = "crates/core", version = "0.1.0" }
+i18n-harness-locales = { path = "crates/locales", version = "0.1.0" }
+i18n-harness-gate = { path = "crates/gate", version = "0.1.0" }
+i18n-harness-glossary = { path = "crates/glossary", version = "0.1.0" }
+i18n-harness-backend = { path = "crates/backend", version = "0.1.0" }
+i18n-harness-catalog = { path = "crates/catalog", version = "0.1.0" }
+i18n-harness-adapter-qt = { path = "crates/adapter-qt", version = "0.1.0" }
+i18n-harness-adapter-react = { path = "crates/adapter-react", version = "0.1.0" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

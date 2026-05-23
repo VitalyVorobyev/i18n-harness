@@ -1,0 +1,20 @@
+[package]
+name = "i18n-harness-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "CatalogFormat trait and serializers (PO, ICU-JSON) for non-Qt formats."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `po` and `icu-json` features land in M4 with their deps.
+
+[dependencies]
+i18n-harness-core.workspace = true
+thiserror.workspace = true

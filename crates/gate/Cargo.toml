@@ -1,0 +1,17 @@
+[package]
+name = "i18n-harness-gate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "CLDR-driven validation gate: placeholder multiset, plural/select arity, ICU parse, soft flags."
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
+thiserror.workspace = true

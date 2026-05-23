@@ -1,2 +1,14 @@
-target
+target/
 *.pyc
+
+# Per-project i18n-harness state (metrics, intermediate, batch progress)
+.i18n-harness/
+
+# UI tooling (lands in M3)
+node_modules/
+dist/
+
+# OS / editor noise
+.DS_Store
+*.swp
+*.swo

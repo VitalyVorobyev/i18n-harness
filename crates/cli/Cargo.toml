@@ -1,0 +1,30 @@
+[package]
+name = "i18n-harness-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Headless `harness` CLI — the entry point for both human and (later) Tauri UI use."
+
+[[bin]]
+name = "harness"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
+i18n-harness-gate.workspace = true
+i18n-harness-glossary.workspace = true
+i18n-harness-backend.workspace = true
+i18n-harness-catalog.workspace = true
+i18n-harness-adapter-qt.workspace = true
+i18n-harness-adapter-react.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "i18n-harness-adapter-react"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "React-side adapter — thin wrapper over PO and ICU-JSON serializers from `i18n-harness-catalog`."
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-catalog.workspace = true
+thiserror.workspace = true
