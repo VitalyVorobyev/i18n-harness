@@ -40,6 +40,10 @@ pub enum Flag {
     PluralArityMismatch,
     /// The target text is not parseable as ICU MessageFormat.
     IcuParseError,
+    /// The unit is marked [`crate::UnitState::Finished`] but at least one
+    /// required target slot is `None`. The harness must not ship a
+    /// "finished" unit with missing text.
+    EmptyTargetWhenFinished,
 
     // ── Soft (M1, gate) ────────────────────────────────────────────────────
     /// The accelerator marker (`&`) is present in the source but not in the
@@ -87,9 +91,10 @@ impl Flag {
     /// it in other crates.
     pub fn severity(self) -> FlagSeverity {
         match self {
-            Self::PlaceholderMismatch | Self::PluralArityMismatch | Self::IcuParseError => {
-                FlagSeverity::Hard
-            }
+            Self::PlaceholderMismatch
+            | Self::PluralArityMismatch
+            | Self::IcuParseError
+            | Self::EmptyTargetWhenFinished => FlagSeverity::Hard,
             Self::AccelMismatch
             | Self::LengthWarn
             | Self::CjkPunctuationTolerated
@@ -176,6 +181,7 @@ mod tests {
             Flag::PlaceholderMismatch,
             Flag::PluralArityMismatch,
             Flag::IcuParseError,
+            Flag::EmptyTargetWhenFinished,
             Flag::AccelMismatch,
             Flag::LengthWarn,
             Flag::CjkPunctuationTolerated,

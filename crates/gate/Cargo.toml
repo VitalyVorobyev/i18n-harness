@@ -14,4 +14,10 @@ workspace = true
 [dependencies]
 i18n-harness-core.workspace = true
 i18n-harness-locales.workspace = true
+i18n-harness-glossary.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+i18n-harness-adapter-qt.workspace = true
