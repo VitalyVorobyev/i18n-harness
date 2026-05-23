@@ -11,5 +11,7 @@ description = "Locale records and CLDR plural-arity tables as data, not match ar
 [lints]
 workspace = true
 
+# Locale data is a static Rust table (see lib.rs doc comment); no serialization
+# dependency is needed at this stage. If the table moves to YAML/TOML later, add
+# `serde` + the loader of choice here.
 [dependencies]
-serde.workspace = true
