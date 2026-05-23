@@ -251,8 +251,13 @@ dependencies = [
 name = "i18n-harness-backend"
 version = "0.1.0"
 dependencies = [
+ "i18n-harness-adapter-qt",
  "i18n-harness-core",
+ "i18n-harness-gate",
  "i18n-harness-glossary",
+ "i18n-harness-locales",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

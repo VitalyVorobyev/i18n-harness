@@ -19,11 +19,17 @@ fn fixture(name: &str) -> PathBuf {
 #[test]
 fn good_fixture_loads_with_expected_shape() {
     let (g, warnings) = Glossary::load(fixture("good.toml")).expect("load");
-    assert!(warnings.is_empty(), "expected no warnings, got {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got {warnings:?}"
+    );
     assert_eq!(g.len(), 3);
     let open = g.term("Open").expect("Open term present");
     assert!(!open.do_not_translate);
-    assert_eq!(open.translations.get("de_DE").map(String::as_str), Some("Öffnen"));
+    assert_eq!(
+        open.translations.get("de_DE").map(String::as_str),
+        Some("Öffnen")
+    );
     let chroma = g.term("ChromaCheck").expect("ChromaCheck term present");
     assert!(chroma.do_not_translate);
     assert_eq!(g.register_for("de_DE"), Some(Register::Formal));
@@ -47,8 +53,7 @@ fn round_trip_through_disk_is_identity() {
 
 #[test]
 fn missing_schema_version_is_rejected() {
-    let err = Glossary::load(fixture("bad_missing_schema_version.toml"))
-        .expect_err("must fail");
+    let err = Glossary::load(fixture("bad_missing_schema_version.toml")).expect_err("must fail");
     assert!(
         matches!(err, GlossaryError::MissingSchemaVersion),
         "got {err:?}",
@@ -57,8 +62,7 @@ fn missing_schema_version_is_rejected() {
 
 #[test]
 fn duplicate_source_is_rejected() {
-    let err =
-        Glossary::load(fixture("bad_duplicate_source.toml")).expect_err("must fail");
+    let err = Glossary::load(fixture("bad_duplicate_source.toml")).expect_err("must fail");
     assert!(
         matches!(&err, GlossaryError::DuplicateSource { term_source } if term_source == "Open"),
         "got {err:?}",
@@ -67,8 +71,7 @@ fn duplicate_source_is_rejected() {
 
 #[test]
 fn invalid_register_is_rejected() {
-    let err =
-        Glossary::load(fixture("bad_register_value.toml")).expect_err("must fail");
+    let err = Glossary::load(fixture("bad_register_value.toml")).expect_err("must fail");
     assert!(
         matches!(&err, GlossaryError::InvalidRegister { locale, value }
             if locale == "de_DE" && value == "casual"),

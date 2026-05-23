@@ -72,7 +72,9 @@ pub enum GlossaryError {
     ///
     /// Occurs when a user types a typo or invents a register name. Caller:
     /// surface the bad value and the entry it appeared in.
-    #[error("invalid register `{value}` in `[locale.{locale}]` (must be one of formal|informal|neutral)")]
+    #[error(
+        "invalid register `{value}` in `[locale.{locale}]` (must be one of formal|informal|neutral)"
+    )]
     InvalidRegister {
         /// Locale id whose `[locale.<id>]` table contained the bad value.
         locale: String,

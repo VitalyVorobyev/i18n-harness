@@ -14,11 +14,19 @@ workspace = true
 [features]
 default = ["manual"]
 manual = []
-# `ollama` and `openai-compatible` features (with their HTTP + serde deps) land
-# in M2 / M4 respectively. Adding features here without deps keeps the surface
-# stable so callers can opt in without breaking changes later.
+# `ollama` and `openai-compatible` features bring their HTTP/serde deps in
+# M2 follow-up / M4 respectively. The trait surface stays stable across
+# those additions because backends produce text only — adding HTTP transport
+# does not change the trait method signature.
 
 [dependencies]
 i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
 i18n-harness-glossary.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+i18n-harness-adapter-qt.workspace = true
+i18n-harness-gate.workspace = true

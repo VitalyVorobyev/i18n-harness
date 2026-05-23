@@ -142,7 +142,8 @@ impl Glossary {
     ///   a source string.
     /// - [`GlossaryError::InvalidRegister`] if a register string outside
     ///   `formal|informal|neutral` is used.
-    /// - [`GlossaryError::EmptyMeta`] if `meta.schema_version` is missing.
+    /// - [`GlossaryError::MissingSchemaVersion`] if `meta.schema_version`
+    ///   is missing.
     pub fn load(path: impl AsRef<Path>) -> Result<(Self, Vec<GlossaryWarning>), GlossaryError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(path).map_err(|source| GlossaryError::Io {
@@ -229,10 +230,7 @@ impl Glossary {
 
     /// Project-level variant override for the given locale, if any.
     pub fn variant_for(&self, locale_id: &str) -> Option<&str> {
-        self.locale_overrides
-            .get(locale_id)?
-            .variant
-            .as_deref()
+        self.locale_overrides.get(locale_id)?.variant.as_deref()
     }
 }
 
@@ -270,7 +268,10 @@ register = "formal"
 variant = "de_DE"
 "#;
         let (g1, warnings) = Glossary::from_toml(toml).expect("parse");
-        assert!(warnings.is_empty(), "expected no warnings, got {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings, got {warnings:?}"
+        );
         let serialized = g1.to_toml().expect("serialize");
         let (g2, _) = Glossary::from_toml(&serialized).expect("re-parse");
         assert_eq!(g1, g2, "round trip identity (serialize then parse)");

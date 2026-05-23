@@ -61,14 +61,12 @@ fn term_spec_strategy() -> impl Strategy<Value = TermSpec> {
         proptest::option::of(translation_strategy()),
         prop::collection::btree_map(locale_id_strategy(), translation_strategy(), 0..3),
     )
-        .prop_map(
-            |(source, do_not_translate, notes, translations)| TermSpec {
-                source,
-                do_not_translate,
-                notes,
-                translations,
-            },
-        )
+        .prop_map(|(source, do_not_translate, notes, translations)| TermSpec {
+            source,
+            do_not_translate,
+            notes,
+            translations,
+        })
 }
 
 #[derive(Debug, Clone)]

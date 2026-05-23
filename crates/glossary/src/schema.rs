@@ -182,9 +182,9 @@ pub(crate) fn validate(raw: Raw) -> Result<(Glossary, Vec<GlossaryWarning>), Glo
             Some(s) => Some(parse_register(&locale_id, &s)?),
         };
         if WorkspaceLocale::by_id(&locale_id).is_none()
-            && !warnings.iter().any(|w| {
-                matches!(w, GlossaryWarning::UnknownLocale { locale } if locale == &locale_id)
-            })
+            && !warnings.iter().any(
+                |w| matches!(w, GlossaryWarning::UnknownLocale { locale } if locale == &locale_id),
+            )
         {
             warnings.push(GlossaryWarning::UnknownLocale {
                 locale: locale_id.clone(),
@@ -267,10 +267,7 @@ mod tests {
 
     #[test]
     fn future_schema_version_is_rejected() {
-        let toml_str = format!(
-            "[meta]\nschema_version = {}\n",
-            SCHEMA_VERSION + 1
-        );
+        let toml_str = format!("[meta]\nschema_version = {}\n", SCHEMA_VERSION + 1);
         let raw: Raw = toml::from_str(&toml_str).unwrap();
         let err = validate(raw).expect_err("must error");
         assert!(matches!(
@@ -299,7 +296,9 @@ do_not_translate = false
 "#;
         let raw: Raw = toml::from_str(toml_str).unwrap();
         let err = validate(raw).expect_err("must error");
-        assert!(matches!(err, GlossaryError::DuplicateSource { term_source } if term_source == "Open"));
+        assert!(
+            matches!(err, GlossaryError::DuplicateSource { term_source } if term_source == "Open")
+        );
     }
 
     #[test]
