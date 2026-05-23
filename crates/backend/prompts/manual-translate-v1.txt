@@ -1,0 +1,15 @@
+[template={template_version}]
+
+Translate the following user-interface string into {locale}.
+Use the {register} register.
+
+Glossary (preferred translations):
+{glossary_block}
+
+Do not translate the following terms; render them verbatim in the output:
+{do_not_translate_block}
+
+Source:
+{source}
+
+Reply with only the translated string, no commentary.
