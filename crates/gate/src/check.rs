@@ -277,7 +277,10 @@ fn length_warn_check(
     }
     let target_chars: u32 = slots.iter().map(|s| s.text.chars().count() as u32).sum();
     let threshold = locale.length_warn_ratio;
-    let ratio = f32::from(target_chars as u16) / f32::from(source_chars as u16);
+    // UI strings are tiny (a screen at a time); even at 100 KB per slot
+    // the loss of precision converting u32 → f32 is irrelevant for a
+    // 2-significant-figures ratio test.
+    let ratio = target_chars as f32 / source_chars as f32;
     if ratio > threshold {
         findings.push(Finding {
             flag: Flag::LengthWarn,
