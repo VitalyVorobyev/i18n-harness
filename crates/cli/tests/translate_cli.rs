@@ -13,13 +13,20 @@ fn harness() -> Command {
 }
 
 fn tempdir() -> std::path::PathBuf {
+    // process::id + nanos alone can clash under parallel test execution
+    // (cargo's default scheduler can call this twice in the same nanosecond
+    // on a fast machine). The atomic counter is the trustworthy source of
+    // uniqueness within a process; nanos + pid disambiguate across runs.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
-        "i18n-harness-translate-{}-{}",
+        "i18n-harness-translate-{}-{}-{seq}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
     ));
     fs::create_dir_all(&dir).expect("create tempdir");
     dir
@@ -174,6 +181,126 @@ fn unknown_locale_errors() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("unknown locale"), "stderr: {stderr}");
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Source contains malformed ICU (unclosed `{`). The echo backend copies
+/// it verbatim, so the target is also malformed → gate's `IcuParseError`
+/// (hard) fires from the translate loop itself. This is the cleanest way
+/// to trigger a hard finding via echo, since the echo path always preserves
+/// placeholder multisets and plural arity.
+const HARD_FAIL_TS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>Boom</name>
+    <message>
+        <source>Hello {name</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+</TS>
+"#;
+
+#[test]
+fn hard_finding_blocks_write_back_even_with_out() {
+    let dir = tempdir();
+    let path = dir.join("hard.ts");
+    let out_path = dir.join("hard.out.ts");
+    fs::write(&path, HARD_FAIL_TS).unwrap();
+
+    let out = harness()
+        .args(["translate", "--locale", "de_DE", "--out"])
+        .arg(&out_path)
+        .arg(&path)
+        .output()
+        .expect("spawn");
+
+    // CLI must exit non-zero AND must not write the output file.
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit, got success. stdout={}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("hard finding"),
+        "stderr missing message: {stderr}"
+    );
+    assert!(
+        !out_path.exists(),
+        "out file must not exist after a blocked write-back, found at {}",
+        out_path.display()
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+/// Source carries a German determiner (`der`) immediately before a `%1`
+/// placeholder. After ICU-normalization that becomes `der {0}`. The echo
+/// backend copies the source verbatim, so the target also contains
+/// `der {0}` — the gate's `PlaceholderAgreementRisk` heuristic fires.
+/// This is a soft finding only; the unit must stay `Proposed` (not promoted
+/// to Finished) and the file write-back must still succeed.
+const SOFT_AGREEMENT_TS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>Agree</name>
+    <message>
+        <source>Öffne der %1 Datei</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+</TS>
+"#;
+
+#[test]
+fn soft_finding_keeps_unit_proposed_but_writes_back() {
+    let dir = tempdir();
+    let path = dir.join("soft.ts");
+    let out_path = dir.join("soft.out.ts");
+    fs::write(&path, SOFT_AGREEMENT_TS).unwrap();
+
+    let out = harness()
+        .args(["translate", "--locale", "de_DE", "--out"])
+        .arg(&out_path)
+        .arg(&path)
+        .output()
+        .expect("spawn");
+
+    assert!(
+        out.status.success(),
+        "soft findings must not block write-back. stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("placeholder-agreement-risk"),
+        "expected soft finding reported in stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("soft=1"),
+        "expected soft=1 in summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("flagged=1"),
+        "expected flagged=1 in summary: {stdout}"
+    );
+    assert!(
+        stdout.contains("finished=0"),
+        "soft-flagged unit must not be promoted to Finished: {stdout}"
+    );
+
+    let written = fs::read_to_string(&out_path).expect("output file written");
+    // The unit was filled but kept at Proposed — the `type="unfinished"`
+    // attribute should still be present in the on-disk catalog.
+    assert!(
+        written.contains(r#"type="unfinished""#),
+        "soft-flagged unit must stay Proposed (unfinished): {written}"
+    );
 
     fs::remove_dir_all(&dir).ok();
 }

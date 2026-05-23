@@ -434,9 +434,10 @@ fn translate(args: TranslateArgs) -> Result<()> {
             }
 
             let mut promoted = unit;
-            if !report.has_hard() && promoted.target.is_complete() {
-                // Gate-clean and target present: promote to Finished. Soft
-                // findings are not blocking.
+            if report.is_clean() && promoted.target.is_complete() {
+                // Fully gate-clean (no hard AND no soft findings) and target
+                // present: safe to promote to Finished. Any finding — hard or
+                // soft — keeps the unit at Proposed for human review.
                 promoted.state = UnitState::Finished;
                 summary.finished += 1;
             } else if !report.is_clean() {
@@ -460,19 +461,33 @@ fn translate(args: TranslateArgs) -> Result<()> {
     let mut overrides = translated_units;
     overrides.extend(preserved);
 
-    // Always render to check the bytes are well-formed; only write if --out.
-    let bytes =
+    // Always render to validate the bytes are well-formed, regardless of
+    // findings; renders are pure and surface adapter bugs without mutating
+    // disk state.
+    let _bytes =
         render(&catalog, &overrides).with_context(|| format!("render {}", args.path.display()))?;
-    let _ = bytes; // consumed for validation; written below if --out is set.
+
+    // Hard-finding guard MUST precede `apply()` — write-back is blocked any
+    // time the gate found a hard issue, even in --out mode. Soft-only runs
+    // still write; the affected units stay at Proposed.
+    let write_blocked = summary.hard > 0;
 
     if let Some(out_path) = args.out.as_ref() {
-        apply(&catalog, &overrides, out_path)
-            .with_context(|| format!("apply → {}", out_path.display()))?;
-        println!(
-            "\nwrote: {} ({} units)",
-            out_path.display(),
-            overrides.len()
-        );
+        if write_blocked {
+            eprintln!(
+                "\nblocked: {} hard finding(s); not writing {} (use `harness gate` to inspect)",
+                summary.hard,
+                out_path.display(),
+            );
+        } else {
+            apply(&catalog, &overrides, out_path)
+                .with_context(|| format!("apply → {}", out_path.display()))?;
+            println!(
+                "\nwrote: {} ({} units)",
+                out_path.display(),
+                overrides.len()
+            );
+        }
     } else {
         println!("\ndry-run (no --out); skipped write-back");
     }
@@ -492,10 +507,10 @@ fn translate(args: TranslateArgs) -> Result<()> {
         summary.soft,
     );
 
-    if summary.hard > 0 {
+    if write_blocked {
         return Err(anyhow!(
-            "{} hard finding(s) — write-back blocked for affected units",
-            summary.hard
+            "{} hard finding(s) — write-back blocked",
+            summary.hard,
         ));
     }
     Ok(())

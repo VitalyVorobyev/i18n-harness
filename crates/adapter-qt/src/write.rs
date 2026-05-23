@@ -202,8 +202,16 @@ fn plan_edits_for_unit(
     }
 
     // State transition: only when we *actually* changed the target and the
-    // unit's current state allows write-back.
-    if any_target_change && ep.original_state.is_writable() && promote_to_finished {
+    // unit's current state allows write-back. If the caller explicitly set
+    // `candidate.state = Proposed`, keep `type="unfinished"` on disk so the
+    // file carries the "needs human review" signal the gate produced. This
+    // is the contract `harness translate` relies on: gate-clean units land
+    // as Finished, gate-flagged units stay Proposed.
+    if any_target_change
+        && ep.original_state.is_writable()
+        && promote_to_finished
+        && candidate.state != UnitState::Proposed
+    {
         if let Some(attr) = ep.type_attr.as_ref() {
             // Rewrite the open tag to strip `type="unfinished"`.
             edits.push(Edit {
