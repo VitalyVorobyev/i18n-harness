@@ -309,6 +309,8 @@ name = "i18n-harness-glossary"
 version = "0.1.0"
 dependencies = [
  "i18n-harness-core",
+ "i18n-harness-locales",
+ "proptest",
  "serde",
  "thiserror",
  "toml",

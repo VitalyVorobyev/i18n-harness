@@ -1,0 +1,14 @@
+# Two `[[term]]` entries share the same `source`. Loader must reject with
+# `GlossaryError::DuplicateSource`.
+
+[meta]
+schema_version = 1
+
+[[term]]
+source = "Open"
+do_not_translate = true
+
+[[term]]
+source = "Open"
+[term.translations]
+de_DE = "Öffnen"

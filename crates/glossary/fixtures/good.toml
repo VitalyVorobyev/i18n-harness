@@ -1,0 +1,35 @@
+# A representative good glossary covering:
+# - meta.schema_version
+# - a regular term with de_DE translation
+# - a do_not_translate product name (no translations)
+# - a term with notes
+# - a locale override (register + variant)
+#
+# Used by the loader and round-trip tests.
+
+[meta]
+schema_version = 1
+
+[[term]]
+source = "Open"
+do_not_translate = false
+notes = "Verb sense (file menu); not 'open' as in 'open question'."
+
+  [term.translations]
+  de_DE = "Öffnen"
+
+[[term]]
+source = "Save"
+do_not_translate = false
+
+  [term.translations]
+  de_DE = "Speichern"
+
+[[term]]
+source = "ChromaCheck"
+do_not_translate = true
+notes = "Product name; always render verbatim."
+
+[locale.de_DE]
+register = "formal"
+variant = "de_DE"
