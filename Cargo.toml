@@ -48,6 +48,12 @@ clap = { version = "4", features = ["derive"] }
 # Qt .ts adapter
 quick-xml = "0.38"
 
+# HTTP client (sync, no async runtime; used by the ollama backend).
+# The `json` feature enables send_json / as_json helpers used by the
+# ollama backend; it also activates ureq's own serde/serde_json deps, which
+# is fine because those are already workspace deps with matching versions.
+ureq = { version = "3", features = ["json"] }
+
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

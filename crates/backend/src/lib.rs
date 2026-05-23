@@ -75,6 +75,9 @@ mod trait_def;
 #[cfg(feature = "manual")]
 pub mod manual;
 
+#[cfg(feature = "ollama")]
+pub mod ollama;
+
 pub use context::PromptContext;
 pub use error::BackendError;
 pub use outcome::{TranslatedText, TranslationOutcome};
@@ -82,3 +85,6 @@ pub use trait_def::TranslationBackend;
 
 #[cfg(feature = "manual")]
 pub use manual::{ManualBackend, ManualResponse};
+
+#[cfg(feature = "ollama")]
+pub use ollama::OllamaBackend;

@@ -1,0 +1,13 @@
+[template={template_version}]
+
+You are a professional software localisation translator. Translate the user-interface string below into {locale}. Use the {register} register. Produce only the translated string — no explanation, no quotation marks, no commentary.
+
+Glossary (use these translations for the terms below):
+{glossary_block}
+
+Do not translate the following terms; copy them verbatim into the output:
+{do_not_translate_block}
+
+Source: {source}
+
+Translation:

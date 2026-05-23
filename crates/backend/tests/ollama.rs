@@ -1,0 +1,298 @@
+//! Mocked HTTP tests for [`OllamaBackend`].
+//!
+//! Each test spawns a minimal `TcpListener` on a random loopback port,
+//! wires an `OllamaBackend` to that address, and asserts the outcome.
+//! No async runtime, no external mock crate — just `std::net`.
+//!
+//! The mock server reads until the end of the HTTP request headers
+//! (`\r\n\r\n`), then reads the body if `Content-Length` is present,
+//! and writes a canned HTTP/1.1 response. It handles exactly as many
+//! connections as the test needs; afterwards the thread exits.
+
+#![cfg(feature = "ollama")]
+
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::time::Duration;
+
+use i18n_harness_backend::{BackendError, OllamaBackend, TranslationBackend, TranslationOutcome};
+use i18n_harness_core::{Batch, BatchKey, Target, Unit};
+use i18n_harness_locales::Locale;
+
+// ── Mock server helpers ──────────────────────────────────────────────────────
+
+/// A canned HTTP/1.1 200 response with the given JSON body.
+fn ok_response(body: &str) -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
+}
+
+/// A canned HTTP/1.1 response with an arbitrary status and no body.
+fn status_response(code: u16, reason: &str) -> String {
+    format!("HTTP/1.1 {code} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+/// Read an HTTP request from `stream` until the header block ends.
+/// Also reads the body if `Content-Length` is present in the headers.
+fn drain_request(stream: &mut std::net::TcpStream) {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 1];
+    // Read byte-by-byte until \r\n\r\n.
+    loop {
+        if stream.read(&mut tmp).unwrap_or(0) == 0 {
+            break;
+        }
+        buf.push(tmp[0]);
+        if buf.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    // Parse Content-Length and drain the body so the response is not
+    // sent before the client has finished sending its request.
+    let headers = String::from_utf8_lossy(&buf);
+    let content_length: usize = headers
+        .lines()
+        .find_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower
+                .strip_prefix("content-length:")
+                .map(|v| v.trim().parse().unwrap_or(0))
+        })
+        .unwrap_or(0);
+    if content_length > 0 {
+        let mut body_buf = vec![0u8; content_length];
+        let _ = stream.read_exact(&mut body_buf);
+    }
+}
+
+/// Spawn a mock server that handles `conn_count` connections sequentially.
+///
+/// `responses` must have exactly `conn_count` entries. The server sends
+/// `responses[i]` for the i-th connection, in order.
+///
+/// Returns `(host_url, join_handle)`.
+fn spawn_mock_server(responses: Vec<String>) -> (String, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let host = format!("http://{addr}");
+    let handle = std::thread::spawn(move || {
+        for response in responses {
+            if let Ok((mut stream, _)) = listener.accept() {
+                drain_request(&mut stream);
+                let _ = stream.write_all(response.as_bytes());
+            }
+        }
+    });
+    (host, handle)
+}
+
+// ── Unit factories ────────────────────────────────────────────────────────────
+
+fn singular_unit(id: &str, source: &str) -> Unit {
+    Unit::untranslated_singular(id, source)
+}
+
+fn plural_unit(id: &str, source: &str) -> Unit {
+    let mut u = Unit::untranslated_singular(id, source);
+    u.plural_arity = Some(2);
+    u.target = Target::Plural {
+        forms: vec![None, None],
+    };
+    u
+}
+
+fn de_de() -> &'static Locale {
+    Locale::by_id("de_DE").expect("de_DE")
+}
+
+fn make_batch(units: Vec<Unit>) -> Batch {
+    Batch::new(BatchKey::new("test", 0), units)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+/// 1. Happy path: model returns `{"response": "Hallo Welt"}`.
+///    Outcome must be `Translated { text: Singular("Hallo Welt") }`.
+#[test]
+fn happy_path_singular_translation() {
+    let body = r#"{"response": "Hallo Welt", "done": true}"#;
+    let (host, _handle) = spawn_mock_server(vec![ok_response(body)]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("greet", "Hello World")]);
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        TranslationOutcome::Translated {
+            text: i18n_harness_backend::TranslatedText::Singular(s),
+            ..
+        } => assert_eq!(s, "Hallo Welt"),
+        other => panic!("expected Translated singular, got {other:?}"),
+    }
+}
+
+/// 2. Empty response field: `{"response": ""}`.
+///    Outcome must be `Failed { reason: "ollama-empty-response", retryable: true }`.
+#[test]
+fn empty_response_field_is_failed_retryable() {
+    let body = r#"{"response": "", "done": true}"#;
+    let (host, _handle) = spawn_mock_server(vec![ok_response(body)]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("a", "Hello")]);
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        TranslationOutcome::Failed { reason, retryable } => {
+            assert_eq!(reason, "ollama-empty-response");
+            assert!(retryable, "empty response should be retryable");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+/// 3. Non-JSON response body: server returns `not json`.
+///    Must produce `Err(BackendError::Protocol(...))`.
+#[test]
+fn non_json_body_is_protocol_error() {
+    let (host, _handle) = spawn_mock_server(vec![ok_response("not json")]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("a", "Hello")]);
+    let result = backend.translate_batch(&batch, de_de(), None);
+
+    match result {
+        Err(BackendError::Protocol { backend, .. }) => {
+            assert_eq!(backend, "ollama");
+        }
+        other => panic!("expected Protocol error, got {other:?}"),
+    }
+}
+
+/// 4. 503 status: server returns 503.
+///    Must produce `Err(BackendError::Network(...))`.
+#[test]
+fn http_503_is_network_error() {
+    let (host, _handle) = spawn_mock_server(vec![status_response(503, "Service Unavailable")]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("a", "Hello")]);
+    let result = backend.translate_batch(&batch, de_de(), None);
+
+    match result {
+        Err(BackendError::Network { backend, .. }) => {
+            assert_eq!(backend, "ollama");
+        }
+        other => panic!("expected Network error, got {other:?}"),
+    }
+}
+
+/// 5. 401 status: server returns 401.
+///    Must produce `Err(BackendError::Auth(...))`.
+#[test]
+fn http_401_is_auth_error() {
+    let (host, _handle) = spawn_mock_server(vec![status_response(401, "Unauthorized")]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("a", "Hello")]);
+    let result = backend.translate_batch(&batch, de_de(), None);
+
+    match result {
+        Err(BackendError::Auth { backend, .. }) => {
+            assert_eq!(backend, "ollama");
+        }
+        other => panic!("expected Auth error, got {other:?}"),
+    }
+}
+
+/// 6. Plural unit: outcome must be
+///    `Failed { reason: "ollama-plural-not-supported-yet", retryable: false }`.
+///    No HTTP request is issued.
+#[test]
+fn plural_unit_returns_failed_non_retryable() {
+    // Spawn a server that will fail if contacted — we assert it is NOT
+    // contacted. If the test passes without a network error, the backend
+    // correctly short-circuits plural units before making HTTP calls.
+    let (host, _handle) = spawn_mock_server(vec![]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![plural_unit("p", "%n items")]);
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        TranslationOutcome::Failed { reason, retryable } => {
+            assert_eq!(reason, "ollama-plural-not-supported-yet");
+            assert!(!retryable, "plural failure should not be retryable");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+/// 7. Order preservation: 3-unit batch, each gets a distinct response.
+///    Outcomes must be in the same order as input units.
+#[test]
+fn order_preserved_across_three_units() {
+    let responses = vec![
+        ok_response(r#"{"response": "Eins"}"#),
+        ok_response(r#"{"response": "Zwei"}"#),
+        ok_response(r#"{"response": "Drei"}"#),
+    ];
+    let (host, handle) = spawn_mock_server(responses);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let units = vec![
+        singular_unit("u1", "One"),
+        singular_unit("u2", "Two"),
+        singular_unit("u3", "Three"),
+    ];
+    let batch = make_batch(units.clone());
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+
+    handle.join().unwrap();
+
+    assert_eq!(outcomes.len(), units.len());
+    let expected = ["Eins", "Zwei", "Drei"];
+    for (i, (outcome, want)) in outcomes.iter().zip(expected.iter()).enumerate() {
+        match outcome {
+            TranslationOutcome::Translated {
+                text: i18n_harness_backend::TranslatedText::Singular(s),
+                ..
+            } => assert_eq!(s, want, "unit {i} order mismatch"),
+            other => panic!("unit {i}: expected Translated singular, got {other:?}"),
+        }
+    }
+}

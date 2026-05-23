@@ -14,10 +14,12 @@ workspace = true
 [features]
 default = ["manual"]
 manual = []
-# `ollama` and `openai-compatible` features bring their HTTP/serde deps in
-# M2 follow-up / M4 respectively. The trait surface stays stable across
-# those additions because backends produce text only — adding HTTP transport
-# does not change the trait method signature.
+# `ollama` brings ureq (sync HTTP) + serde/serde_json for JSON encode/decode.
+# `serde` and `serde_json` are already workspace deps used unconditionally by
+# `TranslationOutcome`; they are not guarded here because removing them would
+# break the outcome serialisation surface that the non-ollama build needs.
+ollama = ["dep:ureq"]
+# `openai-compatible` comes in M4.
 
 [dependencies]
 i18n-harness-core.workspace = true
@@ -26,6 +28,7 @@ i18n-harness-glossary.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+ureq = { workspace = true, optional = true }
 
 [dev-dependencies]
 i18n-harness-adapter-qt.workspace = true
