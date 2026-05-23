@@ -21,13 +21,28 @@
 //! covers the typical prompt size comfortably. Callers that need a larger
 //! window can override via [`OllamaBackend::with_num_ctx`].
 //!
-//! # Plural units (v1 limitation)
+//! # Plural units
 //!
-//! Plural units — i.e., units where `unit.plural_arity` is `Some(_)` —
-//! return `TranslationOutcome::Failed { reason: "ollama-plural-not-supported-yet",
-//! retryable: false }`. Wiring plural prompting cleanly (one prompt per CLDR
-//! form, or a structured-output JSON prompt with aligned arity) is a
-//! follow-up enhancement. Track in the project backlog.
+//! Plural units (`unit.plural_arity.is_some()`) are handled by issuing one
+//! HTTP call per CLDR plural slot for the target locale, in CLDR canonical
+//! order (`zero, one, two, few, many, other` — only the slots applicable
+//! to the locale). Each request reuses the singular prompt template and
+//! appends a single-line directive naming the CLDR category — e.g.,
+//! `Plural form: produce the "other" form (CLDR category for zh_Hans).`
+//!
+//! Trade-off: N HTTP calls per plural unit (where N is the locale's
+//! plural arity — 1 for Mandarin, 2 for German/Spanish, up to 6 for
+//! Arabic) versus a single call returning a JSON object with one slot per
+//! category. The per-call approach was picked because:
+//!
+//! - One failed slot does not poison the rest of the unit; the per-slot
+//!   error path is identical to the singular one.
+//! - No JSON re-alignment risk if the model returns a partial object.
+//! - The prompt template stays untouched.
+//!
+//! If a future quality metric shows this is too slow for large plural-
+//! heavy catalogs, the optimisation is to add a JSON-structured plural
+//! prompt as a separate `OllamaBackend::with_plural_strategy(...)` knob.
 //!
 //! # Environment variables (read at construction only)
 //!
@@ -164,16 +179,6 @@ impl TranslationBackend for OllamaBackend {
         let agent = build_agent(self.request_timeout)?;
 
         for unit in &batch.units {
-            // Plural support is a v1 follow-up; return a clean Failed outcome
-            // so the caller can queue the unit for human review.
-            if unit.plural_arity.is_some() {
-                outcomes.push(TranslationOutcome::Failed {
-                    reason: "ollama-plural-not-supported-yet".into(),
-                    retryable: false,
-                });
-                continue;
-            }
-
             let register = glossary
                 .and_then(|g| g.register_for(locale.id))
                 .map(Register::to_locales_register)
@@ -181,8 +186,13 @@ impl TranslationBackend for OllamaBackend {
                 .unwrap_or_else(|| register_from_locales(locale.register));
 
             let ctx = PromptContext::new(unit, locale, register, glossary, &unit.flags);
-            let prompt = self.template.render(&ctx);
-            let outcome = self.call_generate(&agent, &prompt)?;
+
+            let outcome = if unit.plural_arity.is_some() {
+                self.translate_plural(&agent, locale, &ctx)?
+            } else {
+                let prompt = self.template.render(&ctx);
+                self.call_generate(&agent, &prompt)?
+            };
             outcomes.push(outcome);
         }
 
@@ -196,6 +206,61 @@ impl TranslationBackend for OllamaBackend {
 }
 
 impl OllamaBackend {
+    /// Translate a plural unit by issuing one HTTP call per CLDR plural
+    /// slot in the target locale, in canonical order.
+    ///
+    /// On any per-form failure the whole unit becomes
+    /// `Failed { reason: "ollama-plural-form-<form>: <inner>" }`. Whole-
+    /// batch errors (network, auth, protocol) bubble up via `?` and abort
+    /// the batch — matches the singular path's behaviour.
+    fn translate_plural(
+        &self,
+        agent: &ureq::Agent,
+        locale: &Locale,
+        ctx: &PromptContext<'_>,
+    ) -> Result<TranslationOutcome, BackendError> {
+        let base_prompt = self.template.render(ctx);
+        let mut forms: Vec<String> = Vec::with_capacity(locale.cldr_plural.len());
+        for category in locale.cldr_plural {
+            let directive = format!(
+                "\nPlural form: produce the \"{category}\" form (CLDR category for {locale_id}).\n",
+                locale_id = locale.id,
+            );
+            let prompt = format!("{base_prompt}{directive}");
+            match self.call_generate(agent, &prompt)? {
+                TranslationOutcome::Translated {
+                    text: TranslatedText::Singular(s),
+                    ..
+                } => forms.push(s),
+                TranslationOutcome::Translated {
+                    text: TranslatedText::Plural(_),
+                    ..
+                } => {
+                    // call_generate always returns Singular — defensive
+                    // arm so adding new variants is a visible TODO, not a
+                    // silent fall-through.
+                    return Ok(TranslationOutcome::Failed {
+                        reason: "ollama-plural-unexpected-shape".into(),
+                        retryable: false,
+                    });
+                }
+                TranslationOutcome::Failed { reason, retryable } => {
+                    return Ok(TranslationOutcome::Failed {
+                        reason: format!("ollama-plural-form-{category}: {reason}"),
+                        retryable,
+                    });
+                }
+                TranslationOutcome::Skipped { reason } => {
+                    return Ok(TranslationOutcome::Skipped { reason });
+                }
+            }
+        }
+        Ok(TranslationOutcome::Translated {
+            text: TranslatedText::Plural(forms),
+            flags: Vec::new(),
+        })
+    }
+
     /// Send one `POST /api/generate` request and map the response to a
     /// [`TranslationOutcome`].
     ///
