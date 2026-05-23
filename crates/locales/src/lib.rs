@@ -164,6 +164,16 @@ impl Locale {
 ///   English in UI strings; `1.4` matches the reference table in
 ///   `.claude/skills/add-locale/SKILL.md`. CLDR cardinal arity is 2
 ///   (`[one, other]`). The maintainer ships `Sie`/formal as default.
+/// - `es_ES` — Romance target. CLDR cardinal arity 2 (`[one, other]`). The
+///   maintainer ships `usted`/formal as default; informal `tú` projects
+///   override via the glossary's `[locale.es_ES]` block.
+/// - `zh_Hans` — Simplified Chinese. CLDR cardinal arity 1 (`[other]` only)
+///   — no singular/plural distinction, no agreement to worry about. Han
+///   script activates the gate's `CjkPunctuationTolerated` soft rule.
+///   `register = Neutral`: Mandarin's formal/informal distinction lives in
+///   word choice (e.g., `您` vs `你`) rather than a fixed dialectal pick,
+///   so we don't encode it at the locale level; projects with strong
+///   register requirements should bake that into the glossary.
 static LOCALES: &[Locale] = &[
     Locale {
         id: "en",
@@ -180,6 +190,22 @@ static LOCALES: &[Locale] = &[
         variant: "de_DE",
         script: Script::Latin,
         length_warn_ratio: 1.4,
+    },
+    Locale {
+        id: "es_ES",
+        cldr_plural: &[PluralCategory::One, PluralCategory::Other],
+        register: Register::Formal,
+        variant: "es_ES",
+        script: Script::Latin,
+        length_warn_ratio: 1.3,
+    },
+    Locale {
+        id: "zh_Hans",
+        cldr_plural: &[PluralCategory::Other],
+        register: Register::Neutral,
+        variant: "zh_Hans",
+        script: Script::Han,
+        length_warn_ratio: 0.6,
     },
 ];
 
@@ -217,6 +243,39 @@ mod tests {
     }
 
     #[test]
+    fn es_es_loads_with_expected_arity_and_ratio() {
+        let es = Locale::by_id("es_ES").expect("es_ES must be present");
+        assert_eq!(es.plural_arity(), 2, "es_ES CLDR arity is 2 (one, other)");
+        assert_eq!(
+            es.cldr_plural,
+            &[PluralCategory::One, PluralCategory::Other]
+        );
+        assert!(
+            (es.length_warn_ratio - 1.3).abs() < f32::EPSILON,
+            "es_ES length_warn_ratio must be 1.3 (Romance ~25% longer)",
+        );
+        assert_eq!(es.register, Register::Formal, "default to usted");
+        assert_eq!(es.script, Script::Latin);
+    }
+
+    #[test]
+    fn zh_hans_loads_with_arity_1_and_han_script() {
+        let zh = Locale::by_id("zh_Hans").expect("zh_Hans must be present");
+        assert_eq!(zh.plural_arity(), 1, "Mandarin has no plural distinction");
+        assert_eq!(zh.cldr_plural, &[PluralCategory::Other]);
+        assert!(
+            (zh.length_warn_ratio - 0.6).abs() < f32::EPSILON,
+            "zh_Hans length_warn_ratio must be 0.6 (CJK typically shorter)",
+        );
+        assert_eq!(zh.register, Register::Neutral);
+        assert_eq!(
+            zh.script,
+            Script::Han,
+            "Script::Han activates the gate's CJK punctuation tolerance rule"
+        );
+    }
+
+    #[test]
     fn unknown_locale_yields_none() {
         assert!(Locale::by_id("xx_XX").is_none());
         assert!(Locale::by_id("").is_none());
@@ -225,6 +284,6 @@ mod tests {
     #[test]
     fn all_iterates_in_table_order() {
         let ids: Vec<_> = Locale::all().map(|l| l.id).collect();
-        assert_eq!(ids, vec!["en", "de_DE"]);
+        assert_eq!(ids, vec!["en", "de_DE", "es_ES", "zh_Hans"]);
     }
 }

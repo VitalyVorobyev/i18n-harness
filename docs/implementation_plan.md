@@ -22,7 +22,9 @@ This plan implements the design with the following deliberate tightening:
   loop. M3 in the original doc shifts later.
 - **Single target locale through M2.** `en → de_DE` only; `es_ES` and
   `zh_Hans` come in with the second-format/second-backend wave to validate
-  the "locale as data" claim by being trivial to add.
+  the "locale as data" claim by being trivial to add. (Status: both landed
+  as data-only rows ahead of M3; the gate's CJK punctuation rule and the
+  arity-1 Mandarin path are exercised by `fixtures/qt/{es_ES,zh_Hans}.ts`.)
 - **No logs code.** §9 stays design-only in the doc; no crate, no fixtures.
 - **Agent path is a two-phase CLI**, not a `TranslationBackend`. Keeps the
   trait sync and deterministic-shaped.
@@ -122,8 +124,8 @@ Lands once M0–M2 are stable and the CLI loop is honest.
   handlers.
 - Primary surfaces: glossary editor, flag-triage dashboard, per-
   `(backend, locale)` metrics view, source-vs-proposed review.
-- Add `es_ES` and `zh_Hans` locale data + CLDR arity (the "locale as
-  data" payoff). Fixture coverage extends.
+- ~~Add `es_ES` and `zh_Hans` locale data + CLDR arity (the "locale as
+  data" payoff). Fixture coverage extends.~~ (Landed as a pre-M3 data drop.)
 
 **Verification:** Tauri app loads a Qt fixture, runs translation through
 Ollama, surfaces flagged units, allows edit + accept, writes back a
