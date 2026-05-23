@@ -12,6 +12,12 @@ description = "Headless `harness` CLI — the entry point for both human and (la
 name = "harness"
 path = "src/main.rs"
 
+[features]
+default = []
+# Forwards to backend crate's `ollama` feature. Enables `--backend ollama` in
+# `harness translate` against a local Ollama server.
+ollama = ["i18n-harness-backend/ollama"]
+
 [lints]
 workspace = true
 
