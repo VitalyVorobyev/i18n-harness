@@ -230,15 +230,16 @@ fn http_401_is_auth_error() {
     }
 }
 
-/// 6. Plural unit: outcome must be
-///    `Failed { reason: "ollama-plural-not-supported-yet", retryable: false }`.
-///    No HTTP request is issued.
+/// 6a. Plural unit (de_DE, arity 2): one HTTP call per CLDR form, in
+///     canonical order. Outcomes assembled into `TranslatedText::Plural`.
 #[test]
-fn plural_unit_returns_failed_non_retryable() {
-    // Spawn a server that will fail if contacted — we assert it is NOT
-    // contacted. If the test passes without a network error, the backend
-    // correctly short-circuits plural units before making HTTP calls.
-    let (host, _handle) = spawn_mock_server(vec![]);
+fn plural_unit_issues_one_call_per_cldr_form() {
+    // de_DE has arity 2 (one, other), so two HTTP calls.
+    let responses = vec![
+        ok_response(r#"{"response": "1 Element"}"#),
+        ok_response(r#"{"response": "%n Elemente"}"#),
+    ];
+    let (host, handle) = spawn_mock_server(responses);
 
     let backend = OllamaBackend::new()
         .unwrap()
@@ -247,14 +248,84 @@ fn plural_unit_returns_failed_non_retryable() {
 
     let batch = make_batch(vec![plural_unit("p", "%n items")]);
     let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+    handle.join().unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        TranslationOutcome::Translated {
+            text: i18n_harness_backend::TranslatedText::Plural(forms),
+            ..
+        } => {
+            assert_eq!(forms.len(), 2, "de_DE arity is 2");
+            assert_eq!(forms[0], "1 Element");
+            assert_eq!(forms[1], "%n Elemente");
+        }
+        other => panic!("expected Translated plural, got {other:?}"),
+    }
+}
+
+/// 6b. Plural unit where one form returns empty (`retryable: true` Failed).
+///     The whole unit becomes Failed with the form name in the reason.
+#[test]
+fn plural_unit_partial_failure_marks_whole_unit_failed() {
+    let responses = vec![
+        ok_response(r#"{"response": "1 Element"}"#),
+        ok_response(r#"{"response": ""}"#), // empty → per-form Failed
+    ];
+    let (host, handle) = spawn_mock_server(responses);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![plural_unit("p", "%n items")]);
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+    handle.join().unwrap();
 
     assert_eq!(outcomes.len(), 1);
     match &outcomes[0] {
         TranslationOutcome::Failed { reason, retryable } => {
-            assert_eq!(reason, "ollama-plural-not-supported-yet");
-            assert!(!retryable, "plural failure should not be retryable");
+            assert!(
+                reason.contains("ollama-plural-form-other"),
+                "expected per-form reason, got: {reason}"
+            );
+            assert!(reason.contains("ollama-empty-response"), "reason: {reason}");
+            assert!(retryable, "underlying empty-response is retryable");
         }
         other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+/// 6c. Mandarin plural arity is 1: exactly one HTTP call, single form.
+#[test]
+fn plural_unit_zh_hans_arity_1() {
+    let responses = vec![ok_response(r#"{"response": "%n 条消息"}"#)];
+    let (host, handle) = spawn_mock_server(responses);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let zh = Locale::by_id("zh_Hans").expect("zh_Hans");
+    let mut unit = plural_unit("msg", "%n messages");
+    unit.plural_arity = Some(1);
+    unit.target = Target::Plural { forms: vec![None] };
+    let batch = make_batch(vec![unit]);
+    let outcomes = backend.translate_batch(&batch, zh, None).unwrap();
+    handle.join().unwrap();
+
+    assert_eq!(outcomes.len(), 1);
+    match &outcomes[0] {
+        TranslationOutcome::Translated {
+            text: i18n_harness_backend::TranslatedText::Plural(forms),
+            ..
+        } => {
+            assert_eq!(forms.len(), 1, "zh_Hans arity is 1 (other only)");
+            assert_eq!(forms[0], "%n 条消息");
+        }
+        other => panic!("expected Translated plural, got {other:?}"),
     }
 }
 
