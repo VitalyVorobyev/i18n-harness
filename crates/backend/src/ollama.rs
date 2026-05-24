@@ -493,8 +493,9 @@ enum ExpectedShape {
 /// `expected` pins what the caller asked the model to produce; a payload
 /// of the wrong shape becomes `Failed { failure_kind: MalformedResponse,
 /// retryable: false }`. This prevents an array reply from being silently
-/// written into a singular [`crate::Unit`] slot — that would violate the
-/// unit invariant (`plural_arity == None` implies `Target::Singular`).
+/// written into a singular [`i18n_harness_core::Unit`] slot — that would
+/// violate the unit invariant (`plural_arity == None` implies
+/// `Target::Singular`).
 ///
 /// All parse / validation failures collapse to `Failed { failure_kind:
 /// MalformedResponse, retryable: false }`. The `reason` is short and
