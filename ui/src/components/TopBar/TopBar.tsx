@@ -2,12 +2,26 @@ import { cn } from "../../lib/cn";
 
 interface Props {
   catalogPath: string | null;
+  language: string | null;
   unitCount: number;
+  dirtyCount: number;
   version: string;
   onOpen: () => void;
+  onSave: () => void;
+  onDiscard: () => void;
 }
 
-export function TopBar({ catalogPath, unitCount, version, onOpen }: Props) {
+export function TopBar({
+  catalogPath,
+  language,
+  unitCount,
+  dirtyCount,
+  version,
+  onOpen,
+  onSave,
+  onDiscard,
+}: Props) {
+  const dirty = dirtyCount > 0;
   return (
     <header
       className={cn(
@@ -36,9 +50,28 @@ export function TopBar({ catalogPath, unitCount, version, onOpen }: Props) {
           Open
           <kbd>⌘O</kbd>
         </ActionButton>
-        <ActionButton disabled title="Save — wired in the next milestone">
+        <ActionButton
+          onClick={onSave}
+          disabled={!dirty}
+          tone={dirty ? "primary" : "default"}
+          title={
+            dirty ? `Save ${dirtyCount} change(s) — ⌘S` : "No unsaved changes"
+          }
+        >
           Save
+          {dirty && (
+            <span className="rounded-pill bg-bg-base/40 px-1 text-[10px] font-semibold tabular-nums">
+              {dirtyCount}
+            </span>
+          )}
           <kbd>⌘S</kbd>
+        </ActionButton>
+        <ActionButton
+          onClick={onDiscard}
+          disabled={!dirty}
+          title={dirty ? "Discard unsaved changes" : "No unsaved changes"}
+        >
+          Discard
         </ActionButton>
       </div>
 
@@ -46,11 +79,33 @@ export function TopBar({ catalogPath, unitCount, version, onOpen }: Props) {
         {catalogPath ? (
           <>
             <span
-              className="font-mono text-xs text-fg-secondary truncate max-w-[360px]"
+              className="font-mono text-xs text-fg-secondary truncate max-w-[300px]"
               title={catalogPath}
             >
               {shortenPath(catalogPath)}
+              {dirty && (
+                <span
+                  role="img"
+                  className="ml-1 text-state-proposed"
+                  aria-label="Unsaved changes"
+                  title="Unsaved changes"
+                >
+                  •
+                </span>
+              )}
             </span>
+            {language && (
+              <span
+                className={cn(
+                  "shrink-0 inline-flex items-center h-5 px-2 rounded-pill border",
+                  "border-accent-subtle-border bg-accent-subtle",
+                  "font-mono text-xs text-accent-hover tracking-loose",
+                )}
+                title="Target language declared in the .ts root"
+              >
+                {language}
+              </span>
+            )}
             <span className="text-fg-disabled">·</span>
             <span className="text-xs text-fg-tertiary tracking-loose whitespace-nowrap">
               {unitCount} {unitCount === 1 ? "unit" : "units"}
@@ -71,12 +126,15 @@ function ActionButton({
   onClick,
   disabled,
   title,
+  tone = "default",
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   title?: string;
+  tone?: "default" | "primary";
 }) {
+  const primary = tone === "primary";
   return (
     <button
       type="button"
@@ -85,11 +143,11 @@ function ActionButton({
       title={title}
       className={cn(
         "inline-flex items-center gap-2 h-7 px-3 rounded-md border",
-        "text-sm font-medium text-fg-secondary border-border-default bg-transparent",
-        "transition-colors duration-100 ease-out",
-        "enabled:hover:bg-bg-hover enabled:hover:text-fg-primary enabled:hover:border-border-strong",
-        "enabled:active:bg-bg-selected",
-        "disabled:text-fg-disabled disabled:border-border-subtle disabled:cursor-not-allowed",
+        "text-sm font-medium transition-colors duration-100 ease-out",
+        primary
+          ? "text-accent-fg bg-accent border-transparent enabled:hover:bg-accent-hover enabled:active:bg-accent-active"
+          : "text-fg-secondary border-border-default bg-transparent enabled:hover:bg-bg-hover enabled:hover:text-fg-primary enabled:hover:border-border-strong enabled:active:bg-bg-selected",
+        "disabled:text-fg-disabled disabled:border-border-subtle disabled:cursor-not-allowed disabled:bg-transparent",
       )}
     >
       {children}
@@ -98,7 +156,7 @@ function ActionButton({
 }
 
 function shortenPath(p: string): string {
-  if (p.length <= 60) return p;
+  if (p.length <= 56) return p;
   const parts = p.split(/[\\/]/);
   if (parts.length <= 3) return p;
   return `…/${parts.slice(-3).join("/")}`;

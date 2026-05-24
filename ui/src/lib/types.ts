@@ -22,10 +22,8 @@ export interface Provenance {
   byte_offset: number | null;
 }
 
-// Placeholder + Flag are opaque to the UI for now — we read them through
-// but don't introspect their shape.
+// Placeholder is opaque to the UI for now.
 export type Placeholder = unknown;
-export type FlagSet = unknown;
 
 export interface Unit {
   id: UnitId;
@@ -33,7 +31,7 @@ export interface Unit {
   target: Target;
   placeholders: Placeholder[];
   plural_arity: number | null;
-  flags: FlagSet;
+  flags: unknown;
   provenance: Provenance;
   state: UnitState;
 }
@@ -41,7 +39,72 @@ export interface Unit {
 export interface CatalogResponse {
   path: string;
   unit_count: number;
+  language: string | null;
   units: Unit[];
+}
+
+export interface SaveSummary {
+  path: string;
+  unit_count: number;
+}
+
+// Mirrors the Rust enum #[serde(tag = "kind", rename_all = "kebab-case")]
+// in ui/src-tauri/src/lib.rs.
+export type TargetEdit =
+  | { kind: "singular"; text: string | null }
+  | { kind: "plural"; form_index: number; text: string | null };
+
+// Severity classification of a gate flag. Mirrors
+// `i18n_harness_core::Flag::severity()` in Rust verbatim — that file is the
+// canonical mapping; this duplication is the IPC bridge. Add or rename a
+// flag there first, then update this file.
+export type Severity = "hard" | "soft" | "semantic";
+
+export interface Finding {
+  flag: string;
+  detail: { rule: string; [k: string]: unknown };
+}
+
+export interface GateReport {
+  unit_id: UnitId;
+  findings: Finding[];
+  flags: unknown;
+}
+
+export interface TranslateResult {
+  unit: Unit;
+  report: GateReport;
+}
+
+const HARD_FLAGS = new Set([
+  "placeholder-mismatch",
+  "plural-arity-mismatch",
+  "icu-parse-error",
+  "empty-target-when-finished",
+]);
+
+const SOFT_FLAGS = new Set([
+  "accel-mismatch",
+  "length-warn",
+  "cjk-punctuation-tolerated",
+  "placeholder-agreement-risk",
+  "markup-tag-mismatch",
+]);
+
+const SEMANTIC_FLAGS = new Set([
+  "ambiguous-source",
+  "idiom",
+  "insufficient-context",
+  "low-confidence",
+]);
+
+export function severityOf(flag: string): Severity {
+  if (HARD_FLAGS.has(flag)) return "hard";
+  if (SOFT_FLAGS.has(flag)) return "soft";
+  if (SEMANTIC_FLAGS.has(flag)) return "semantic";
+  // Unknown flag — be conservative: treat as soft so it surfaces but
+  // does not look like a hard blocker.
+  return "soft";
 }
 
 // Derived UI shape: per-row data used by the catalog list.

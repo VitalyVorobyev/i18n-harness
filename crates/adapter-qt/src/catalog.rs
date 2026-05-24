@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use i18n_harness_core::Unit;
+use i18n_harness_core::{Unit, UnitId};
 
 /// The output of [`crate::extract`]: a list of [`Unit`]s plus the
 /// preserved byte-level state required for byte-stable round-trip.
@@ -16,6 +16,11 @@ pub struct Catalog {
     /// for `apply` to emit useful errors; `apply` writes to a caller-supplied
     /// output path, not back to this one.
     pub(crate) source_path: PathBuf,
+
+    /// Target language as recorded in `<TS language="…">`. `None` if the
+    /// root element did not declare one. Backends consume this to pick the
+    /// CLDR record + register; the harness does not infer it from filename.
+    pub(crate) language: Option<String>,
 
     /// The full bytes of the source `.ts` file. We reuse this on `apply` so
     /// anything we did not deliberately edit comes through verbatim.
@@ -35,6 +40,20 @@ impl Catalog {
         &self.units
     }
 
+    /// Mutably borrow the units. The frontend (or any in-process owner of
+    /// the catalog) edits targets through this slice; the byte buffer and
+    /// edit-points stay untouched until [`crate::apply`] runs.
+    pub fn units_mut(&mut self) -> &mut [Unit] {
+        &mut self.units
+    }
+
+    /// Find a unit by id, returning a mutable borrow. Linear scan because
+    /// catalogs are small (hundreds of units) and we don't want to keep a
+    /// parallel index in sync on every mutation.
+    pub fn find_unit_mut(&mut self, id: &UnitId) -> Option<&mut Unit> {
+        self.units.iter_mut().find(|u| u.id == *id)
+    }
+
     /// Take ownership of the units (mutating a caller-owned `Vec<Unit>` is
     /// the more common path; we expose this for completeness).
     pub fn into_units(self) -> Vec<Unit> {
@@ -50,6 +69,12 @@ impl Catalog {
     /// Borrow the source path the catalog was read from.
     pub fn source_path(&self) -> &PathBuf {
         &self.source_path
+    }
+
+    /// Target language declared on the `<TS>` root element, if present.
+    /// Returned as the raw CLDR-style id (`de_DE`, `es_ES`, `zh_Hans`, …).
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 }
 

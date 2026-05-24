@@ -13,6 +13,14 @@ repository.workspace = true
 name = "i18n_harness_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["ollama"]
+# Gemma/Ollama HTTP backend. Enabled by default — without it the
+# `translate_unit` command is unavailable and the UI falls back to
+# manual editing only. The backend crate's `manual` feature is on
+# unconditionally via its own defaults.
+ollama = ["i18n-harness-backend/ollama"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -24,6 +32,9 @@ serde_json = { workspace = true }
 i18n-harness-core = { workspace = true }
 i18n-harness-adapter-qt = { workspace = true }
 i18n-harness-locales = { workspace = true }
+i18n-harness-backend = { workspace = true }
+i18n-harness-gate = { workspace = true }
+i18n-harness-glossary = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
