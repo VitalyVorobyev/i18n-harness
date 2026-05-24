@@ -220,6 +220,21 @@ function Row({
             •
           </span>
         )}
+        {row.flagCount > 0 && (
+          <span
+            role="img"
+            className={cn(
+              "inline-flex items-center gap-0.5 h-4 px-1 rounded-sm border",
+              "text-[10px] font-medium leading-none tabular-nums",
+              "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
+            )}
+            title={`${row.flagCount} flag${row.flagCount === 1 ? "" : "s"}: ${row.flagNames.join(", ")}`}
+            aria-label={`${row.flagCount} flag${row.flagCount === 1 ? "" : "s"}: ${row.flagNames.join(", ")}`}
+          >
+            <span aria-hidden="true">⚑</span>
+            {row.flagCount}
+          </span>
+        )}
         {row.isPlural && (
           <span
             className="font-mono text-xs text-fg-tertiary px-1 rounded-sm bg-bg-elevated"

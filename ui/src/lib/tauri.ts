@@ -347,3 +347,14 @@ export async function unCurateCorrection(id: string): Promise<boolean> {
 export async function listCuratedInProject(): Promise<CuratedExample[]> {
   return await invoke<CuratedExample[]>("list_curated_in_project");
 }
+
+// ── M4.6.2 — Accept (clear flags, mark Reviewed) ─────────────────────────────
+
+/// Mark the unit as reviewed: clears model flags + flag_notes in memory and
+/// appends a `Reviewed` event to `review.jsonl`. Returns the updated unit.
+export async function acceptUnitInProject(
+  catalogPath: string,
+  unitId: UnitId,
+): Promise<Unit> {
+  return await invoke<Unit>("accept_unit_in_project", { catalogPath, unitId });
+}

@@ -1,13 +1,44 @@
 import { cn } from "../../lib/cn";
-import type { Finding, GateReport, Unit } from "../../lib/types";
-import { severityOf } from "../../lib/types";
+import type {
+  AnyFlag,
+  Finding,
+  GateReport,
+  ModelFlag,
+  Unit,
+} from "../../lib/types";
+import { humanizeFlag, severityOf } from "../../lib/types";
 
 interface Props {
   unit: Unit;
   report: GateReport | null;
+  activeCatalogPath: string | null;
+  busyIds: Set<string>;
+  onAccept: (unitId: string) => Promise<void>;
 }
 
-export function Inspector({ unit, report }: Props) {
+// Narrows a generic flag string to ModelFlag (the enumerated semantic variants).
+// Returns null for gate-produced flags that are not model-supplied.
+function asModelFlag(flag: AnyFlag): ModelFlag | null {
+  const MODEL_FLAGS: readonly ModelFlag[] = [
+    "ambiguous-source",
+    "idiom",
+    "insufficient-context",
+    "low-confidence",
+    "brand-term",
+    "tone-mismatch",
+  ];
+  return (MODEL_FLAGS as readonly string[]).includes(flag)
+    ? (flag as ModelFlag)
+    : null;
+}
+
+export function Inspector({
+  unit,
+  report,
+  activeCatalogPath,
+  busyIds,
+  onAccept,
+}: Props) {
   const isPlural = unit.plural_arity != null;
   const placeholders = unit.placeholders ?? [];
   const placeholderCount = Array.isArray(placeholders)
@@ -16,12 +47,41 @@ export function Inspector({ unit, report }: Props) {
   const provenance = unit.provenance;
   const findings = report?.findings ?? [];
 
+  // Model-supplied flags from Unit.flags (semantic subset).
+  const modelFlags: ModelFlag[] = Array.isArray(unit.flags)
+    ? unit.flags.map(asModelFlag).filter((f): f is ModelFlag => f !== null)
+    : [];
+  const flagNotes: Record<string, string> = unit.flag_notes ?? {};
+
+  const confidence = unit.confidence ?? null;
+  const reviewStatus = unit.review_status ?? null;
+  const busy = busyIds.has(unit.id);
+
+  const hasFlags = modelFlags.length > 0;
+
   return (
     <aside className="app-chrome shrink-0 w-80 min-w-[240px] flex flex-col overflow-hidden bg-bg-surface border-l border-border-subtle">
-      <header className="px-4 py-3 border-b border-border-subtle">
+      <header className="px-4 py-3 border-b border-border-subtle flex items-center justify-between gap-2">
         <span className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
           Inspector
         </span>
+        {/* Review-status chip — only rendered for "needs-review" and "reviewed" */}
+        {reviewStatus === "needs-review" && (
+          <span
+            className="inline-flex items-center h-[18px] px-2 rounded-pill border border-severity-soft-border bg-severity-soft-bg text-severity-soft text-xs font-medium uppercase tracking-loose whitespace-nowrap"
+            title="This unit has been flagged for human review"
+          >
+            Needs review
+          </span>
+        )}
+        {reviewStatus === "reviewed" && (
+          <span
+            className="inline-flex items-center h-[18px] px-2 rounded-pill border border-state-finished-border bg-state-finished-bg text-state-finished text-xs font-medium uppercase tracking-loose whitespace-nowrap"
+            title="This unit has been reviewed and accepted"
+          >
+            Reviewed
+          </span>
+        )}
       </header>
 
       <dl className="m-0 px-4 py-3 flex flex-col gap-3 border-b border-border-subtle">
@@ -55,7 +115,54 @@ export function Inspector({ unit, report }: Props) {
             <Muted>—</Muted>
           )}
         </Item>
+
+        {/* Confidence indicator — rendered only when the backend reported one */}
+        {confidence !== null && (
+          <Item label="Confidence">
+            <ConfidenceBar value={confidence} />
+          </Item>
+        )}
       </dl>
+
+      {/* Model flags section — shown when the unit carries model-supplied flags */}
+      {hasFlags && (
+        <div className="px-4 py-3 border-b border-border-subtle flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
+              Model flags
+            </span>
+            <span className="text-xs font-mono text-fg-tertiary tabular-nums">
+              {modelFlags.length}
+            </span>
+          </div>
+          <ul className="flex flex-col gap-2" aria-label="Model flags">
+            {modelFlags.map((flag) => (
+              <ModelFlagChip
+                key={flag}
+                flag={flag}
+                note={flagNotes[flag] ?? null}
+              />
+            ))}
+          </ul>
+          {/* Accept button — visible only when flags are present */}
+          <button
+            type="button"
+            disabled={busy || !activeCatalogPath}
+            onClick={() => void onAccept(unit.id)}
+            aria-label="Accept translation and mark as reviewed"
+            className={cn(
+              "mt-1 w-full h-7 px-3 rounded-md border text-xs font-medium",
+              "transition-colors duration-100 ease-out",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              busy || !activeCatalogPath
+                ? "opacity-40 cursor-not-allowed border-border-subtle text-fg-tertiary bg-transparent"
+                : "border-border-default text-fg-primary bg-bg-elevated hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected",
+            )}
+          >
+            {busy ? "Accepting…" : "Accept"}
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
         <div className="flex items-center justify-between">
@@ -83,6 +190,71 @@ export function Inspector({ unit, report }: Props) {
         )}
       </div>
     </aside>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  const colorClass =
+    value < 0.5
+      ? "text-severity-soft"
+      : value > 0.85
+        ? "text-state-finished"
+        : "text-fg-secondary";
+  const barColor =
+    value < 0.5
+      ? "bg-severity-soft"
+      : value > 0.85
+        ? "bg-state-finished"
+        : "bg-accent";
+
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        className={cn("font-mono text-sm tabular-nums", colorClass)}
+        title={`Model confidence: ${pct}%`}
+      >
+        {pct}%
+      </span>
+      <span
+        className="flex-1 h-1.5 rounded-pill bg-bg-elevated overflow-hidden"
+        role="img"
+        aria-label={`Confidence bar: ${pct}%`}
+      >
+        <span
+          className={cn("block h-full rounded-pill", barColor)}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+    </span>
+  );
+}
+
+function ModelFlagChip({
+  flag,
+  note,
+}: {
+  flag: ModelFlag;
+  note: string | null;
+}) {
+  return (
+    <li className="px-3 py-2 rounded-md border bg-severity-info-bg border-border-default">
+      <div className="flex items-center justify-between gap-2 mb-px">
+        <span className="font-medium text-xs text-severity-info" title={flag}>
+          {humanizeFlag(flag)}
+        </span>
+        <span className="text-[10px] font-semibold uppercase tracking-loose text-fg-tertiary">
+          semantic
+        </span>
+      </div>
+      {note && (
+        <p className="mt-1 text-xs italic text-fg-tertiary leading-snug">
+          {note}
+        </p>
+      )}
+    </li>
   );
 }
 
@@ -157,6 +329,14 @@ function summarizeDetail(detail: Finding["detail"]): string {
       return chars.length > 0
         ? `ASCII punctuation where CJK convention is full-width: ${chars.join(" ")}`
         : "CJK script with ASCII punctuation.";
+    }
+    // M4.6.1: backend returned a non-parseable response. The detail carries
+    // a `reason` field from `BackendMalformedResponseDetail`.
+    case "backend-malformed-response": {
+      const reason = typeof rest.reason === "string" ? rest.reason : "";
+      return reason
+        ? `Malformed response from backend: ${reason}`
+        : "Backend returned a response that could not be parsed. Check the prompt template.";
     }
     default:
       return rule;
