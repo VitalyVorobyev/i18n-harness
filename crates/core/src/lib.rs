@@ -38,6 +38,7 @@ mod error;
 mod flag;
 mod intermediate;
 mod placeholder;
+mod review;
 mod unit;
 
 pub use batch::{Batch, BatchKey, DEFAULT_BATCH_SIZE};
@@ -45,4 +46,5 @@ pub use error::{CoreError, IntermediateError};
 pub use flag::{Flag, FlagSet, FlagSeverity};
 pub use intermediate::{Intermediate, IntermediateLine, SCHEMA_VERSION};
 pub use placeholder::{IcuForm, Placeholder, PlaceholderKind};
-pub use unit::{Provenance, Target, Unit, UnitId, UnitState};
+pub use review::ReviewStatus;
+pub use unit::{Provenance, Target, Unit, UnitId, UnitState, compute_source_hash};

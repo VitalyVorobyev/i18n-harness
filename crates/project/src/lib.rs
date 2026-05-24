@@ -34,6 +34,7 @@ pub mod manifest;
 pub mod memory;
 pub mod paths;
 pub mod project;
+pub mod review;
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
@@ -64,3 +65,5 @@ pub use memory::{
 pub use paths::ProjectPaths;
 
 pub use project::{CatalogRef, CatalogStatus, Project, ProjectSummary};
+
+pub use review::{ReviewEvent, ReviewRecord, ReviewStore};

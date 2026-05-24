@@ -284,6 +284,168 @@ fn xml_entity_references_in_source_are_decoded() {
     );
 }
 
+// ── Source-hash tests ─────────────────────────────────────────────────────────
+
+/// Every active (non-vanished, non-obsolete) unit in the showcase has a hash.
+#[test]
+fn active_units_have_source_hash() {
+    use i18n_harness_core::UnitState;
+    let fixture = fixtures_dir().join("showcase.ts");
+    let catalog = extract(&fixture).expect("extract");
+    for unit in catalog.units() {
+        if matches!(unit.state, UnitState::Vanished | UnitState::Obsolete) {
+            assert!(
+                unit.source_hash.is_none(),
+                "vanished/obsolete unit {:?} should have no hash",
+                unit.id
+            );
+        } else {
+            assert!(
+                unit.source_hash.is_some(),
+                "active unit {:?} should have a source_hash",
+                unit.id
+            );
+        }
+    }
+}
+
+/// Vanished and obsolete units must have `source_hash = None`.
+#[test]
+fn vanished_unit_has_no_source_hash() {
+    use i18n_harness_core::UnitState;
+    let fixture = fixtures_dir().join("showcase.ts");
+    let catalog = extract(&fixture).expect("extract");
+    let vanished = catalog
+        .units()
+        .iter()
+        .find(|u| u.state == UnitState::Vanished)
+        .expect("showcase must have a vanished unit");
+    assert!(
+        vanished.source_hash.is_none(),
+        "vanished unit must have source_hash = None"
+    );
+}
+
+#[test]
+fn obsolete_unit_has_no_source_hash() {
+    use i18n_harness_core::UnitState;
+    let fixture = fixtures_dir().join("showcase.ts");
+    let catalog = extract(&fixture).expect("extract");
+    let obsolete = catalog
+        .units()
+        .iter()
+        .find(|u| u.state == UnitState::Obsolete)
+        .expect("showcase must have an obsolete unit");
+    assert!(
+        obsolete.source_hash.is_none(),
+        "obsolete unit must have source_hash = None"
+    );
+}
+
+/// A unit with an extracomment produces a hash that differs from the same
+/// unit without an extracomment.
+#[test]
+fn extracomment_changes_hash() {
+    use i18n_harness_core::compute_source_hash;
+    let hash_with = compute_source_hash("Save", "", "Button label in the main toolbar.", false);
+    let hash_without = compute_source_hash("Save", "", "", false);
+    assert_ne!(
+        hash_with, hash_without,
+        "hash with extracomment must differ from hash without"
+    );
+}
+
+/// The extracomment fixture's "Save" unit gets a hash matching the expected
+/// value (validates the parser is capturing extracomment text).
+#[test]
+fn extracomment_fixture_hash_matches_expected() {
+    use i18n_harness_core::compute_source_hash;
+    let fixture = fixtures_dir().join("extracomment.ts");
+    let catalog = extract(&fixture).expect("extract extracomment fixture");
+    let save_unit = catalog
+        .units()
+        .iter()
+        .find(|u| u.source == "Save")
+        .expect("Save unit must be present");
+    let expected = compute_source_hash("Save", "", "Button label in the main toolbar.", false);
+    assert_eq!(
+        save_unit.source_hash.as_deref(),
+        Some(expected.as_str()),
+        "Save unit hash must include extracomment text"
+    );
+}
+
+/// Two `<extracomment>` blocks are concatenated with `\n` before hashing.
+#[test]
+fn multi_extracomment_concatenated_with_newline() {
+    use i18n_harness_core::compute_source_hash;
+    let fixture = fixtures_dir().join("extracomment.ts");
+    let catalog = extract(&fixture).expect("extract extracomment fixture");
+    let open_unit = catalog
+        .units()
+        .iter()
+        .find(|u| u.source == "Open")
+        .expect("Open unit must be present");
+    let expected = compute_source_hash(
+        "Open",
+        "",
+        "First developer note.\nSecond developer note.",
+        false,
+    );
+    assert_eq!(
+        open_unit.source_hash.as_deref(),
+        Some(expected.as_str()),
+        "Open unit hash must reflect concatenated extracomment blocks"
+    );
+}
+
+/// A plural unit and a singular unit with the same source text have different
+/// hashes (the `plural` flag distinguishes them).
+#[test]
+fn plural_hash_differs_from_singular() {
+    use i18n_harness_core::compute_source_hash;
+    let fixture = fixtures_dir().join("extracomment.ts");
+    let catalog = extract(&fixture).expect("extract");
+    // "%n item(s)" is plural in the fixture; "Save" is singular.
+    // The source text differs, so compare via compute_source_hash directly.
+    let singular_hash = compute_source_hash("msg", "", "", false);
+    let plural_hash = compute_source_hash("msg", "", "", true);
+    assert_ne!(
+        singular_hash, plural_hash,
+        "plural and singular hash of same text must differ"
+    );
+
+    // Also verify from the fixture: the plural unit's hash reflects plural=true.
+    let plural_unit = catalog
+        .units()
+        .iter()
+        .find(|u| u.source.contains("{count}"))
+        .expect("plural unit with {count} source must be present");
+    let expected = compute_source_hash(&plural_unit.source, "", "Shown in the status bar.", true);
+    assert_eq!(
+        plural_unit.source_hash.as_deref(),
+        Some(expected.as_str()),
+        "plural unit hash must encode plural=true"
+    );
+}
+
+/// The extracomment fixture vanished/obsolete units must have `source_hash = None`.
+#[test]
+fn extracomment_fixture_vanished_obsolete_no_hash() {
+    use i18n_harness_core::UnitState;
+    let fixture = fixtures_dir().join("extracomment.ts");
+    let catalog = extract(&fixture).expect("extract");
+    for unit in catalog.units() {
+        if matches!(unit.state, UnitState::Vanished | UnitState::Obsolete) {
+            assert!(
+                unit.source_hash.is_none(),
+                "vanished/obsolete unit {:?} must have source_hash = None",
+                unit.id
+            );
+        }
+    }
+}
+
 fn byte_diff_summary(a: &[u8], b: &[u8]) -> String {
     let common = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let line = a[..common].iter().filter(|&&b| b == b'\n').count() + 1;
