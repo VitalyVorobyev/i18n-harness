@@ -7,6 +7,7 @@
 //! JavaScript layer. No business logic that does not fit on a single
 //! screen of glue belongs here.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -14,7 +15,6 @@ use i18n_harness_adapter_qt::Catalog;
 use i18n_harness_core::{Target, Unit, UnitId, UnitState};
 #[cfg(feature = "ollama")]
 use i18n_harness_gate::GateReport;
-#[cfg(feature = "ollama")]
 use i18n_harness_locales::Locale;
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +94,95 @@ pub struct TranslateResult {
     pub unit: Unit,
     /// The gate report. Findings drive the UI's inline review.
     pub report: GateReport,
+}
+
+/// Wire-format locale entry returned by `list_locales` — the UI uses
+/// this to build column headers in the glossary editor and to label
+/// register overrides.
+#[derive(Debug, Serialize)]
+pub struct LocaleInfo {
+    /// CLDR-style id (`en`, `de_DE`, `es_ES`, `zh_Hans`).
+    pub id: String,
+    /// Default register declared in the locales table
+    /// (`"formal"` | `"informal"` | `"neutral"`). Glossary overrides may
+    /// override per project.
+    pub register: &'static str,
+    /// Script family — useful for grouping or icon picks
+    /// (`"Latin"`, `"Han"`, …).
+    pub script: String,
+    /// CLDR plural arity. Useful as a tooltip in the editor.
+    pub plural_arity: u32,
+}
+
+/// One glossary term in the wire format. Mirrors
+/// `i18n_harness_glossary::Term` plus the source key, since the JS
+/// layer prefers a flat list to a map.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TermEntry {
+    /// Source string (case-sensitive natural key).
+    pub source: String,
+    /// `true` if the term must never be translated.
+    #[serde(default)]
+    pub do_not_translate: bool,
+    /// Free-form notes (sense disambiguation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Translations keyed by locale id.
+    #[serde(default)]
+    pub translations: BTreeMap<String, String>,
+}
+
+/// One `[locale.<id>]` override in wire form.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LocaleOverrideEntry {
+    /// Locale id (`de_DE`, `es_ES`, …).
+    pub locale: String,
+    /// `"formal"` | `"informal"` | `"neutral"`, or `None` to leave
+    /// the workspace default in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub register: Option<String>,
+    /// Variant tag override; rarely set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+}
+
+/// Editable glossary payload exchanged between the UI and the Rust
+/// layer. The shape mirrors the on-disk TOML schema; `save_glossary`
+/// validates by round-tripping through `Glossary::from_toml` before
+/// writing.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GlossaryPayload {
+    /// Schema version (`1` today). The save command refuses higher
+    /// values to keep forward compatibility deliberate.
+    pub schema_version: u32,
+    /// Terms in alphabetical order by source.
+    pub terms: Vec<TermEntry>,
+    /// Per-locale register / variant overrides.
+    pub locale_overrides: Vec<LocaleOverrideEntry>,
+}
+
+/// Response from `load_glossary` — the parsed payload plus any
+/// non-fatal warnings the loader surfaced (unknown locale ids, terms
+/// with empty translation tables).
+#[derive(Debug, Serialize)]
+pub struct GlossaryLoadResponse {
+    /// Absolute path the glossary was read from.
+    pub path: String,
+    /// Editable payload — what the UI binds against.
+    pub payload: GlossaryPayload,
+    /// Human-readable warning strings. Empty when the glossary
+    /// validates cleanly.
+    pub warnings: Vec<String>,
+}
+
+/// Response from `save_glossary` — the path written plus the
+/// validator's warnings (so the UI can surface them without re-loading).
+#[derive(Debug, Serialize)]
+pub struct GlossarySaveResponse {
+    /// Path the glossary was written to.
+    pub path: String,
+    /// Warnings the validator surfaced before write.
+    pub warnings: Vec<String>,
 }
 
 /// Return the package version baked at compile time.
@@ -210,6 +299,76 @@ fn save_catalog(
     })
 }
 
+/// List the workspace locales (`en`, `de_DE`, `es_ES`, `zh_Hans`).
+/// The UI uses this for column headers in the glossary editor and to
+/// render the locale badge on the catalog view.
+#[tauri::command]
+fn list_locales() -> Vec<LocaleInfo> {
+    Locale::all()
+        .map(|l| LocaleInfo {
+            id: l.id.to_string(),
+            register: match l.register {
+                i18n_harness_locales::Register::Formal => "formal",
+                i18n_harness_locales::Register::Informal => "informal",
+                i18n_harness_locales::Register::Neutral => "neutral",
+            },
+            script: format!("{:?}", l.script),
+            plural_arity: l.plural_arity(),
+        })
+        .collect()
+}
+
+/// Load a glossary `.toml` from `path`. Returns the editable payload
+/// and any non-fatal warnings (unknown locale, empty translations).
+#[tauri::command]
+fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
+    let abs = PathBuf::from(&path);
+    let (glossary, warnings) =
+        i18n_harness_glossary::Glossary::load(&abs).map_err(|e| format!("load failed: {e}"))?;
+    let terms = glossary
+        .terms()
+        .map(|(src, t)| TermEntry {
+            source: src.to_string(),
+            do_not_translate: t.do_not_translate,
+            notes: t.notes.clone(),
+            translations: t.translations.clone(),
+        })
+        .collect();
+    let locale_overrides = glossary
+        .overrides()
+        .map(|(id, ov)| LocaleOverrideEntry {
+            locale: id.to_string(),
+            register: ov.register.map(|r| r.as_str().to_owned()),
+            variant: ov.variant.clone(),
+        })
+        .collect();
+    Ok(GlossaryLoadResponse {
+        path: abs.to_string_lossy().into_owned(),
+        payload: GlossaryPayload {
+            schema_version: glossary.schema_version(),
+            terms,
+            locale_overrides,
+        },
+        warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
+    })
+}
+
+/// Validate the payload by round-tripping through `Glossary::from_toml`
+/// and then write the resulting (deterministic, alphabetical) TOML to
+/// `path`. Refuses to write if validation fails.
+#[tauri::command]
+fn save_glossary(path: String, payload: GlossaryPayload) -> Result<GlossarySaveResponse, String> {
+    let abs = PathBuf::from(&path);
+    let toml_string = payload_to_toml(&payload)?;
+    let (_, warnings) = i18n_harness_glossary::Glossary::from_toml(&toml_string)
+        .map_err(|e| format!("validation failed: {e}"))?;
+    std::fs::write(&abs, &toml_string).map_err(|e| format!("write failed: {e}"))?;
+    Ok(GlossarySaveResponse {
+        path: abs.to_string_lossy().into_owned(),
+        warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
+    })
+}
+
 /// Drop all in-memory edits and re-read the catalog from disk. The
 /// UI's "Discard changes" / revert action.
 #[tauri::command]
@@ -312,6 +471,92 @@ fn translate_unit(
     })
 }
 
+/// Serialise a [`GlossaryPayload`] to the on-disk TOML schema. Kept
+/// in this crate so we can drive it from a wire payload without
+/// running the validator twice (once on the payload, once on the
+/// produced TOML). Field names match `crates/glossary/src/schema.rs`'s
+/// `Raw*` shapes.
+fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct WireMeta {
+        schema_version: u32,
+    }
+    #[derive(Serialize)]
+    struct WireTerm<'a> {
+        source: &'a str,
+        do_not_translate: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<&'a String>,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        translations: BTreeMap<String, String>,
+    }
+    #[derive(Serialize)]
+    struct WireLocale<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        register: Option<&'a String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        variant: Option<&'a String>,
+    }
+    #[derive(Serialize)]
+    struct Wire<'a> {
+        meta: WireMeta,
+        #[serde(rename = "term", skip_serializing_if = "Vec::is_empty")]
+        terms: Vec<WireTerm<'a>>,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        locale: BTreeMap<String, WireLocale<'a>>,
+    }
+
+    // Locale overrides are keyed by id on disk, so duplicates would
+    // silently collapse into the last writer if we let BTreeMap::collect
+    // do its thing. Detect them up-front and refuse to write — the UI
+    // surfaces the error to the user. Term duplicates are caught by
+    // `Glossary::from_toml`'s `DuplicateSource` check downstream, but
+    // catching them here too produces a sharper message.
+    let mut seen_terms = std::collections::HashSet::new();
+    for t in &payload.terms {
+        if !seen_terms.insert(&t.source) {
+            return Err(format!(
+                "duplicate term source `{}` — every source must be unique",
+                t.source,
+            ));
+        }
+    }
+    let mut locale: BTreeMap<String, WireLocale> = BTreeMap::new();
+    for o in &payload.locale_overrides {
+        if locale.contains_key(&o.locale) {
+            return Err(format!(
+                "duplicate locale override for `{}` — each locale appears at most once",
+                o.locale,
+            ));
+        }
+        locale.insert(
+            o.locale.clone(),
+            WireLocale {
+                register: o.register.as_ref(),
+                variant: o.variant.as_ref(),
+            },
+        );
+    }
+    let terms = payload
+        .terms
+        .iter()
+        .map(|t| WireTerm {
+            source: &t.source,
+            do_not_translate: t.do_not_translate,
+            notes: t.notes.as_ref(),
+            translations: t.translations.clone(),
+        })
+        .collect();
+    let wire = Wire {
+        meta: WireMeta {
+            schema_version: payload.schema_version,
+        },
+        terms,
+        locale,
+    };
+    toml::to_string(&wire).map_err(|e| format!("toml serialize: {e}"))
+}
+
 fn build_catalog_response(path: &std::path::Path, catalog: &Catalog) -> CatalogResponse {
     CatalogResponse {
         path: path.to_string_lossy().into_owned(),
@@ -354,6 +599,9 @@ pub fn run() {
         save_catalog,
         discard_changes,
         translate_unit,
+        list_locales,
+        load_glossary,
+        save_glossary,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -363,6 +611,9 @@ pub fn run() {
         update_unit_target,
         save_catalog,
         discard_changes,
+        list_locales,
+        load_glossary,
+        save_glossary,
     ]);
 
     builder

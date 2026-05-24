@@ -28,7 +28,9 @@ ui/
     └── src/                main.rs (entry), lib.rs (commands)
 ```
 
-## What it does today (M3.0 – M3.3)
+## What it does today (M3.0 – M3.5)
+
+**Catalog view** — the default surface.
 
 - Open a Qt Linguist `.ts` file via a native dialog (⌘O).
 - List every unit on the left with state badges, search, filter
@@ -44,6 +46,17 @@ ui/
   adapter. **Discard** reverts every in-memory edit to disk.
 - Locale badge in the top bar shows the language declared in the
   `.ts` root (`de_DE`, `es_ES`, `zh_Hans`).
+
+**Glossary view** — switch via the tab strip in the top bar.
+
+- Open a `glossary.toml` (or create one from scratch).
+- Per-term editor: source string, do-not-translate flag, free-form
+  notes, and one column per workspace locale.
+- Per-locale overrides table: register (formal / informal / neutral)
+  and variant tags.
+- Validation is server-side via `Glossary::from_toml` — save refuses
+  to write a malformed file; non-fatal warnings (unknown locale id,
+  empty translations) surface inline.
 
 ## Development
 

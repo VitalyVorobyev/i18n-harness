@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CatalogList } from "./components/CatalogList/CatalogList";
 import { EmptyState } from "./components/EmptyState/EmptyState";
+import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { Inspector } from "./components/Inspector/Inspector";
-import { TopBar } from "./components/TopBar/TopBar";
+import { TopBar, type View } from "./components/TopBar/TopBar";
 import {
   UnitEditor,
   type UnitEditorHandle,
@@ -43,6 +44,7 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+  const [view, setView] = useState<View>("catalog");
   const editorRef = useRef<UnitEditorHandle | null>(null);
 
   useEffect(() => {
@@ -236,6 +238,8 @@ export function App() {
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
       <TopBar
+        view={view}
+        onViewChange={setView}
         catalogPath={catalog?.path ?? null}
         language={catalog?.language ?? null}
         unitCount={catalog?.unit_count ?? 0}
@@ -245,42 +249,56 @@ export function App() {
         onSave={onSave}
         onDiscard={onDiscard}
       />
-      {catalog ? (
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          <CatalogList
-            units={catalog.units}
-            selectedId={selectedId}
-            filter={filter}
-            search={search}
-            dirtyIds={dirtyIds}
-            onSelect={setSelectedId}
-            onFilterChange={setFilter}
-            onSearchChange={setSearch}
-          />
-          {selectedUnit ? (
-            <UnitEditor
-              ref={editorRef}
-              unit={selectedUnit}
-              busy={selectedBusy}
-              hasOllama={Boolean(catalog.language)}
-              onEdit={onEditTarget}
-              onTranslate={onTranslate}
+      {/*
+        Both views stay mounted so their local state (open file, edits,
+        dirty tracking) survives a tab switch. Only one is visible at a
+        time via the `hidden` class.
+      */}
+      <div
+        className={
+          view === "catalog" ? "flex-1 flex overflow-hidden min-h-0" : "hidden"
+        }
+      >
+        {catalog ? (
+          <>
+            <CatalogList
+              units={catalog.units}
+              selectedId={selectedId}
+              filter={filter}
+              search={search}
+              dirtyIds={dirtyIds}
+              onSelect={setSelectedId}
+              onFilterChange={setFilter}
+              onSearchChange={setSearch}
             />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
-              <p>Select a unit on the left to inspect it.</p>
-            </div>
-          )}
-          {selectedUnit && (
-            <Inspector unit={selectedUnit} report={selectedReport} />
-          )}
-        </div>
-      ) : (
-        <EmptyState
-          onOpen={openFile}
-          {...(error ? { errorMessage: error } : {})}
-        />
-      )}
+            {selectedUnit ? (
+              <UnitEditor
+                ref={editorRef}
+                unit={selectedUnit}
+                busy={selectedBusy}
+                hasOllama={Boolean(catalog.language)}
+                onEdit={onEditTarget}
+                onTranslate={onTranslate}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
+                <p>Select a unit on the left to inspect it.</p>
+              </div>
+            )}
+            {selectedUnit && (
+              <Inspector unit={selectedUnit} report={selectedReport} />
+            )}
+          </>
+        ) : (
+          <EmptyState
+            onOpen={openFile}
+            {...(error ? { errorMessage: error } : {})}
+          />
+        )}
+      </div>
+      <div className={view === "glossary" ? "flex-1 flex min-h-0" : "hidden"}>
+        <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
+      </div>
       {loading && (
         <div
           aria-live="polite"

@@ -232,6 +232,17 @@ impl Glossary {
     pub fn variant_for(&self, locale_id: &str) -> Option<&str> {
         self.locale_overrides.get(locale_id)?.variant.as_deref()
     }
+
+    /// Iterate every `[locale.<id>]` override in alphabetical id order.
+    ///
+    /// Useful for editors and tooling that need to enumerate the
+    /// overrides verbatim — including ones for locales the workspace
+    /// does not recognise (the loader emits a warning for those but
+    /// keeps them in the map so a round-trip does not silently drop
+    /// data).
+    pub fn overrides(&self) -> impl Iterator<Item = (&str, &LocaleOverride)> {
+        self.locale_overrides.iter().map(|(k, v)| (k.as_str(), v))
+    }
 }
 
 #[cfg(test)]
