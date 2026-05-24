@@ -99,7 +99,7 @@ pub enum TranslationOutcome {
         /// Defaults to [`FailureKind::Unspecified`] so older constructions
         /// of `Failed { reason, retryable }` keep compiling and so on-disk
         /// JSONL written before this field existed deserializes cleanly.
-        #[serde(default, rename = "failure_kind")]
+        #[serde(default)]
         failure_kind: FailureKind,
     },
 }
