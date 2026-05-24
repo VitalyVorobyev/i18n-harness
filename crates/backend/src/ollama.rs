@@ -48,11 +48,16 @@
 //!
 //! - `OLLAMA_HOST` — base URL for the Ollama server, e.g.
 //!   `http://192.168.1.10:11434`. Defaults to `http://localhost:11434`.
+//! - `OLLAMA_MODEL` — model tag (e.g. `gemma4:e4b`, `gemma4:e2b`).
+//!   Defaults to the built-in [`DEFAULT_MODEL`]; per the implementation
+//!   plan, Gemma 4 E4B is the workspace standard (better quality) with
+//!   E2B as the fast alternative — choose with this env var or
+//!   [`OllamaBackend::with_model`].
 //! - `OLLAMA_API_KEY` — Bearer token for remote Ollama deployments that sit
 //!   behind an auth proxy. Not required for the default local setup.
 //!
-//! Neither variable is read at translation time; the values are captured
-//! once in [`OllamaBackend::new`] and held on `self`.
+//! None of these variables is read at translation time; the values are
+//! captured once in [`OllamaBackend::new`] and held on `self`.
 //!
 //! # Performance
 //!
@@ -79,14 +84,20 @@ use crate::trait_def::TranslationBackend;
 const TEMPLATE_BODY: &str = include_str!("../prompts/ollama-translate-v1.txt");
 
 const DEFAULT_HOST: &str = "http://localhost:11434";
-const DEFAULT_MODEL: &str = "gemma3:4b";
+/// Default Ollama model tag. The plan calls for Gemma 4 E4B (better
+/// quality) as the workspace default with E2B as the fast alternative;
+/// the maintainer has E2B installed locally so the binary default is
+/// E2B. Override via `OLLAMA_MODEL` or [`OllamaBackend::with_model`] to
+/// pick a different tag without rebuilding.
+pub const DEFAULT_MODEL: &str = "gemma4:e2b";
 const DEFAULT_NUM_CTX: u32 = 8192;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Ollama HTTP backend.
 ///
-/// Construct with [`OllamaBackend::new`] (reads `OLLAMA_HOST` /
-/// `OLLAMA_API_KEY` from the environment) or via the builder methods.
+/// Construct with [`OllamaBackend::new`] (reads `OLLAMA_HOST`,
+/// `OLLAMA_MODEL`, and `OLLAMA_API_KEY` from the environment) or via the
+/// builder methods.
 pub struct OllamaBackend {
     host: String,
     model: String,
@@ -99,14 +110,16 @@ pub struct OllamaBackend {
 impl OllamaBackend {
     /// Construct from environment variables and built-in defaults.
     ///
-    /// Reads `OLLAMA_HOST` and `OLLAMA_API_KEY` once at construction.
-    /// Never reads environment variables at translation time.
+    /// Reads `OLLAMA_HOST`, `OLLAMA_MODEL`, and `OLLAMA_API_KEY` once at
+    /// construction. Never reads environment variables at translation
+    /// time.
     pub fn new() -> Result<Self, BackendError> {
         let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_owned());
+        let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_owned());
         let api_key = std::env::var("OLLAMA_API_KEY").ok();
         Ok(Self {
             host,
-            model: DEFAULT_MODEL.to_owned(),
+            model,
             num_ctx: DEFAULT_NUM_CTX,
             request_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
             template: PromptTemplate::new(TEMPLATE_BODY, "v1"),
@@ -121,7 +134,8 @@ impl OllamaBackend {
         self
     }
 
-    /// Override the model tag (default: `gemma3:4b`).
+    /// Override the model tag (default: [`DEFAULT_MODEL`], overridable via
+    /// the `OLLAMA_MODEL` env var at construction time).
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();

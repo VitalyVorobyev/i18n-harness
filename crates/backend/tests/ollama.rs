@@ -329,6 +329,80 @@ fn plural_unit_zh_hans_arity_1() {
     }
 }
 
+/// 6d. Trip-wire on the model default. The first M2 release shipped the
+///     wrong constant (`gemma3:4b`, which is Gemma *3*). Pinning the prefix
+///     makes regression to a non-Gemma-4 tag a compile-failure-equivalent.
+#[test]
+fn default_model_is_gemma_4_family() {
+    assert!(
+        i18n_harness_backend::ollama::DEFAULT_MODEL.starts_with("gemma4:"),
+        "DEFAULT_MODEL must be a Gemma 4 family tag; got `{}`",
+        i18n_harness_backend::ollama::DEFAULT_MODEL
+    );
+}
+
+/// 6e. `with_model` overrides the model tag, and the chosen tag travels
+///     through to the request body. Exercises the override path without
+///     touching env vars (which are `unsafe` to mutate under our lint).
+#[test]
+fn with_model_overrides_request_payload() {
+    // Capture the request body so we can assert the `model` field.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let host = format!("http://{addr}");
+    let captured: std::sync::Arc<std::sync::Mutex<Vec<u8>>> = Default::default();
+    let captured_clone = captured.clone();
+    let handle = std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut all = Vec::new();
+            let mut tmp = [0u8; 1];
+            loop {
+                if stream.read(&mut tmp).unwrap_or(0) == 0 {
+                    break;
+                }
+                all.push(tmp[0]);
+                if all.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let headers = String::from_utf8_lossy(&all);
+            let content_length: usize = headers
+                .lines()
+                .find_map(|line| {
+                    let lower = line.to_ascii_lowercase();
+                    lower
+                        .strip_prefix("content-length:")
+                        .map(|v| v.trim().parse().unwrap_or(0))
+                })
+                .unwrap_or(0);
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                let _ = stream.read_exact(&mut body);
+                *captured_clone.lock().unwrap() = body;
+            }
+            let _ = stream.write_all(ok_response(r#"{"response": "ok"}"#).as_bytes());
+        }
+    });
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_model("gemma4:e4b")
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("u", "Hello")]);
+    let _ = backend.translate_batch(&batch, de_de(), None).unwrap();
+    handle.join().unwrap();
+
+    let body = captured.lock().unwrap().clone();
+    let parsed: serde_json::Value = serde_json::from_slice(&body)
+        .unwrap_or_else(|_| panic!("body is not valid JSON: {}", String::from_utf8_lossy(&body)));
+    assert_eq!(
+        parsed["model"], "gemma4:e4b",
+        "request body must reflect with_model override; full body:\n{parsed}"
+    );
+}
+
 /// 7. Order preservation: 3-unit batch, each gets a distinct response.
 ///    Outcomes must be in the same order as input units.
 #[test]
