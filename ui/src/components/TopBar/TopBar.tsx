@@ -1,6 +1,6 @@
 import { cn } from "../../lib/cn";
 
-export type View = "catalog" | "glossary";
+export type View = "catalog" | "glossary" | "metrics";
 
 interface Props {
   view: View;
@@ -29,6 +29,9 @@ export function TopBar({
 }: Props) {
   const dirty = dirtyCount > 0;
   const catalogView = view === "catalog";
+  // The Open/Save/Discard actions only make sense on the catalog view.
+  // Hide them (but keep them in layout) when the user is on Glossary or
+  // Metrics so the toolbar shape stays stable across tabs.
   return (
     <header
       className={cn(
@@ -62,10 +65,16 @@ export function TopBar({
             Catalog
           </TabButton>
           <TabButton
-            active={!catalogView}
+            active={view === "glossary"}
             onClick={() => onViewChange("glossary")}
           >
             Glossary
+          </TabButton>
+          <TabButton
+            active={view === "metrics"}
+            onClick={() => onViewChange("metrics")}
+          >
+            Metrics
           </TabButton>
         </div>
       </div>

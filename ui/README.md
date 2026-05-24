@@ -28,7 +28,7 @@ ui/
     └── src/                main.rs (entry), lib.rs (commands)
 ```
 
-## What it does today (M3.0 – M3.5)
+## What it does today (M3.0 – M3.6)
 
 **Catalog view** — the default surface.
 
@@ -57,6 +57,15 @@ ui/
 - Validation is server-side via `Glossary::from_toml` — save refuses
   to write a malformed file; non-fatal warnings (unknown locale id,
   empty translations) surface inline.
+
+**Metrics view** — the lab's measurement payoff.
+
+- Open a `metrics.jsonl` produced by `gate::MetricsWriter` (CLI runs
+  or the UI's Translate path).
+- Summary cards: total events, distinct backends, locales, time range.
+- "By rule" table with severity chips and a count-share bar.
+- "By backend × locale" table separating hard / soft / other counts.
+- Malformed lines surface as a count without aborting the load.
 
 ## Development
 

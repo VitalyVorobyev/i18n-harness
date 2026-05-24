@@ -12,6 +12,7 @@ import type {
   GlossaryPayload,
   GlossarySaveResponse,
   LocaleInfo,
+  MetricsResponse,
   SaveSummary,
   TargetEdit,
   TranslateResult,
@@ -91,6 +92,25 @@ export async function pickGlossaryFile(): Promise<string | null> {
       {
         name: "Glossary (.toml)",
         extensions: ["toml"],
+      },
+    ],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+export async function loadMetrics(path: string): Promise<MetricsResponse> {
+  return await invoke<MetricsResponse>("load_metrics", { path });
+}
+
+export async function pickMetricsFile(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: false,
+    filters: [
+      {
+        name: "Metrics (.jsonl)",
+        extensions: ["jsonl", "ndjson", "json"],
       },
     ],
   });
