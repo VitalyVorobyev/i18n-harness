@@ -404,12 +404,17 @@ review queue. Empty-flag units stay at their previous review status
 (`None` for a freshly-translated unit) — the M4.6.2 "Accept" button is
 the path to `Reviewed`.
 
-#### M4.6.2 — UI surface for flagging (planned)
+#### M4.6.2 — UI surface for flagging ✓ shipped
 
-Inspector renders flags as severity-style chips with the model's
-per-flag note; unit list shows a flag badge next to the state badge;
-the editor shows the confidence value. "Accept" button clears flags
-and moves `review_status` to `Reviewed` (or `Approved` on Save All).
+Inspector renders model flags as severity-style chips with the model's
+per-flag note; a confidence bar shows `unit.confidence` with muted-warning /
+neutral / subdued-positive coloring at <50% / 50–85% / >85%. A "Needs
+review" or "Reviewed" chip appears in the Inspector header. Unit list rows
+show a ⚑-prefixed flag count badge next to the state dot. The "Accept"
+button (visible when flags are present) calls `accept_unit_in_project`,
+clears flags + flag_notes in memory, and appends a `Reviewed` event to
+`review.jsonl`. The `BackendMalformedResponse` finding detail now renders
+its `reason` field in `summarizeDetail`.
 
 ### M4.7 — Review queue
 

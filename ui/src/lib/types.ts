@@ -27,15 +27,38 @@ export interface Provenance {
 // Placeholder is opaque to the UI for now.
 export type Placeholder = unknown;
 
+// ModelFlag enumerates the semantic flag kinds the model may attach to a unit.
+// These are the kebab-case serde renderings of `crates/core/src/flag.rs` Flag variants.
+// The list is exhaustive — TypeScript enforces it in humanizeFlag below.
+export type ModelFlag =
+  | "ambiguous-source"
+  | "idiom"
+  | "insufficient-context"
+  | "low-confidence"
+  | "brand-term"
+  | "tone-mismatch";
+
+// AnyFlag covers model flags plus gate-produced flag strings.
+// The full set mirrors the Rust Flag enum (kebab-case serde).
+export type AnyFlag = string;
+
 export interface Unit {
   id: UnitId;
   source: string;
   target: Target;
   placeholders: Placeholder[];
   plural_arity: number | null;
-  flags: unknown;
+  // FlagSet serializes as a JSON array of kebab-case flag strings.
+  flags: AnyFlag[];
   provenance: Provenance;
   state: UnitState;
+  // Added by M4.1.5 — may be absent on older JSONL.
+  review_status?: ReviewStatus | null;
+  source_hash?: string | null;
+  // Added by M4.6.1 — may be absent when the v1 backend was used.
+  confidence?: number | null;
+  // flag_notes is a map from kebab-case flag name to the model's note.
+  flag_notes?: Record<AnyFlag, string> | null;
 }
 
 export interface CatalogResponse {
@@ -138,6 +161,8 @@ const HARD_FLAGS = new Set([
   "plural-arity-mismatch",
   "icu-parse-error",
   "empty-target-when-finished",
+  // M4.6.1: backend returned a non-parseable response (hard: no translation to ship).
+  "backend-malformed-response",
 ]);
 
 const SOFT_FLAGS = new Set([
@@ -153,6 +178,9 @@ const SEMANTIC_FLAGS = new Set([
   "idiom",
   "insufficient-context",
   "low-confidence",
+  // M4.6.1: new semantic flag variants.
+  "brand-term",
+  "tone-mismatch",
 ]);
 
 export function severityOf(flag: string): Severity {
@@ -174,6 +202,10 @@ export interface UnitRow {
   pluralFilled: number;
   pluralTotal: number;
   fileHint: string;
+  // Number of model/gate flags on this unit (0 when clean).
+  flagCount: number;
+  // Names of the flags for the tooltip (kebab-case).
+  flagNames: AnyFlag[];
 }
 
 export function unitRow(unit: Unit): UnitRow {
@@ -185,6 +217,7 @@ export function unitRow(unit: Unit): UnitRow {
       : unit.target.text != null
         ? 1
         : 0;
+  const flagNames: AnyFlag[] = Array.isArray(unit.flags) ? unit.flags : [];
   return {
     id: unit.id,
     source: unit.source,
@@ -194,12 +227,42 @@ export function unitRow(unit: Unit): UnitRow {
     pluralFilled: filled,
     pluralTotal: totals,
     fileHint: unit.provenance.file || "",
+    flagCount: flagNames.length,
+    flagNames,
   };
 }
 
 function previewOf(s: string): string {
   const oneLine = s.replace(/\s+/g, " ").trim();
   return oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine;
+}
+
+/// Human-readable label for a model-supplied flag. The switch is exhaustive
+/// over all `ModelFlag` variants: if a new variant is added to the Rust enum
+/// and the serde kebab-case rendering appears here, this function must be
+/// updated. An `assertNever` call at the bottom of the switch ensures the
+/// TypeScript compiler surfaces any forgotten case at build time.
+export function humanizeFlag(flag: ModelFlag): string {
+  switch (flag) {
+    case "ambiguous-source":
+      return "Ambiguous source";
+    case "idiom":
+      return "Idiom";
+    case "insufficient-context":
+      return "Insufficient context";
+    case "low-confidence":
+      return "Low confidence";
+    case "brand-term":
+      return "Brand term";
+    case "tone-mismatch":
+      return "Tone mismatch";
+    default:
+      return assertNever(flag);
+  }
+}
+
+function assertNever(x: never): never {
+  throw new Error(`Unhandled ModelFlag variant: ${String(x)}`);
 }
 
 // ── M4.2 project-mode types ───────────────────────────────────────────────────

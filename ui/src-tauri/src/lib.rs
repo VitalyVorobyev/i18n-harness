@@ -1625,6 +1625,70 @@ fn set_review_status_in_project(
     Ok(())
 }
 
+// ── M4.6.2 — Accept (clear flags, mark Reviewed) ────────────────────────────
+
+/// Accept a unit as reviewed: clear its flags and flag notes, then append a
+/// `Reviewed` event to `review.jsonl`.
+///
+/// The unit's `state` is left unchanged (per M4.3a.1: the human controls the
+/// `Proposed → Finished` transition via Save/accept flows). The catalog is
+/// marked dirty because clearing flags is a meaningful edit that the next Save
+/// will persist.
+///
+/// Lock ordering: acquire `project_catalogs` first for the mutation, drop it,
+/// then acquire `project` for the durable review write. This mirrors the
+/// pattern established in `translate_unit_in_project`.
+#[tauri::command]
+fn accept_unit_in_project(
+    catalog_path: String,
+    unit_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Unit, String> {
+    use i18n_harness_core::{FlagSet, ReviewStatus};
+    use std::collections::BTreeMap;
+
+    let abs = PathBuf::from(&catalog_path);
+    let uid = UnitId::from(unit_id.clone());
+
+    // Acquire project_catalogs first; locate and mutate the unit. Capture
+    // the post-mutation clone and source hash before dropping the lock.
+    let (merged, source_hash) = {
+        let mut store = state
+            .project_catalogs
+            .lock()
+            .map_err(project_catalogs_lock_poisoned)?;
+        let entry = store
+            .get_mut(&abs)
+            .ok_or_else(|| "catalog not open in project".to_string())?;
+        let unit = entry
+            .catalog
+            .find_unit_mut(&uid)
+            .ok_or_else(|| format!("unit not found: {unit_id}"))?;
+
+        // Clear model-supplied flags and their notes.
+        unit.flags = FlagSet::new();
+        unit.flag_notes = BTreeMap::new();
+        unit.review_status = Some(ReviewStatus::Reviewed);
+        let hash = unit.source_hash.clone().unwrap_or_default();
+        let merged = unit.clone();
+        entry.dirty = true;
+        (merged, hash)
+    };
+    // project_catalogs lock is now dropped.
+
+    // Acquire project lock for the durable review.jsonl event.
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    if let Some(project) = project_guard.as_ref() {
+        project
+            .set_review_status(&abs, &uid, Some(ReviewStatus::Reviewed), source_hash, None)
+            .map_err(|e| format!("set_review_status failed: {e}"))?;
+    } else {
+        return Err(no_project());
+    }
+
+    Ok(merged)
+}
+
 // ── M4.3c — Settings view mutation commands ───────────────────────────────────
 
 /// Add a new catalog entry to the project manifest and persist it.
@@ -1915,6 +1979,7 @@ pub fn run() {
         un_curate_correction,
         list_curated_in_project,
         set_review_status_in_project,
+        accept_unit_in_project,
         add_catalog_to_project,
         remove_catalog_from_project,
         update_locale_in_project,
@@ -1955,6 +2020,7 @@ pub fn run() {
         un_curate_correction,
         list_curated_in_project,
         set_review_status_in_project,
+        accept_unit_in_project,
         add_catalog_to_project,
         remove_catalog_from_project,
         update_locale_in_project,

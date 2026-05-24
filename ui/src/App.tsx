@@ -13,6 +13,7 @@ import {
   type UnitEditorHandle,
 } from "./components/UnitEditor/UnitEditor";
 import {
+  acceptUnitInProject,
   closeProject,
   currentProjectSummary,
   discardChangesInProject,
@@ -453,6 +454,30 @@ export function App() {
     }
   }, [catalog, activeCatalogPath, dirtyIds, selectedId, flashInfo, flashError]);
 
+  // ── Accept (M4.6.2) ─────────────────────────────────────────────────────────
+
+  const onAccept = useCallback(
+    async (id: UnitId) => {
+      if (!activeCatalogPath) return;
+      setBusyIds((prev) => new Set(prev).add(id));
+      try {
+        const updated = await acceptUnitInProject(activeCatalogPath, id);
+        replaceUnit(updated);
+        markCatalogDirty(activeCatalogPath);
+        flashInfo(`Marked unit ${id} as reviewed`);
+      } catch (e) {
+        flashError(`Accept failed: ${formatError(e)}`);
+      } finally {
+        setBusyIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [activeCatalogPath, replaceUnit, markCatalogDirty, flashInfo, flashError],
+  );
+
   // ── Locale filter + sibling quick-switch ────────────────────────────────────
 
   // Naive stem heuristic: strip the trailing `_<locale>` segment from the
@@ -617,7 +642,13 @@ export function App() {
                   </div>
                 )}
                 {selectedUnit && (
-                  <Inspector unit={selectedUnit} report={selectedReport} />
+                  <Inspector
+                    unit={selectedUnit}
+                    report={selectedReport}
+                    activeCatalogPath={activeCatalogPath}
+                    busyIds={busyIds}
+                    onAccept={onAccept}
+                  />
                 )}
               </>
             ) : (
