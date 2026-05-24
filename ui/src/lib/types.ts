@@ -2,6 +2,8 @@
 // hand-written rather than generated: the IPC surface is small, the
 // schema is stable, and a hand-written file documents the wire format
 // in one place.
+//
+// M4.2 project-mode additions are grouped at the bottom of this file.
 
 export type UnitId = string;
 
@@ -198,4 +200,144 @@ export function unitRow(unit: Unit): UnitRow {
 function previewOf(s: string): string {
   const oneLine = s.replace(/\s+/g, " ").trim();
   return oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine;
+}
+
+// ── M4.2 project-mode types ───────────────────────────────────────────────────
+
+// ReviewStatus mirrors crates/core/src/review.rs — serde(rename_all = "kebab-case").
+export type ReviewStatus =
+  | "new"
+  | "machine-translated"
+  | "needs-review"
+  | "reviewed"
+  | "approved"
+  | "locked"
+  | "rejected"
+  | "conflict";
+
+// CatalogStatus mirrors crates/project/src/project.rs — serde(rename_all = "kebab-case").
+export type CatalogStatus = "ok" | "missing" | "format-mismatch";
+
+// CatalogFormat mirrors crates/project/src/manifest.rs — serde(rename_all = "kebab-case").
+export type CatalogFormat = "qt-ts" | "gettext-po" | "icu-json";
+
+// BackendKind mirrors crates/project/src/manifest.rs — serde(rename_all = "kebab-case").
+export type BackendKind = "manual" | "ollama" | "open-ai-compatible" | "agent";
+
+export interface BackendConfig {
+  kind: BackendKind;
+  model?: string | null;
+  host?: string | null;
+  num_ctx?: number | null;
+}
+
+// RegisterOverride mirrors crates/project/src/manifest.rs — serde(rename_all = "lowercase").
+export type RegisterOverride = "formal" | "informal" | "neutral";
+
+export interface LocaleConfig {
+  register?: RegisterOverride | null;
+  variant?: string | null;
+  length_warn_ratio?: number | null;
+}
+
+export interface GlossaryConfig {
+  path: string;
+}
+
+// CatalogRef mirrors crates/project/src/project.rs.
+// Fields: absolute_path, manifest_path, format, locale, status.
+// No serde(rename_all) on the struct — field names are snake_case.
+export interface CatalogRef {
+  absolute_path: string;
+  manifest_path: string;
+  format: CatalogFormat;
+  locale: string;
+  status: CatalogStatus;
+}
+
+// ProjectSummary mirrors crates/project/src/project.rs.
+// All path fields are String (not PathBuf), already resolved.
+export interface ProjectSummary {
+  root: string;
+  name: string;
+  schema: number;
+  locales: string[];
+  catalogs: CatalogRef[];
+  glossary_path: string | null;
+  backend: BackendConfig | null;
+  state_dir: string;
+}
+
+// ProjectOpenResponse — wire response for open_project / create_project.
+export interface ProjectOpenResponse {
+  summary: ProjectSummary;
+  warnings: string[];
+}
+
+// FormatGuess mirrors crates/project/src/manifest.rs — serde(rename_all = "kebab-case").
+export type FormatGuess = "qt-ts" | "gettext-po" | "icu-json" | "unknown";
+
+// ClassificationConfidence mirrors crates/project/src/discovery/mod.rs — serde(rename_all = "kebab-case").
+export type ClassificationConfidence = "high" | "medium" | "low";
+
+export interface DraftAlternative {
+  format: FormatGuess;
+  locale: string | null;
+  reason: string;
+}
+
+// DraftCatalog mirrors crates/project/src/discovery/mod.rs.
+// path is PathBuf in Rust, serialized as a string by serde.
+export interface DraftCatalog {
+  path: string;
+  format: FormatGuess;
+  locale: string | null;
+  confidence: ClassificationConfidence;
+  reason: string;
+  alternatives: DraftAlternative[];
+}
+
+// DraftManifest mirrors crates/project/src/discovery/mod.rs.
+// locales is BTreeMap<String, LocaleConfig> — becomes Record<string, LocaleConfig>.
+export interface DraftManifest {
+  root: string;
+  name: string;
+  locales: Record<string, LocaleConfig>;
+  catalogs: DraftCatalog[];
+  glossary: GlossaryConfig | null;
+  backend: BackendConfig | null;
+}
+
+// SaveAllDirtyResponse mirrors ui/src-tauri/src/lib.rs.
+// failed_path / failed_reason are omitted by serde when None.
+export interface SaveAllDirtyResponse {
+  saved: SaveSummary[];
+  failed_path?: string;
+  failed_reason?: string;
+}
+
+// CorrectionId — a "corr_<12-hex>" string newtype on the Rust side.
+export type CorrectionId = string;
+
+// CorrectionProvenance mirrors crates/project/src/memory.rs.
+export interface CorrectionProvenance {
+  backend: string;
+  model: string;
+  model_version: string;
+  prompt_template_version: string;
+  glossary_version: string;
+}
+
+// Correction mirrors crates/project/src/memory.rs — full record.
+export interface Correction {
+  id: CorrectionId;
+  catalog: string;
+  locale: string;
+  unit_id: UnitId;
+  source: string;
+  mt_proposal: string;
+  human_target: string;
+  provenance: CorrectionProvenance;
+  flags_at_correction: unknown[];
+  ts: string;
 }

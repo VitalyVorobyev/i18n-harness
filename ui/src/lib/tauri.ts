@@ -8,11 +8,15 @@ import {
 } from "@tauri-apps/plugin-dialog";
 import type {
   CatalogResponse,
+  DraftManifest,
   GlossaryLoadResponse,
   GlossaryPayload,
   GlossarySaveResponse,
   LocaleInfo,
   MetricsResponse,
+  ProjectOpenResponse,
+  ProjectSummary,
+  SaveAllDirtyResponse,
   SaveSummary,
   TargetEdit,
   TranslateResult,
@@ -130,4 +134,102 @@ export async function pickGlossarySaveLocation(): Promise<string | null> {
     ],
   });
   return selected ?? null;
+}
+
+// ── M4.2 project-mode wrappers ────────────────────────────────────────────────
+
+export async function openProject(root: string): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("open_project", { root });
+}
+
+export async function discoverProject(root: string): Promise<DraftManifest> {
+  return await invoke<DraftManifest>("discover_project", { root });
+}
+
+export async function createProject(
+  root: string,
+  draft: DraftManifest,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("create_project", { root, draft });
+}
+
+export async function closeProject(): Promise<void> {
+  return await invoke<void>("close_project");
+}
+
+export async function currentProjectSummary(): Promise<ProjectSummary | null> {
+  return await invoke<ProjectSummary | null>("current_project_summary");
+}
+
+export async function listCatalogs(): Promise<import("./types").CatalogRef[]> {
+  return await invoke("list_catalogs");
+}
+
+export async function saveManifest(): Promise<void> {
+  return await invoke<void>("save_manifest");
+}
+
+export async function openCatalogInProject(
+  catalogPath: string,
+): Promise<CatalogResponse> {
+  return await invoke<CatalogResponse>("open_catalog_in_project", {
+    catalogPath,
+  });
+}
+
+export async function updateUnitTargetInProject(
+  catalogPath: string,
+  unitId: UnitId,
+  edit: TargetEdit,
+): Promise<Unit> {
+  return await invoke<Unit>("update_unit_target_in_project", {
+    catalogPath,
+    unitId,
+    edit,
+  });
+}
+
+export async function saveCatalogInProject(
+  catalogPath: string,
+): Promise<SaveSummary> {
+  return await invoke<SaveSummary>("save_catalog_in_project", { catalogPath });
+}
+
+export async function saveAllDirty(): Promise<SaveAllDirtyResponse> {
+  return await invoke<SaveAllDirtyResponse>("save_all_dirty");
+}
+
+export async function discardChangesInProject(
+  catalogPath: string,
+): Promise<CatalogResponse> {
+  return await invoke<CatalogResponse>("discard_changes_in_project", {
+    catalogPath,
+  });
+}
+
+export async function listOpenCatalogs(): Promise<string[]> {
+  return await invoke<string[]>("list_open_catalogs");
+}
+
+export async function isCatalogDirty(catalogPath: string): Promise<boolean> {
+  return await invoke<boolean>("is_catalog_dirty", { catalogPath });
+}
+
+export async function translateUnitInProject(
+  catalogPath: string,
+  unitId: UnitId,
+): Promise<TranslateResult> {
+  return await invoke<TranslateResult>("translate_unit_in_project", {
+    catalogPath,
+    unitId,
+  });
+}
+
+export async function pickProjectFolder(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
 }
