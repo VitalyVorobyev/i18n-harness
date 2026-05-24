@@ -1650,41 +1650,57 @@ fn accept_unit_in_project(
     let abs = PathBuf::from(&catalog_path);
     let uid = UnitId::from(unit_id.clone());
 
-    // Acquire project_catalogs first; locate and mutate the unit. Capture
-    // the post-mutation clone and source hash before dropping the lock.
-    let (merged, source_hash) = {
-        let mut store = state
+    // Read the unit's source_hash without mutating, so we can do the durable
+    // write first. Codex P2: clearing flags before the fallible review.jsonl
+    // append would leave the in-memory state mutated on append failure, and
+    // a later Save would persist a cleared-flags state with no matching
+    // review event.
+    let source_hash = {
+        let store = state
             .project_catalogs
             .lock()
             .map_err(project_catalogs_lock_poisoned)?;
         let entry = store
-            .get_mut(&abs)
+            .get(&abs)
             .ok_or_else(|| "catalog not open in project".to_string())?;
         let unit = entry
             .catalog
-            .find_unit_mut(&uid)
+            .units()
+            .iter()
+            .find(|u| u.id == uid)
             .ok_or_else(|| format!("unit not found: {unit_id}"))?;
-
-        // Clear model-supplied flags and their notes.
-        unit.flags = FlagSet::new();
-        unit.flag_notes = BTreeMap::new();
-        unit.review_status = Some(ReviewStatus::Reviewed);
-        let hash = unit.source_hash.clone().unwrap_or_default();
-        let merged = unit.clone();
-        entry.dirty = true;
-        (merged, hash)
+        unit.source_hash.clone().unwrap_or_default()
     };
     // project_catalogs lock is now dropped.
 
-    // Acquire project lock for the durable review.jsonl event.
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    if let Some(project) = project_guard.as_ref() {
+    // Durable write first. If this fails, the in-memory state is untouched
+    // and the caller can retry safely.
+    {
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project = project_guard.as_ref().ok_or_else(no_project)?;
         project
             .set_review_status(&abs, &uid, Some(ReviewStatus::Reviewed), source_hash, None)
             .map_err(|e| format!("set_review_status failed: {e}"))?;
-    } else {
-        return Err(no_project());
     }
+
+    // Durable write succeeded — now mutate the in-memory unit and return it.
+    let mut store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    let entry = store
+        .get_mut(&abs)
+        .ok_or_else(|| "catalog not open in project".to_string())?;
+    let unit = entry
+        .catalog
+        .find_unit_mut(&uid)
+        .ok_or_else(|| format!("unit not found: {unit_id}"))?;
+
+    unit.flags = FlagSet::new();
+    unit.flag_notes = BTreeMap::new();
+    unit.review_status = Some(ReviewStatus::Reviewed);
+    let merged = unit.clone();
+    entry.dirty = true;
 
     Ok(merged)
 }

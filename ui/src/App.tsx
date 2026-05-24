@@ -464,6 +464,14 @@ export function App() {
         const updated = await acceptUnitInProject(activeCatalogPath, id);
         replaceUnit(updated);
         markCatalogDirty(activeCatalogPath);
+        // Codex P1: onSave / onDiscard are gated by dirtyIds.size === 0, so
+        // without adding the unit here Ctrl-S and Discard would become no-ops
+        // after Accept on an otherwise clean catalog.
+        setDirtyIds((prev) => {
+          const next = new Set(prev);
+          next.add(id);
+          return next;
+        });
         flashInfo(`Marked unit ${id} as reviewed`);
       } catch (e) {
         flashError(`Accept failed: ${formatError(e)}`);
