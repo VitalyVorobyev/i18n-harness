@@ -128,6 +128,12 @@ pub enum FindingDetail {
     /// a Latin-script target; gender/case agreement cannot be resolved at
     /// translation time.
     PlaceholderAgreementRisk(PlaceholderAgreementDetail),
+
+    /// HTML/markup tag multiset mismatch between source and target. The
+    /// most common case is the model dropping tags entirely (e.g.,
+    /// `<b>Save</b>` → `Save`); we also catch reordered or differently-
+    /// named tags.
+    MarkupTagMismatch(MarkupTagMismatchDetail),
 }
 
 /// Detail for [`Flag::PlaceholderMismatch`].
@@ -222,4 +228,23 @@ pub struct PlaceholderAgreementDetail {
     pub placeholder: String,
     /// The determiner word that preceded it.
     pub determiner: String,
+}
+
+/// Detail for [`Flag::MarkupTagMismatch`].
+///
+/// Each entry is a tag NAME (with no `<`/`>`, no attributes) — e.g. `b`,
+/// `a`, `strong`. Self-closing tags like `<br/>` and `<br>` are normalised
+/// to the same name and counted as both an opening and a closing
+/// occurrence for multiset comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkupTagMismatchDetail {
+    /// Which target slot the mismatch was found in.
+    pub slot: u32,
+    /// Tag names present in the source but missing (or under-counted) in
+    /// the target. May contain duplicates when a tag appears multiple
+    /// times.
+    pub missing: Vec<String>,
+    /// Tag names present in the target but absent (or over-counted) in
+    /// the source.
+    pub extra: Vec<String>,
 }

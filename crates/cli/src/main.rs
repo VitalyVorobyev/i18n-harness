@@ -22,8 +22,8 @@ use i18n_harness_core::{
 use i18n_harness_gate::metrics::{FileSink, MetricsWriter};
 use i18n_harness_gate::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
-    IcuParseDetail, LengthWarnDetail, PlaceholderAgreementDetail, PlaceholderMismatchDetail,
-    PluralArityMismatchDetail, validate_batch,
+    IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
+    PlaceholderMismatchDetail, PluralArityMismatchDetail, validate_batch,
 };
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
@@ -330,6 +330,11 @@ fn render_detail(f: &Finding) -> String {
             placeholder,
             determiner,
         }) => format!("{determiner} {placeholder} — gender/case unresolved at translation time"),
+        FindingDetail::MarkupTagMismatch(MarkupTagMismatchDetail {
+            slot,
+            missing,
+            extra,
+        }) => format!("slot {slot}: missing tags={missing:?} extra tags={extra:?}"),
     }
 }
 
@@ -349,6 +354,7 @@ fn flag_name(flag: Flag) -> &'static str {
         Flag::Idiom => "idiom",
         Flag::InsufficientContext => "insufficient-context",
         Flag::LowConfidence => "low-confidence",
+        Flag::MarkupTagMismatch => "markup-tag-mismatch",
     }
 }
 

@@ -388,7 +388,18 @@ fn parse_translation_children_singular(
                     skip_to_close(reader, s.name())?;
                 }
             }
-            Event::End(_) | Event::GeneralRef(_) => {}
+            Event::GeneralRef(_) => {
+                // quick-xml v0.38 splits XML entity references out of the
+                // surrounding text. The reader advanced over the literal
+                // `&name;` bytes; capture them here so `unescape_xml` can
+                // resolve them when this body is consumed downstream.
+                let raw = &bytes[event_start..reader.buffer_position() as usize];
+                let acc = body_text.get_or_insert_with(String::new);
+                if let Ok(s) = std::str::from_utf8(raw) {
+                    acc.push_str(s);
+                }
+            }
+            Event::End(_) => {}
         }
         buf.clear();
     }

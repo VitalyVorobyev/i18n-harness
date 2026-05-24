@@ -68,8 +68,8 @@ pub mod metrics;
 
 pub use report::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
-    IcuParseDetail, LengthWarnDetail, PlaceholderAgreementDetail, PlaceholderMismatchDetail,
-    PluralArityMismatchDetail,
+    IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
+    PlaceholderMismatchDetail, PluralArityMismatchDetail,
 };
 
 use i18n_harness_core::Unit;

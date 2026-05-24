@@ -454,7 +454,72 @@ fn gate_rule_table_drives_every_check() {
                 Flag::LengthWarn,
                 Flag::CjkPunctuationTolerated,
                 Flag::PlaceholderAgreementRisk,
+                Flag::MarkupTagMismatch,
             ],
+        },
+        // ── markup-tag-mismatch ─────────────────────────────────────────
+        Fixture {
+            name: "markup-tag/positive/b-dropped",
+            unit: make_singular(
+                "msg::dropped",
+                "Click <b>Save</b> to continue.",
+                Some("Klicken Sie auf Speichern, um fortzufahren."),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::MarkupTagMismatch],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "markup-tag/positive/strong-instead-of-b",
+            unit: make_singular(
+                "msg::renamed",
+                "Click <b>Save</b>.",
+                Some("Klicken Sie auf <strong>Speichern</strong>."),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::MarkupTagMismatch],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "markup-tag/negative/preserved-identical",
+            unit: make_singular(
+                "msg::preserved",
+                "Click <b>Save</b> to continue.",
+                Some("Klicken Sie auf <b>Speichern</b>, um fortzufahren."),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[],
+            forbidden: &[Flag::MarkupTagMismatch],
+        },
+        Fixture {
+            name: "markup-tag/negative/case-and-attribute-insensitive",
+            unit: make_singular(
+                "msg::attrs",
+                "See <a href=\"/help\">docs</a>",
+                // Same `a` tag name; attributes differ; case differs.
+                Some("Siehe <A HREF=\"/de/hilfe\">Dokumente</A>"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[],
+            forbidden: &[Flag::MarkupTagMismatch],
+        },
+        Fixture {
+            name: "markup-tag/negative/source-has-no-tags",
+            unit: make_singular(
+                "msg::no-tags",
+                "Simple message",
+                // Even a stray `<` in the target shouldn't flag when source
+                // had no tags — see comment in `markup_tag_check`.
+                Some("Einfache Nachricht mit 1 < 2"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[],
+            forbidden: &[Flag::MarkupTagMismatch],
         },
     ];
 

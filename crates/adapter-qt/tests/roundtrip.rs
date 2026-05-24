@@ -196,6 +196,42 @@ fn extract_normalizes_placeholders_to_icu() {
     );
 }
 
+/// XML entity references in `<translation>` body bodies must round-trip
+/// through `Unit::target` correctly. The singular body parser previously
+/// dropped `&lt;`/`&gt;`/`&amp;` GeneralRef events, so a target containing
+/// `&lt;b&gt;Speichern&lt;/b&gt;` came out as `bSpeichern/b` (no brackets).
+/// The plural body parser uses a different code path (full byte slice +
+/// `unescape_xml`) and was always correct; this test pins both shapes.
+#[test]
+fn xml_entity_references_in_translation_body_are_decoded() {
+    let dir = std::env::temp_dir().join(format!("i18n-translation-decode-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("entity.ts");
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>X</name>
+    <message>
+        <source>Click &lt;b&gt;Save&lt;/b&gt;.</source>
+        <translation>Klicken Sie auf &lt;b&gt;Speichern&lt;/b&gt;.</translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&path, src).unwrap();
+    let cat = extract(&path).expect("extract");
+    let unit = &cat.units()[0];
+    assert_eq!(unit.source, "Click <b>Save</b>.");
+    match &unit.target {
+        i18n_harness_core::Target::Singular { text: Some(t) } => {
+            assert_eq!(t, "Klicken Sie auf <b>Speichern</b>.");
+        }
+        other => panic!("expected Singular Some, got {other:?}"),
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// XML entity references in `<source>` and `<comment>` bodies (`&amp;`,
 /// `&lt;`, `&gt;`, `&quot;`, `&apos;`) must be decoded into their literal
 /// characters in `Unit::source` — otherwise the backend prompt loses the

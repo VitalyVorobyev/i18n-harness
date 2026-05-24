@@ -59,6 +59,11 @@ pub enum Flag {
     /// resolved at translation time (German `den`/`dem`/`der`, Spanish
     /// `el`/`la`). Cannot be checked, but worth a human glance.
     PlaceholderAgreementRisk,
+    /// HTML/markup tags present in the source were dropped, reordered,
+    /// added, or differently-named in the target. The gate compares
+    /// `<tag>` / `</tag>` multisets, treating tag NAMES as opaque and
+    /// ignoring attribute differences.
+    MarkupTagMismatch,
 
     // ── Model-supplied semantic (M2+) ──────────────────────────────────────
     /// The source is ambiguous; the model picked one reading but is not
@@ -98,7 +103,8 @@ impl Flag {
             Self::AccelMismatch
             | Self::LengthWarn
             | Self::CjkPunctuationTolerated
-            | Self::PlaceholderAgreementRisk => FlagSeverity::Soft,
+            | Self::PlaceholderAgreementRisk
+            | Self::MarkupTagMismatch => FlagSeverity::Soft,
             Self::AmbiguousSource
             | Self::Idiom
             | Self::InsufficientContext
@@ -186,6 +192,7 @@ mod tests {
             Flag::LengthWarn,
             Flag::CjkPunctuationTolerated,
             Flag::PlaceholderAgreementRisk,
+            Flag::MarkupTagMismatch,
             Flag::AmbiguousSource,
             Flag::Idiom,
             Flag::InsufficientContext,
