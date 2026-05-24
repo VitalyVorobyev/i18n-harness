@@ -1,0 +1,17 @@
+[meta]
+schema_version = 1
+
+[[term]]
+source = "Open"
+do_not_translate = false
+
+[term.translations]
+de_DE = "Öffnen"
+es_ES = "Abrir"
+
+[[term]]
+source = "ChromaCheck"
+do_not_translate = true
+
+[locale.es_ES]
+register = "informal"
