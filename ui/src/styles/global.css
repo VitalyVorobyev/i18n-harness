@@ -1,0 +1,75 @@
+/* Global type, surfaces, scrollbars. Everything else is component-local. */
+
+html,
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-normal);
+  color: var(--fg-primary);
+  background: var(--bg-base);
+  font-feature-settings: "cv11", "ss01", "ss03";
+  letter-spacing: var(--tracking-normal);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Scrollbars — restrained, themed. WebKit only (Tauri uses WebKit/wry). */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--bg-base);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: padding-box;
+  border: 2px solid var(--bg-base);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Disable native text-select on chrome (panes, dividers, bars).
+   Components opt back in by overriding user-select. */
+.app-chrome {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+/* Keyboard hint chips used in the top bar and empty states. */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--fg-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  letter-spacing: var(--tracking-loose);
+}

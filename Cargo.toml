@@ -10,6 +10,7 @@ members = [
     "crates/adapter-qt",
     "crates/adapter-react",
     "crates/cli",
+    "ui/src-tauri",
 ]
 
 [workspace.package]
