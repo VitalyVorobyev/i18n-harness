@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CatalogList } from "./components/CatalogList/CatalogList";
 import { EmptyState } from "./components/EmptyState/EmptyState";
+import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { Inspector } from "./components/Inspector/Inspector";
-import { TopBar } from "./components/TopBar/TopBar";
+import { TopBar, type View } from "./components/TopBar/TopBar";
 import {
   UnitEditor,
   type UnitEditorHandle,
@@ -43,6 +44,7 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+  const [view, setView] = useState<View>("catalog");
   const editorRef = useRef<UnitEditorHandle | null>(null);
 
   useEffect(() => {
@@ -236,6 +238,8 @@ export function App() {
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
       <TopBar
+        view={view}
+        onViewChange={setView}
         catalogPath={catalog?.path ?? null}
         language={catalog?.language ?? null}
         unitCount={catalog?.unit_count ?? 0}
@@ -245,7 +249,9 @@ export function App() {
         onSave={onSave}
         onDiscard={onDiscard}
       />
-      {catalog ? (
+      {view === "glossary" ? (
+        <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
+      ) : catalog ? (
         <div className="flex-1 flex overflow-hidden min-h-0">
           <CatalogList
             units={catalog.units}

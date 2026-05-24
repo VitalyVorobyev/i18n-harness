@@ -48,6 +48,43 @@ export interface SaveSummary {
   unit_count: number;
 }
 
+export interface LocaleInfo {
+  id: string;
+  register: "formal" | "informal" | "neutral";
+  script: string;
+  plural_arity: number;
+}
+
+export interface TermEntry {
+  source: string;
+  do_not_translate: boolean;
+  notes?: string | null;
+  translations: Record<string, string>;
+}
+
+export interface LocaleOverrideEntry {
+  locale: string;
+  register: "formal" | "informal" | "neutral" | null;
+  variant: string | null;
+}
+
+export interface GlossaryPayload {
+  schema_version: number;
+  terms: TermEntry[];
+  locale_overrides: LocaleOverrideEntry[];
+}
+
+export interface GlossaryLoadResponse {
+  path: string;
+  payload: GlossaryPayload;
+  warnings: string[];
+}
+
+export interface GlossarySaveResponse {
+  path: string;
+  warnings: string[];
+}
+
 // Mirrors the Rust enum #[serde(tag = "kind", rename_all = "kebab-case")]
 // in ui/src-tauri/src/lib.rs.
 export type TargetEdit =

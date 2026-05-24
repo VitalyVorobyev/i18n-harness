@@ -1,6 +1,10 @@
 import { cn } from "../../lib/cn";
 
+export type View = "catalog" | "glossary";
+
 interface Props {
+  view: View;
+  onViewChange: (v: View) => void;
   catalogPath: string | null;
   language: string | null;
   unitCount: number;
@@ -12,6 +16,8 @@ interface Props {
 }
 
 export function TopBar({
+  view,
+  onViewChange,
   catalogPath,
   language,
   unitCount,
@@ -22,6 +28,7 @@ export function TopBar({
   onDiscard,
 }: Props) {
   const dirty = dirtyCount > 0;
+  const catalogView = view === "catalog";
   return (
     <header
       className={cn(
@@ -43,9 +50,32 @@ export function TopBar({
         <span className="font-mono text-xs text-fg-tertiary tracking-loose">
           v{version}
         </span>
+        <div
+          role="tablist"
+          aria-label="View"
+          className="ml-3 flex items-center gap-1"
+        >
+          <TabButton
+            active={catalogView}
+            onClick={() => onViewChange("catalog")}
+          >
+            Catalog
+          </TabButton>
+          <TabButton
+            active={!catalogView}
+            onClick={() => onViewChange("glossary")}
+          >
+            Glossary
+          </TabButton>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div
+        className={cn(
+          "flex items-center gap-2",
+          catalogView ? "" : "invisible pointer-events-none",
+        )}
+      >
         <ActionButton onClick={onOpen} title="Open a .ts catalog (⌘O)">
           Open
           <kbd>⌘O</kbd>
@@ -75,7 +105,12 @@ export function TopBar({
         </ActionButton>
       </div>
 
-      <div className="flex items-center gap-2 justify-end min-w-0">
+      <div
+        className={cn(
+          "flex items-center gap-2 justify-end min-w-0",
+          catalogView ? "" : "invisible",
+        )}
+      >
         {catalogPath ? (
           <>
             <span
@@ -148,6 +183,34 @@ function ActionButton({
           ? "text-accent-fg bg-accent border-transparent enabled:hover:bg-accent-hover enabled:active:bg-accent-active"
           : "text-fg-secondary border-border-default bg-transparent enabled:hover:bg-bg-hover enabled:hover:text-fg-primary enabled:hover:border-border-strong enabled:active:bg-bg-selected",
         "disabled:text-fg-disabled disabled:border-border-subtle disabled:cursor-not-allowed disabled:bg-transparent",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center h-6 px-2 rounded-sm text-xs font-medium",
+        "transition-colors duration-100 ease-out",
+        active
+          ? "text-fg-primary bg-accent-subtle border border-accent-subtle-border"
+          : "text-fg-tertiary border border-transparent hover:text-fg-primary hover:bg-bg-hover",
       )}
     >
       {children}

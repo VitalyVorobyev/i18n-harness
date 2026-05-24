@@ -2,9 +2,16 @@
 // stringly-typed call. One function per Tauri command + dialog helpers.
 
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  open as openDialog,
+  save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import type {
   CatalogResponse,
+  GlossaryLoadResponse,
+  GlossaryPayload,
+  GlossarySaveResponse,
+  LocaleInfo,
   SaveSummary,
   TargetEdit,
   TranslateResult,
@@ -54,4 +61,53 @@ export async function pickCatalogFile(): Promise<string | null> {
   });
   if (typeof selected === "string") return selected;
   return null;
+}
+
+export async function listLocales(): Promise<LocaleInfo[]> {
+  return await invoke<LocaleInfo[]>("list_locales");
+}
+
+export async function loadGlossary(
+  path: string,
+): Promise<GlossaryLoadResponse> {
+  return await invoke<GlossaryLoadResponse>("load_glossary", { path });
+}
+
+export async function saveGlossary(
+  path: string,
+  payload: GlossaryPayload,
+): Promise<GlossarySaveResponse> {
+  return await invoke<GlossarySaveResponse>("save_glossary", {
+    path,
+    payload,
+  });
+}
+
+export async function pickGlossaryFile(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: false,
+    filters: [
+      {
+        name: "Glossary (.toml)",
+        extensions: ["toml"],
+      },
+    ],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+export async function pickGlossarySaveLocation(): Promise<string | null> {
+  const selected = await saveDialog({
+    title: "Save glossary",
+    defaultPath: "glossary.toml",
+    filters: [
+      {
+        name: "Glossary (.toml)",
+        extensions: ["toml"],
+      },
+    ],
+  });
+  return selected ?? null;
 }
