@@ -40,23 +40,34 @@ M0–M2 are green.
 | `crates/catalog` | `CatalogFormat` trait + PO/ICU-JSON serializers |
 | `crates/adapter-qt` | Qt `.ts` adapter (reference adapter; XML round-trip) |
 | `crates/adapter-react` | React adapter over the catalog serializers |
-| `crates/cli` | `harness` binary; entry point for humans and (later) Tauri UI |
+| `crates/cli` | `harness` binary; entry point for humans and the Tauri UI |
+| `ui/` | Tauri 2 + Vite + React + TS desktop shell ([ui/README.md](ui/README.md)) |
+| `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
 
-`ui/` (Tauri) and `crates/adapter-log/` are *not* present and will not be
-created until their milestones (M3 / M5 design-only).
+`crates/adapter-log/` is *not* present and will not be created until its
+milestone (M5 design-only).
 
 ## Commands
 
 ```sh
+# Rust workspace (includes ui/src-tauri as a workspace member)
 cargo build --workspace
 cargo test  --workspace --all-targets
 cargo fmt   --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo doc   --workspace --no-deps --document-private-items
 cargo run   -p i18n-harness-cli -- --help
+
+# Desktop UI (Tauri + Vite + React, see ui/README.md for details)
+cd ui && bun install
+cd ui && bun run typecheck
+cd ui && bun run lint           # Biome — single tool for lint + format
+cd ui && bun audit --prod       # Production-dep vulnerability scan
+cd ui && bun run build
+cd ui && bun tauri:dev
 ```
 
-CI runs the same commands on push and PR. See `.github/workflows/ci.yml`.
+CI runs all of the above on push and PR. See `.github/workflows/ci.yml`.
 
 ## Conventions
 

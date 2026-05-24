@@ -13,7 +13,7 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  check:
+  rust:
     name: ${{ matrix.cmd.name }}
     runs-on: ubuntu-latest
     strategy:
@@ -31,7 +31,41 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install Linux Tauri build dependencies
+        if: matrix.cmd.name != 'fmt'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
       - name: ${{ matrix.cmd.name }}
         run: ${{ matrix.cmd.run }}
         env:
           RUSTDOCFLAGS: -D warnings
+
+  ui:
+    name: ui-${{ matrix.cmd.name }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    strategy:
+      fail-fast: false
+      matrix:
+        cmd:
+          - { name: "typecheck", run: "bun run typecheck" }
+          - { name: "lint",      run: "bun run lint" }
+          - { name: "build",     run: "bun run build" }
+          - { name: "audit",     run: "bun audit --prod" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.x"
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+      - name: ${{ matrix.cmd.name }}
+        run: ${{ matrix.cmd.run }}
