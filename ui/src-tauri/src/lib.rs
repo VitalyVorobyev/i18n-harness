@@ -506,6 +506,37 @@ fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
         locale: BTreeMap<String, WireLocale<'a>>,
     }
 
+    // Locale overrides are keyed by id on disk, so duplicates would
+    // silently collapse into the last writer if we let BTreeMap::collect
+    // do its thing. Detect them up-front and refuse to write — the UI
+    // surfaces the error to the user. Term duplicates are caught by
+    // `Glossary::from_toml`'s `DuplicateSource` check downstream, but
+    // catching them here too produces a sharper message.
+    let mut seen_terms = std::collections::HashSet::new();
+    for t in &payload.terms {
+        if !seen_terms.insert(&t.source) {
+            return Err(format!(
+                "duplicate term source `{}` — every source must be unique",
+                t.source,
+            ));
+        }
+    }
+    let mut locale: BTreeMap<String, WireLocale> = BTreeMap::new();
+    for o in &payload.locale_overrides {
+        if locale.contains_key(&o.locale) {
+            return Err(format!(
+                "duplicate locale override for `{}` — each locale appears at most once",
+                o.locale,
+            ));
+        }
+        locale.insert(
+            o.locale.clone(),
+            WireLocale {
+                register: o.register.as_ref(),
+                variant: o.variant.as_ref(),
+            },
+        );
+    }
     let terms = payload
         .terms
         .iter()
@@ -514,19 +545,6 @@ fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
             do_not_translate: t.do_not_translate,
             notes: t.notes.as_ref(),
             translations: t.translations.clone(),
-        })
-        .collect();
-    let locale = payload
-        .locale_overrides
-        .iter()
-        .map(|o| {
-            (
-                o.locale.clone(),
-                WireLocale {
-                    register: o.register.as_ref(),
-                    variant: o.variant.as_ref(),
-                },
-            )
         })
         .collect();
     let wire = Wire {

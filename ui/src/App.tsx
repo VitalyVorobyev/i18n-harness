@@ -249,44 +249,56 @@ export function App() {
         onSave={onSave}
         onDiscard={onDiscard}
       />
-      {view === "glossary" ? (
-        <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
-      ) : catalog ? (
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          <CatalogList
-            units={catalog.units}
-            selectedId={selectedId}
-            filter={filter}
-            search={search}
-            dirtyIds={dirtyIds}
-            onSelect={setSelectedId}
-            onFilterChange={setFilter}
-            onSearchChange={setSearch}
-          />
-          {selectedUnit ? (
-            <UnitEditor
-              ref={editorRef}
-              unit={selectedUnit}
-              busy={selectedBusy}
-              hasOllama={Boolean(catalog.language)}
-              onEdit={onEditTarget}
-              onTranslate={onTranslate}
+      {/*
+        Both views stay mounted so their local state (open file, edits,
+        dirty tracking) survives a tab switch. Only one is visible at a
+        time via the `hidden` class.
+      */}
+      <div
+        className={
+          view === "catalog" ? "flex-1 flex overflow-hidden min-h-0" : "hidden"
+        }
+      >
+        {catalog ? (
+          <>
+            <CatalogList
+              units={catalog.units}
+              selectedId={selectedId}
+              filter={filter}
+              search={search}
+              dirtyIds={dirtyIds}
+              onSelect={setSelectedId}
+              onFilterChange={setFilter}
+              onSearchChange={setSearch}
             />
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
-              <p>Select a unit on the left to inspect it.</p>
-            </div>
-          )}
-          {selectedUnit && (
-            <Inspector unit={selectedUnit} report={selectedReport} />
-          )}
-        </div>
-      ) : (
-        <EmptyState
-          onOpen={openFile}
-          {...(error ? { errorMessage: error } : {})}
-        />
-      )}
+            {selectedUnit ? (
+              <UnitEditor
+                ref={editorRef}
+                unit={selectedUnit}
+                busy={selectedBusy}
+                hasOllama={Boolean(catalog.language)}
+                onEdit={onEditTarget}
+                onTranslate={onTranslate}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
+                <p>Select a unit on the left to inspect it.</p>
+              </div>
+            )}
+            {selectedUnit && (
+              <Inspector unit={selectedUnit} report={selectedReport} />
+            )}
+          </>
+        ) : (
+          <EmptyState
+            onOpen={openFile}
+            {...(error ? { errorMessage: error } : {})}
+          />
+        )}
+      </div>
+      <div className={view === "glossary" ? "flex-1 flex min-h-0" : "hidden"}>
+        <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
+      </div>
       {loading && (
         <div
           aria-live="polite"
