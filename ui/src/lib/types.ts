@@ -85,6 +85,24 @@ export interface GlossarySaveResponse {
   warnings: string[];
 }
 
+export interface MetricEvent {
+  schema: number;
+  ts: string;
+  backend: string;
+  locale: string;
+  event: "gate-reject" | "soft-warning" | "human-edit" | "retry" | string;
+  unit_id: string;
+  rule: string;
+  detail: Record<string, unknown> | unknown;
+}
+
+export interface MetricsResponse {
+  path: string;
+  events: MetricEvent[];
+  error_count: number;
+  line_count: number;
+}
+
 // Mirrors the Rust enum #[serde(tag = "kind", rename_all = "kebab-case")]
 // in ui/src-tauri/src/lib.rs.
 export type TargetEdit =

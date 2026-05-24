@@ -185,6 +185,50 @@ pub struct GlossarySaveResponse {
     pub warnings: Vec<String>,
 }
 
+/// One row from `.i18n-harness/metrics.jsonl`, re-shaped for the wire.
+///
+/// We don't depend on `i18n_harness_gate::Event` directly — its serde
+/// flattened tag would force the UI to deal with two shapes. Here we
+/// surface a flat record the TypeScript layer can render without a
+/// custom serde dance.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetricEvent {
+    /// On-disk schema version (canonical metrics schema, not the
+    /// in-memory `Unit` schema).
+    pub schema: u32,
+    /// RFC3339 timestamp (`…Z`, UTC, microsecond precision).
+    pub ts: String,
+    /// Backend that produced the unit (`"manual"`, `"ollama"`, …).
+    pub backend: String,
+    /// Target locale (`"de_DE"`, …).
+    pub locale: String,
+    /// Event kind discriminator (`"gate-reject"`, `"soft-warning"`,
+    /// `"human-edit"`, `"retry"`).
+    pub event: String,
+    /// Unit id the event pertains to.
+    pub unit_id: String,
+    /// Lower-case kebab flag name (`"length-warn"`, …) or empty for
+    /// non-flag events.
+    pub rule: String,
+    /// Per-rule detail payload. We pass it through opaquely; the UI
+    /// renders rule-specific summaries.
+    pub detail: serde_json::Value,
+}
+
+/// Wire response from `load_metrics`.
+#[derive(Debug, Serialize)]
+pub struct MetricsResponse {
+    /// Absolute path read.
+    pub path: String,
+    /// Successfully-parsed events, in file order.
+    pub events: Vec<MetricEvent>,
+    /// Lines that could not be parsed as JSON or were missing fields.
+    /// Surfaced to the UI so a corrupted run is visible, not silent.
+    pub error_count: usize,
+    /// Total non-blank lines read (`events.len() + error_count`).
+    pub line_count: usize,
+}
+
 /// Return the package version baked at compile time.
 ///
 /// Smoke-test command: confirms the IPC bridge is wired correctly
@@ -350,6 +394,39 @@ fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
             locale_overrides,
         },
         warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
+    })
+}
+
+/// Read a `metrics.jsonl` file (as produced by
+/// `i18n_harness_gate::metrics::FileSink`). Each line is one event; we
+/// parse leniently — malformed lines are counted but do not abort the
+/// load, so a corrupted run still surfaces the events that came
+/// before it.
+#[tauri::command]
+fn load_metrics(path: String) -> Result<MetricsResponse, String> {
+    let abs = PathBuf::from(&path);
+    let content = std::fs::read_to_string(&abs).map_err(|e| format!("read failed: {e}"))?;
+    let mut events: Vec<MetricEvent> = Vec::new();
+    let mut error_count: usize = 0;
+    let mut line_count: usize = 0;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        line_count += 1;
+        match serde_json::from_str::<MetricEvent>(line) {
+            Ok(event) => events.push(event),
+            Err(_) => {
+                error_count += 1;
+            }
+        }
+    }
+    Ok(MetricsResponse {
+        path: abs.to_string_lossy().into_owned(),
+        events,
+        error_count,
+        line_count,
     })
 }
 
@@ -602,6 +679,7 @@ pub fn run() {
         list_locales,
         load_glossary,
         save_glossary,
+        load_metrics,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -614,6 +692,7 @@ pub fn run() {
         list_locales,
         load_glossary,
         save_glossary,
+        load_metrics,
     ]);
 
     builder

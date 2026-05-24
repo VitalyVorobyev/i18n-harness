@@ -3,6 +3,7 @@ import { CatalogList } from "./components/CatalogList/CatalogList";
 import { EmptyState } from "./components/EmptyState/EmptyState";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { Inspector } from "./components/Inspector/Inspector";
+import { MetricsPanel } from "./components/MetricsPanel/MetricsPanel";
 import { TopBar, type View } from "./components/TopBar/TopBar";
 import {
   UnitEditor,
@@ -298,6 +299,9 @@ export function App() {
       </div>
       <div className={view === "glossary" ? "flex-1 flex min-h-0" : "hidden"}>
         <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
+      </div>
+      <div className={view === "metrics" ? "flex-1 flex min-h-0" : "hidden"}>
+        <MetricsPanel flashError={flashError} flashInfo={flashInfo} />
       </div>
       {loading && (
         <div
