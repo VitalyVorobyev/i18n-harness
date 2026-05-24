@@ -1,0 +1,34 @@
+[project]
+name = "sample-project"
+schema = 1
+
+# Three locales, mirroring three catalog files. The locale ids match the
+# CLDR ids in `crates/locales` so the validation gate has full plural
+# arity, register, and script information for each.
+
+[locales.de_DE]
+register = "neutral"
+
+[locales.es_ES]
+register = "neutral"
+
+[locales.zh_Hans]
+register = "neutral"
+
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+
+[[catalogs]]
+path = "translations/app_es.ts"
+format = "qt-ts"
+locale = "es_ES"
+
+[[catalogs]]
+path = "translations/app_zh.ts"
+format = "qt-ts"
+locale = "zh_Hans"
+
+[glossary]
+path = "glossary.toml"

@@ -1,0 +1,24 @@
+[meta]
+schema_version = 1
+
+# A tiny demo glossary. Terms used by the sample catalogs.
+# Run `harness init` to generate a manifest, then open this directory
+# in the desktop app to exercise the glossary editor.
+
+[[term]]
+source = "Save"
+do_not_translate = false
+notes = "Standard UI verb for persisting state. Keep simple — not 'preserve'."
+translations = { de_DE = "Speichern", es_ES = "Guardar" }
+
+[[term]]
+source = "Cancel"
+do_not_translate = false
+notes = "Standard UI verb for aborting an action."
+translations = { de_DE = "Abbrechen", es_ES = "Cancelar" }
+
+[[term]]
+source = "Theme"
+do_not_translate = false
+notes = "UI appearance setting. Not 'subject' or 'topic'."
+translations = { de_DE = "Erscheinungsbild", es_ES = "Tema" }
