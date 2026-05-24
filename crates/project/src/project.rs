@@ -12,12 +12,19 @@ use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
 
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
 use crate::error::{ProjectError, ProjectWarning};
 use crate::fs::{ProjectFs, RealFs};
 use crate::locale::ResolvedLocale;
 use crate::manifest::{
     BackendConfig, BackendKind, CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig,
     PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, RegisterOverride, SCHEMA_VERSION,
+};
+use crate::memory::{
+    Correction, CorrectionFilter, CorrectionId, CorrectionStore, CuratedExample, CuratedSet,
+    NewCorrection,
 };
 use crate::paths::ProjectPaths;
 
@@ -108,6 +115,10 @@ pub struct Project {
     glossary: Option<Glossary>,
     paths: ProjectPaths,
     catalogs: Vec<CatalogRef>,
+    /// Lazy correction store — the file is not opened until first use.
+    correction_store: CorrectionStore,
+    /// In-memory curated set. Reloaded on every promote/un-curate.
+    curated: CuratedSet,
 }
 
 impl std::fmt::Debug for Project {
@@ -248,6 +259,13 @@ impl Project {
             None
         };
 
+        // Build the correction store (lazy — the file is not opened here).
+        let correction_store =
+            CorrectionStore::new(paths.corrections().to_path_buf(), Arc::clone(&fs));
+
+        // Load curated.toml if present (empty set if absent or empty file).
+        let curated = load_curated(&paths, &*fs, &correction_store)?;
+
         let project = Self {
             root: root.to_path_buf(),
             fs,
@@ -256,6 +274,8 @@ impl Project {
             glossary,
             paths,
             catalogs,
+            correction_store,
+            curated,
         };
 
         Ok((project, warnings))
@@ -602,6 +622,155 @@ impl Project {
             })
     }
 
+    // ── Translation memory ────────────────────────────────────────────────────
+
+    /// Borrow the correction store.
+    ///
+    /// Cheap — the store opens lazily on first append or read. Safe to call
+    /// from a hot path.
+    pub fn corrections(&self) -> &CorrectionStore {
+        &self.correction_store
+    }
+
+    /// Append an accepted human edit to `corrections.jsonl`.
+    ///
+    /// Generates `ts_micros` from `SystemTime::now`, computes the
+    /// [`CorrectionId`] via the content hash, builds a [`Correction`] with
+    /// `schema = 1`, serialises it as one-line JSON, and appends it.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProjectError::Io`] if the append fails.
+    pub fn record_correction(&self, c: NewCorrection) -> Result<CorrectionId, ProjectError> {
+        let ts_micros = {
+            let now = OffsetDateTime::now_utc();
+            now.unix_timestamp() * 1_000_000 + i64::from(now.microsecond())
+        };
+
+        let id = CorrectionId::from_content_hash(
+            &c.catalog,
+            &c.unit_id,
+            &c.source,
+            &c.mt_proposal,
+            &c.human_target,
+            ts_micros,
+        );
+
+        let ts = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| String::from("1970-01-01T00:00:00Z"));
+
+        let correction = Correction {
+            schema: 1,
+            id: id.clone(),
+            ts,
+            catalog: c.catalog,
+            locale: c.locale,
+            unit_id: c.unit_id,
+            source: c.source,
+            mt_proposal: c.mt_proposal,
+            human_target: c.human_target,
+            provenance: c.provenance,
+            flags_at_correction: c.flags_at_correction,
+        };
+
+        self.correction_store.append(&correction)?;
+        Ok(id)
+    }
+
+    /// List corrections matching `filter`.
+    ///
+    /// Reads the whole `corrections.jsonl` file (linear scan). Malformed lines
+    /// are skipped and their parse errors are silently dropped here; callers
+    /// that need the error list can call `self.corrections().read_filtered()`
+    /// directly.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProjectError::Io`] if the file cannot be read.
+    pub fn list_corrections(
+        &self,
+        filter: CorrectionFilter,
+    ) -> Result<Vec<Correction>, ProjectError> {
+        let (corrections, _errs) = self.correction_store.read_filtered(&filter)?;
+        Ok(corrections)
+    }
+
+    /// Promote a correction to the curated set.
+    ///
+    /// Verifies the id exists in `corrections.jsonl`, then adds a new
+    /// `[[example]]` entry to `curated.toml` (round-trip-preserved via
+    /// `toml_edit`).
+    ///
+    /// # Errors
+    ///
+    /// - [`ProjectError::CorrectionNotFound`] if `id` is not in
+    ///   `corrections.jsonl`.
+    /// - [`ProjectError::Io`] if the file cannot be written.
+    pub fn promote_to_curated(
+        &mut self,
+        id: CorrectionId,
+        note: Option<String>,
+    ) -> Result<(), ProjectError> {
+        // Verify the id exists.
+        let (all, _) = self.correction_store.read_all()?;
+        let correction = all
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| ProjectError::CorrectionNotFound { id: id.clone() })?;
+
+        // Read existing curated.toml for round-trip preservation.
+        let existing_text = read_curated_text(&self.paths, &*self.fs);
+
+        // Update in-memory set.
+        self.curated.push(CuratedExample {
+            id: id.clone(),
+            note: note.clone().filter(|s| !s.is_empty()),
+            correction: Some(correction),
+        });
+
+        // Serialise and persist atomically.
+        let new_text = self.curated.to_toml_string(existing_text.as_deref());
+        self.fs
+            .write_atomic(self.paths.curated(), new_text.as_bytes())
+            .map_err(|source| ProjectError::Io {
+                path: self.paths.curated().to_path_buf(),
+                source,
+            })
+    }
+
+    /// Remove a correction from the curated set.
+    ///
+    /// Idempotent — returns `false` if the id was not in the curated set,
+    /// `true` if it was removed.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProjectError::Io`] if the file cannot be written.
+    pub fn un_curate(&mut self, id: &CorrectionId) -> Result<bool, ProjectError> {
+        if !self.curated.contains(id) {
+            return Ok(false);
+        }
+
+        let existing_text = read_curated_text(&self.paths, &*self.fs);
+        self.curated.remove(id);
+
+        let new_text = self.curated.to_toml_string(existing_text.as_deref());
+        self.fs
+            .write_atomic(self.paths.curated(), new_text.as_bytes())
+            .map_err(|source| ProjectError::Io {
+                path: self.paths.curated().to_path_buf(),
+                source,
+            })?;
+
+        Ok(true)
+    }
+
+    /// Borrow the in-memory curated set.
+    pub fn curated(&self) -> &CuratedSet {
+        &self.curated
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /// Rebuild the typed manifest from `doc` and refresh the catalog index.
@@ -640,6 +809,51 @@ impl Project {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Load `curated.toml` if it exists, resolve each example against corrections.
+///
+/// Returns an empty `CuratedSet` if the file does not exist or is empty.
+fn load_curated(
+    paths: &ProjectPaths,
+    fs: &dyn ProjectFs,
+    store: &CorrectionStore,
+) -> Result<CuratedSet, ProjectError> {
+    let curated_path = paths.curated();
+    if !fs.exists(curated_path) {
+        return Ok(CuratedSet::default());
+    }
+
+    let text = fs
+        .read_to_string(curated_path)
+        .map_err(|source| ProjectError::Io {
+            path: curated_path.to_path_buf(),
+            source,
+        })?;
+
+    if text.trim().is_empty() {
+        return Ok(CuratedSet::default());
+    }
+
+    let mut curated = CuratedSet::from_toml_str(&text)?;
+
+    // Resolve correction snapshots (best-effort; dangling references stay None).
+    if let Ok((corrections, _)) = store.read_all() {
+        curated.resolve_corrections(&corrections);
+    }
+
+    Ok(curated)
+}
+
+/// Read the raw text of `curated.toml` for round-trip preservation, or `None`
+/// if the file does not exist.
+fn read_curated_text(paths: &ProjectPaths, fs: &dyn ProjectFs) -> Option<String> {
+    let path = paths.curated();
+    if fs.exists(path) {
+        fs.read_to_string(path).ok()
+    } else {
+        None
+    }
+}
 
 /// Build the catalog index, checking existence and format on disk (strict open mode).
 fn build_catalog_refs(

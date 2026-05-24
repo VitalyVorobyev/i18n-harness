@@ -31,7 +31,7 @@ pub mod error;
 pub mod fs;
 pub mod locale;
 pub mod manifest;
-pub(crate) mod memory;
+pub mod memory;
 pub mod paths;
 pub mod project;
 
@@ -56,7 +56,10 @@ pub use manifest::FormatGuess;
 
 pub use discovery::{ClassificationConfidence, DraftAlternative, DraftCatalog, DraftManifest};
 
-pub use memory::CorrectionId;
+pub use memory::{
+    Correction, CorrectionFilter, CorrectionId, CorrectionProvenance, CorrectionStore,
+    CuratedExample, CuratedSet, NewCorrection,
+};
 
 pub use paths::ProjectPaths;
 

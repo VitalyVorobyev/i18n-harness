@@ -1561,6 +1561,7 @@ dependencies = [
  "i18n-harness-glossary",
  "i18n-harness-locales",
  "insta",
+ "proptest",
  "regex",
  "serde",
  "serde_json",
