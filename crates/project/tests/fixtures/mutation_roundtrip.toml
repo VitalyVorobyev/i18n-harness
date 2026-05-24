@@ -1,0 +1,33 @@
+# Top-level comment that must survive all mutations.
+
+[project]
+name = "roundtrip-test"
+schema = 1
+
+# Locales block with a comment.
+[locales.de_DE]
+register = "formal"
+
+[locales.es_ES]
+register = "informal"
+
+# Catalog section.
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+
+# Second catalog with trailing comment.
+[[catalogs]]
+path = "translations/app_es.po"
+format = "gettext-po"
+locale = "es_ES"
+
+[backend.default]
+kind = "ollama"
+model = "gemma3:27b"
+
+# A top-level future table that the v1 parser must not reject (root has no
+# deny_unknown_fields). This tests forward-compat at the root level.
+[future_v2_extension]
+some_key = "preserved_value"

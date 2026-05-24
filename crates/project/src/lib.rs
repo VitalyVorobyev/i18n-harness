@@ -3,13 +3,14 @@
 //!
 //! This crate owns the persistent state of a single translation project:
 //!
-//! - Reading, validating, and (in later slices) mutating `i18n-harness.toml`
-//!   with comment/ordering preserved via `toml_edit`.
+//! - Reading, validating, and mutating `i18n-harness.toml` with
+//!   comment/ordering preserved via `toml_edit`.
 //! - The [`ProjectFs`] trait that abstracts filesystem access so the whole
 //!   crate is testable against an in-memory backing.
-//! - Pure-serde types for the manifest (this slice).
-//! - Path resolution, locale layering, discovery, and the correction store
-//!   (later slices — see `docs/m4.1-project-crate-design.md`).
+//! - Pure-serde types for the manifest.
+//! - Path resolution ([`ProjectPaths`]), locale layering ([`ResolvedLocale`]),
+//!   and the live [`Project`] value with its mutation surface.
+//! - The correction store (later slices).
 //!
 //! # What this crate does NOT own
 //!
@@ -27,14 +28,19 @@
 
 pub mod error;
 pub mod fs;
+pub mod locale;
 pub mod manifest;
 pub(crate) mod memory;
+pub mod paths;
+pub mod project;
 
-// ── Re-exports for M4.1a public surface ──────────────────────────────────────
+// ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use error::{ProjectError, ProjectWarning};
 
 pub use fs::{InMemoryFs, ProjectFs, RealFs};
+
+pub use locale::{ResolvedLocale, ResolvedLocaleView};
 
 pub use manifest::{
     BackendBlock, BackendConfig, BackendKind, CatalogEntry, CatalogFormat, FormatGuess,
@@ -43,3 +49,7 @@ pub use manifest::{
 };
 
 pub use memory::CorrectionId;
+
+pub use paths::ProjectPaths;
+
+pub use project::{CatalogRef, CatalogStatus, Project, ProjectSummary};

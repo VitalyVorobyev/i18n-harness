@@ -1542,11 +1542,13 @@ version = "0.1.0"
 dependencies = [
  "i18n-harness-core",
  "i18n-harness-glossary",
+ "i18n-harness-locales",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "thiserror 2.0.18",
+ "time",
  "toml 0.9.12+spec-1.1.0",
  "toml_edit 0.23.10+spec-1.0.0",
 ]

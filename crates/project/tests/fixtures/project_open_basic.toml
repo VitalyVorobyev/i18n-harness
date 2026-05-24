@@ -1,0 +1,27 @@
+# Basic project manifest for open tests.
+[project]
+name = "my-app"
+schema = 1
+
+[locales.de_DE]
+register = "formal"
+
+[locales.es_ES]
+register = "informal"
+
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+
+[[catalogs]]
+path = "translations/app_es.po"
+format = "gettext-po"
+locale = "es_ES"
+
+[glossary]
+path = "glossary.toml"
+
+[backend.default]
+kind = "ollama"
+model = "gemma3:27b"
