@@ -162,15 +162,23 @@ An adapter pairs a parser/writer with the round-trip guarantee (`extract` then `
 
 ---
 
-## 8. Validation gate (shared, CLDR-driven) + quality metrics
+## 8. Validation gate (shared, CLDR-driven) + quality surfaces
 
-**Hard (block apply):** placeholder multiset preserved; plural/select arity matches the target locale's CLDR arity; ICU parses; non-empty when marked finished.
+**Hard (block apply):** placeholder multiset preserved; plural/select arity matches the target locale's CLDR arity; ICU parses; non-empty when marked finished; structured-output schema parses (when the prompt requires JSON).
 
 **Soft (warn / flag for review):** accelerator (`&`) preservation; length expansion past the locale's `length_warn_ratio`; CJK full-width punctuation tolerance; **placeholder grammatical-agreement risk** — when a `{param}`/`%1` stands for a noun, German/Spanish gender/case cannot be resolved at translation time, so flag rather than guess.
 
-**Model-supplied flags (semantic):** ambiguous source ("Record", "Empty", "Left"), idiom, insufficient context, low confidence. Stored in the unit's `flags` alongside deterministic ones; both surfaced in the UI triage view.
+**Model-supplied flags (semantic):** `ambiguous_source` ("Record", "Empty", "Left"), `insufficient_context`, `idiom`, `low_confidence`, `brand_term`, `tone_mismatch`. Returned by the model as part of a strict JSON output schema (see `crates/backend/prompts/ollama-translate-v2.txt`), stored in the unit's `flags`, and surfaced in the UI's project-wide review queue. A flag blocks auto-promotion to `Finished` until a human explicitly clears it; the gate's structural flags and the model's semantic flags share the same `flags` field but route to different UI affordances.
 
-**Per-backend / per-locale quality metric.** Track gate-reject rate and human-edit rate, keyed by `(backend, locale)`. The gate and UI already produce these events, so capture is cheap. This turns "is Gemma 4 E2B good enough for German?" into a number visible in the app — the empirical answer to the §4 quality caveat and the §5 model-size question.
+### Two quality surfaces, two audiences
+
+A single dashboard cannot answer both translator and maintainer questions, so the design splits them:
+
+- **In-app Quality tab — per-project, per-locale (translator-facing).** Acceptance rate, edit rate, and flag rate scoped to one project; a translation-memory table of every `(source, mt_proposal, human_target)` triple; a curated "golden examples" set; in-app prompt evaluation (re-run the current prompt over the curated set with the local model, compute a score, show before/after). Drives the prompt-tuning loop. Owned by `roadmap-product.md` (M4.9, M4.10).
+
+- **Lab tool — cross-project, cross-backend (maintainer-facing).** Compares `(backend, locale)` quality across projects and against a fixture corpus to answer "is Gemma 4 E2B good enough for German *as a model*?". Ships as a separate binary or CLI + HTML report, **not** inside the translator app. Owned by `roadmap-lab.md` (L1.x).
+
+The **rewrite step** of the prompt-tuning loop lives in neither tool: the local Gemma is the translation engine, not a prompt engineer. The harness exports a tuning bundle (`.i18n-harness/tuning/<ts>/`) that a Claude Code or Copilot skill consumes with a large model; the skill writes a new prompt back into the project and the user re-runs the in-app evaluation to score it.
 
 The gate is the trust boundary. It runs identically for every adapter, locale, and backend.
 

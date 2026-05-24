@@ -1,0 +1,363 @@
+# i18n-harness — Product roadmap
+
+The translator-facing roadmap. Everything in this file is in service of
+"a translator opens a project and does actual translations" — not
+backend benchmarking or maintainer research (that lives in
+[`roadmap-lab.md`](roadmap-lab.md)).
+
+For the architectural intent, see [`initial_design.md`](initial_design.md).
+For the day-to-day working contract, see [`../CLAUDE.md`](../CLAUDE.md).
+
+## What a translator can do today
+
+Open a single Qt `.ts` file, edit unit targets inline, ask local Gemma 4
+(via Ollama) to translate one unit at a time, save the catalog back to
+disk with a byte-stable round-trip guarantee, and edit the project
+glossary in a separate panel. Shipped in M0–M3.
+
+## What a translator cannot yet do (the M4 gap)
+
+- Open a *project* with multiple catalogs, locales, and shared glossary.
+- Round-trip PO or ICU-JSON catalogs (only Qt today).
+- Have the LLM flag units that need human attention.
+- Triage a project-wide "needs review" queue.
+- Bulk-translate every untranslated unit in a locale with cancellable
+  progress.
+- See per-project quality numbers (acceptance rate, edit rate per
+  locale) and turn human corrections into a tuning loop that improves
+  the project's prompt.
+- Use a theme that looks like a professional tool.
+
+M4 closes those gaps.
+
+---
+
+## Shipped milestones (M0–M3)
+
+### M0 — Core + Qt round-trip ✓
+
+`crates/core`, `crates/locales`, `crates/adapter-qt`, `crates/cli`:
+`extract → apply` byte-identical on every fixture. The load-bearing
+contract; never goes red without immediate rollback.
+
+### M1 — Validation gate + metric events ✓
+
+`crates/gate`: CLDR-driven hard checks (placeholder multiset, plural
+arity, ICU parses, non-empty when finished) and soft checks
+(accelerators, length-warn ratio, CJK punctuation, agreement risk,
+HTML markup). Structured events appended to `.i18n-harness/metrics.jsonl`.
+
+### M2 — Backends + glossary + first real translations ✓
+
+`crates/glossary` (TOML loader/validator), `crates/backend`
+(`TranslationBackend` trait + `manual` + `ollama`). End-to-end CLI loop:
+`harness translate --backend ollama --locale de_DE <catalog>`.
+
+### M3 — Desktop app shell ✓
+
+`ui/` Tauri 2 + React + Vite + TS. Single-catalog editor with unit list
++ editor + inspector triptych, translate-via-Ollama, save/discard,
+glossary editor panel, JSONL metrics viewer. Single-file-at-a-time
+model.
+
+---
+
+## In flight — M4 (Product turn)
+
+The shift: stop being a file-and-metrics inspector, become a
+**project-scoped translation workspace**. Each M4.x sub-milestone is a
+PR-sized piece.
+
+### M4.0 — Theme migration (groundwork)
+
+Adopt the "Technical Journal" light / "Observatory" dark palette
+(HSL tokens, blueprint blue accent) the maintainer dropped in at
+`ui/src/index.css`. Replace `ui/src/styles/tailwind.css` with a single
+stylesheet that uses the new palette but keeps the existing token
+namespace so no component code has to change. Add a topbar light/dark
+toggle that persists per-OS-user (not per-project — themes are
+personal). Delete the unused `ui/src/index.css` import.
+
+Verification: app loads under both themes; all four unit-state badges
+have ≥4.5:1 contrast against their surfaces; focus rings match
+`--primary`; `bun run build` + `bun run typecheck` + `bun run lint`
+green.
+
+### M4.1 — `crates/project` (manifest, discovery, validation)
+
+New crate. Owns the project model:
+
+- `ProjectManifest` (serde over `toml_edit` so user comments and
+  ordering round-trip), `Project` (loaded + resolved paths + catalog
+  index), `ProjectError`.
+- `Project::open(root: &Path)` — read manifest, validate every declared
+  catalog and locale.
+- `Project::discover(root: &Path)` — no manifest yet: scan for `.ts`,
+  `.po`, `.json`, infer a draft (locales from filename suffix or
+  per-format header).
+- `Project::add_catalog`, `remove_catalog`, `update_locale`,
+  `set_backend`, `save_manifest` — TOML round-trip-preserving edits.
+- Translation-memory writer/reader: `corrections.jsonl` (append-only,
+  one line per accepted edit), `curated.toml` (lists correction IDs +
+  per-pair notes).
+
+On-disk layout the manifest implies:
+
+```
+my-app/
+  i18n-harness.toml          # committed — project manifest
+  glossary.toml              # committed — project glossary
+  translations/
+    app_de.ts
+    app_fr.ts
+    settings_de.po
+    onboarding_de.json
+  prompts/                   # committed (optional) — per-locale overrides
+    de_DE.txt
+  .i18n-harness/             # gitignored — runtime state
+    metrics.jsonl
+    corrections.jsonl
+    curated.toml
+    state/batches.jsonl
+    tuning/2026-05-24T12-00-00/
+```
+
+Manifest schema (v1):
+
+```toml
+[project]
+name = "my-app"
+schema = 1
+
+[locales.de_DE]
+register = "neutral"        # neutral | formal | informal
+variant = "standard"
+length_warn_ratio = 1.4
+
+[locales.fr_FR]
+register = "formal"
+
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"            # qt-ts | gettext-po | icu-json
+locale = "de_DE"
+
+[[catalogs]]
+path = "translations/app_fr.ts"
+format = "qt-ts"
+locale = "fr_FR"
+
+[glossary]
+path = "glossary.toml"
+
+[backend.default]
+kind = "ollama"
+model = "gemma4:e2b"
+host = "http://localhost:11434"
+
+[prompts]
+template_dir = "prompts"    # optional; falls back to crate-embedded v2
+```
+
+### M4.2 — Tauri command surface refactor + CLI `init` / `open`
+
+Replace the file-centric `open_catalog` / `save_catalog` API with a
+project-scoped one:
+
+- `open_project(root) -> ProjectSummary`
+- `discover_project(root) -> DraftManifest`
+- `save_manifest(manifest)`
+- `list_catalogs() -> Vec<CatalogRef>`
+- `open_catalog_in_project(path) -> CatalogResponse`
+- `save_catalog_in_project(path)`
+- `save_all_dirty() -> Vec<SaveSummary>`
+- `translate_unit(catalog_path, unit_id)` — now threads the project's
+  glossary, backend config, and per-locale prompt override.
+- `translate_batch(catalog_path, scope, cancel_token)` — streams
+  progress via Tauri events.
+- `record_correction(catalog_path, unit_id, mt_proposal, human_target)`
+- `list_corrections(filters)`, `promote_to_curated(correction_id)`
+- `run_evaluation(prompt_path?) -> EvaluationReport`
+- `export_tuning_bundle() -> Path`
+
+The old `open_catalog` / `save_catalog` stay as thin shims that
+synthesize a single-catalog ephemeral project (so power-user
+file-open paths and the existing CLI still work).
+
+CLI additions: `harness init <dir>` (writes a draft manifest after
+auto-discovery), `harness open <dir>` (validates a manifest).
+
+### M4.3 — UI shell: sidebar + locale chips + view tabs + home screen
+
+New layout:
+
+```
+┌────────────┬──────────────────────────────────────────────────────┐
+│ PROJECT    │ [my-app]  [de_DE • fr_FR • ja_JP]  Translate  Glossary│
+│ Catalogs   │                                    Quality  Settings  │
+│  ▾ translations/                                                   │
+│    app_de  │ ┌──────────┬─────────────────┬───────────────────────┐│
+│    app_fr  │ │Unit list │  Editor         │  Inspector            ││
+│    ui_de   │ │          │                 │                       ││
+│  ▾ glossary│ │          │                 │                       ││
+│ Recent     │ │          │                 │                       ││
+└────────────┴─└──────────┴─────────────────┴───────────────────────┘┘
+```
+
+- **Home screen** when no project is open: recent projects list,
+  "Open folder", "Create from this folder". No catalog-by-itself entry
+  point in the main UI.
+- **Locale chips** in the topbar filter the catalog sidebar to that
+  locale's files. Switching locale = switching to the sibling catalog
+  for that locale (`app_de.ts` → `app_fr.ts`).
+- **View tabs**: Translate (the unit list + editor + inspector
+  triptych), Glossary, Quality, Settings (manifest editor — locales,
+  catalogs, backend, prompts). Translate is the default.
+- **Project settings** is its own view: edit locales, add/remove
+  catalogs, set backend, edit prompt template path.
+
+### M4.4 — PO serializer
+
+New `crates/catalog/src/po.rs` implementing the `CatalogFormat` trait
+(designed in this milestone since the trait itself doesn't exist yet).
+Ships:
+
+- Reader + writer with byte-stable round-trip over a fixture corpus at
+  `fixtures/po/`.
+- Placeholder converter gettext `%s`/`%d`/`%(name)s` ↔ ICU `{n}` with
+  a property test on the converter pair.
+- Plural-form reconciliation between PO's `Plural-Forms` header and
+  the locale's CLDR arity.
+
+### M4.5 — ICU-JSON serializer; wire `crates/adapter-react`
+
+New `crates/catalog/src/icu_json.rs` with the same shape as PO:
+reader + writer + round-trip fixtures at `fixtures/icu-json/` + an
+identity-with-validation converter (react-intl ICU is already ICU).
+`crates/adapter-react` becomes a thin glue crate that dispatches by
+file shape.
+
+### M4.6 — Human-attention flagging
+
+Switch the Ollama prompt from text-only to **strict JSON output**.
+New template `crates/backend/prompts/ollama-translate-v2.txt`:
+
+```
+You MUST respond with one JSON object on a single line:
+{"translation":"<the translated string>",
+ "flags":[{"kind":"ambiguous_source","note":"..."}],
+ "confidence":0.87}
+
+Allowed flag kinds:
+- ambiguous_source     : source could mean multiple things
+- insufficient_context : source is too short/generic to translate confidently
+- idiom                : source uses idiom/wordplay; literal translation loses meaning
+- low_confidence       : you self-report unsure for unspecified reason
+- brand_term           : term looks like a product/brand name not in glossary
+- tone_mismatch        : source register is ambiguous or hard to carry into target
+```
+
+Parsing: strict serde schema. Malformed responses become a gate finding
+(`backend-malformed-response`, hard severity) — no silent retry; surface
+the failure so the prompt can be tuned.
+
+Data model: extend the existing `Flag` enum in
+`crates/backend/src/outcome.rs` to include `BrandTerm` and
+`ToneMismatch`; propagate into `Unit.flags`. Add `Unit.confidence:
+Option<f32>` (shown in inspector; does not block).
+
+Auto-promotion rule: a unit may only auto-promote to `Finished` if
+`flags.is_empty()` AND gate is clean AND target is complete. Flagged
+units stay `Proposed`. The translator clears flags via an explicit
+"Accept" action.
+
+UI: inspector renders flags as severity-style chips with the model's
+per-flag note; unit list shows a flag badge next to the state badge.
+
+### M4.7 — Review queue
+
+- "Needs review" filter on the unit list inside the Translate tab.
+- Project-wide flag count badge in the sidebar ("12 flagged across
+  project"); clicking opens a virtual catalog view listing every
+  flagged unit across catalogs and locales.
+
+### M4.8 — Bulk translate
+
+Per-catalog × per-locale "Translate all untranslated" with live
+progress, cancel mid-run, and flagged units routed to the review queue.
+Backend job system in Rust (channel + cancellation token); Tauri events
+stream progress to the UI. No cross-catalog runs in v1.
+
+### M4.9 — Quality tab + in-app prompt evaluation
+
+Replaces today's Metrics tab. Per-project, per-locale only.
+
+Sections:
+
+1. **Headline numbers per locale** — % accepted-as-is / % edited / %
+   rejected / % flagged; 30-day acceptance-rate sparkline.
+2. **Translation memory** — searchable `(source, mt_proposal,
+   human_target)` table. "Promote to golden" per row; bulk promote
+   from a filter.
+3. **Curated set** — the project's tuning examples. Editable notes;
+   size counter; "Export tuning bundle" button.
+4. **Prompt evaluation** — current prompt template + version + last
+   evaluated score. "Run evaluation" re-runs the current prompt over
+   the curated set using the local Ollama backend and computes
+   per-locale acceptance rate. Honest about cost (shows estimated
+   runtime before starting).
+5. **Tuning bundle export** — writes
+   `.i18n-harness/tuning/<ISO-timestamp>/`:
+   - `examples.jsonl` — every curated pair
+   - `prompt.txt` — current template, verbatim
+   - `score.json` — latest per-locale score
+   - `locales.toml` — locale records from the project
+   - `README.md` — bundle schema spec for the consuming Claude Code
+     skill
+
+### M4.10 — Tuning-skill contract
+
+Ship the bundle schema as a stable contract and a sibling
+[`skills/tune-i18n-prompt/`](../skills/tune-i18n-prompt/) Claude Code
+skill that consumes it:
+
+- Reads a tuning bundle path.
+- Diffs `mt_proposal` vs `human_target` across examples; identifies
+  failure patterns per locale.
+- Drafts a new prompt template adhering to the v2 JSON output contract.
+- Writes the candidate to `prompts/<locale>.txt` in the project (or
+  proposes a global replacement of `prompts/default.txt`).
+- Asks the user to run "Run evaluation" in the app to verify the new
+  score.
+
+Division of labor: the **local** model translates (the hot loop, fast,
+free); a **large** model rewrites the prompt (the slow loop, run on
+demand by an external skill the user invokes — Copilot or Claude Code).
+The harness owns the bundle format and the in-app evaluation runner.
+
+---
+
+## Out of scope for M4
+
+- Cloud / API-key backends (`openai-compatible`) — covered in M5 if
+  pulled forward, otherwise post-M4.
+- The Qt `.ts` adapter internals — unchanged; round-trip remains the
+  invariant.
+- The lab dashboard — see [`roadmap-lab.md`](roadmap-lab.md).
+- Multi-project / multi-window — one project per app window in v1.
+
+---
+
+## Verification (rolling)
+
+After each M4.x:
+
+- `cargo test --workspace --all-targets` and
+  `cargo clippy --workspace --all-targets -- -D warnings` and
+  `cargo fmt --all -- --check` all green.
+- `cd ui && bun run typecheck && bun run lint && bun audit --prod
+  && bun run build` all green.
+- Round-trip suite (`crates/adapter-qt/tests/fixtures/` + new
+  PO/ICU-JSON fixtures from M4.4/M4.5 onward) is byte-identical on
+  every fixture.
+- Gate fixture matrix grows; no rule silently removed.

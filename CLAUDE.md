@@ -3,9 +3,11 @@
 A local-first, offline desktop translation harness. Install a local model
 (Ollama + Gemma 4 by default), point it at translation catalogs (Qt `.ts`,
 PO, ICU-JSON), translate UI strings — no API key, no cloud. The full design
-lives in [`docs/initial_design.md`](docs/initial_design.md); the current
-milestone scope in [`docs/implementation_plan.md`](docs/implementation_plan.md);
-this file is the day-to-day working contract.
+lives in [`docs/initial_design.md`](docs/initial_design.md); the
+translator-facing milestones in
+[`docs/roadmap-product.md`](docs/roadmap-product.md); the maintainer-facing
+lab work in [`docs/roadmap-lab.md`](docs/roadmap-lab.md). This file is the
+day-to-day working contract.
 
 ## The two invariants (never violate)
 
@@ -18,15 +20,27 @@ this file is the day-to-day working contract.
    model can produce *worse text* but cannot *corrupt structure* — the
    validation gate guarantees it.
 
-## Lab framing
+## Two tracks: product and lab
 
-The maintainer has no production translation workload yet. The immediate
-purpose is to find out, empirically, how a local Gemma 4 handles
-translation into target locales. M0 (byte-stable round-trip) and the
-per-`(backend, locale)` quality metric in M1/M2 carry most of the value;
-everything else is structure to make those measurements honest. Do not
-ship features that are not in service of one of those two things until
-M0–M2 are green.
+The repo runs two roadmaps in parallel, with strictly separate audiences:
+
+- **Product** ([`docs/roadmap-product.md`](docs/roadmap-product.md)) — what a
+  translator user does in the Tauri app: open a project, work through
+  units across multiple catalogs and locales, accept LLM suggestions,
+  triage flagged ones, and feed corrections into a per-project
+  prompt-tuning loop.
+- **Lab** ([`docs/roadmap-lab.md`](docs/roadmap-lab.md)) — what the
+  maintainer does to evaluate backends and locales empirically across
+  projects. Lives in a separate binary / CLI + HTML report; **not**
+  shipped inside the translator app.
+
+Translator-facing features live in the translator app and only there.
+Lab features live in the lab tool and only there. The shared substrate
+is the validation gate, the catalog adapters, the backend trait, and
+the per-project `.i18n-harness/` state; everything else is split.
+
+M0–M3 are shipped. M4 (the product turn) is in flight; see
+`docs/roadmap-product.md` for the sub-milestones.
 
 ## Workspace map
 

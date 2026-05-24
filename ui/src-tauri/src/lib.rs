@@ -15,6 +15,7 @@ use i18n_harness_adapter_qt::Catalog;
 use i18n_harness_core::{Target, Unit, UnitId, UnitState};
 #[cfg(feature = "ollama")]
 use i18n_harness_gate::GateReport;
+use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +26,17 @@ use serde::{Deserialize, Serialize};
 /// catalog carries the preserved source bytes needed for byte-stable
 /// round-trip on save, so it lives here rather than crossing the IPC
 /// bridge on every command.
+///
+/// The glossary slot is populated by `load_glossary`. Once set, it is
+/// threaded into every `translate_unit` call so MT proposals respect
+/// project glossary terms — without this, the glossary editor would
+/// be cosmetic. Tactical: when M4.1 introduces a project model, this
+/// slot moves to `Project` and the lifetime is project-scoped instead
+/// of session-scoped.
 #[derive(Default)]
 pub struct AppState {
     catalog: Mutex<Option<OpenCatalog>>,
+    glossary: Mutex<Option<Glossary>>,
 }
 
 /// The currently-open catalog plus the absolute path it was loaded
@@ -364,11 +373,17 @@ fn list_locales() -> Vec<LocaleInfo> {
 
 /// Load a glossary `.toml` from `path`. Returns the editable payload
 /// and any non-fatal warnings (unknown locale, empty translations).
+///
+/// Side effect: stashes the parsed glossary in [`AppState`] so the
+/// next `translate_unit` call passes it to the backend. Loading a new
+/// glossary replaces the previous one.
 #[tauri::command]
-fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
+fn load_glossary(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<GlossaryLoadResponse, String> {
     let abs = PathBuf::from(&path);
-    let (glossary, warnings) =
-        i18n_harness_glossary::Glossary::load(&abs).map_err(|e| format!("load failed: {e}"))?;
+    let (glossary, warnings) = Glossary::load(&abs).map_err(|e| format!("load failed: {e}"))?;
     let terms = glossary
         .terms()
         .map(|(src, t)| TermEntry {
@@ -386,7 +401,7 @@ fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
             variant: ov.variant.clone(),
         })
         .collect();
-    Ok(GlossaryLoadResponse {
+    let response = GlossaryLoadResponse {
         path: abs.to_string_lossy().into_owned(),
         payload: GlossaryPayload {
             schema_version: glossary.schema_version(),
@@ -394,7 +409,9 @@ fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
             locale_overrides,
         },
         warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
-    })
+    };
+    *state.glossary.lock().map_err(glossary_lock_poisoned)? = Some(glossary);
+    Ok(response)
 }
 
 /// Read a `metrics.jsonl` file (as produced by
@@ -508,8 +525,16 @@ fn translate_unit(
     let backend =
         OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
     let backend_name = backend.name().to_string();
+    // Clone the glossary under the lock so we drop the guard before any
+    // network call. Glossary owns small TOML-derived BTreeMaps; the
+    // clone is cheap and avoids holding two locks at once.
+    let glossary = state
+        .glossary
+        .lock()
+        .map_err(glossary_lock_poisoned)?
+        .clone();
     let outcomes = backend
-        .translate_batch(&batch, locale, None)
+        .translate_batch(&batch, locale, glossary.as_ref())
         .map_err(|e| format!("backend `{backend_name}` failed: {e}"))?;
     let outcome = outcomes
         .into_iter()
@@ -657,6 +682,12 @@ fn lock_poisoned(
     _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<OpenCatalog>>>,
 ) -> String {
     "catalog state lock poisoned".to_string()
+}
+
+fn glossary_lock_poisoned(
+    _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Glossary>>>,
+) -> String {
+    "glossary state lock poisoned".to_string()
 }
 
 fn no_catalog() -> String {
