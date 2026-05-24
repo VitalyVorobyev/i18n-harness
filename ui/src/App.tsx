@@ -40,16 +40,33 @@ interface Toast {
 // Top-level mode: home screen when no project is open, project workspace otherwise.
 type AppMode = { kind: "home" } | { kind: "project"; summary: ProjectSummary };
 
+// When the user attempts to close the project (or open another while dirty),
+// we present an inline confirmation with three choices.
+type CloseConfirmPending =
+  | { kind: "none" }
+  | { kind: "pending"; reason: "close" | "open-other" };
+
 export function App() {
   const [theme, setTheme] = useTheme();
   const [mode, setMode] = useState<AppMode>({ kind: "home" });
 
-  // ── Catalog / unit state ──────────────────────────────────────────────────
-  const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
-  // Absolute path of the catalog currently open in the project store.
+  // ── Catalog cache ─────────────────────────────────────────────────────────
+  // All catalogs that have been opened in this session, keyed by absolute path.
+  // Re-clicking a sidebar entry restores the cached state (including unsaved
+  // edits) without re-extracting from disk.
+  const [openCatalogs, setOpenCatalogs] = useState<
+    Map<string, CatalogResponse>
+  >(new Map());
+  // Absolute path of the catalog currently displayed.
   const [activeCatalogPath, setActiveCatalogPath] = useState<string | null>(
     null,
   );
+  // Derived: the catalog object for the active path (null when nothing selected).
+  // Components that used to read `catalog` now read this derived value.
+  const catalog = activeCatalogPath
+    ? (openCatalogs.get(activeCatalogPath) ?? null)
+    : null;
+
   const [selectedId, setSelectedId] = useState<UnitId | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -64,6 +81,11 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+
+  // Inline close-project confirmation state (P1 #2 guard).
+  const [closeConfirm, setCloseConfirm] = useState<CloseConfirmPending>({
+    kind: "none",
+  });
 
   // Project-mode view tab.
   const [projectView, setProjectView] = useState<ProjectView>("translate");
@@ -97,16 +119,23 @@ export function App() {
     setToast({ kind: "info", message });
   }, []);
 
-  const replaceUnit = useCallback((updated: Unit) => {
-    setCatalog((prev) =>
-      prev
-        ? {
-            ...prev,
-            units: prev.units.map((u) => (u.id === updated.id ? updated : u)),
-          }
-        : prev,
-    );
-  }, []);
+  // Merge an updated unit into the cached CatalogResponse for the active path.
+  const replaceUnit = useCallback(
+    (updated: Unit) => {
+      if (!activeCatalogPath) return;
+      setOpenCatalogs((prev) => {
+        const entry = prev.get(activeCatalogPath);
+        if (!entry) return prev;
+        const next = new Map(prev);
+        next.set(activeCatalogPath, {
+          ...entry,
+          units: entry.units.map((u) => (u.id === updated.id ? updated : u)),
+        });
+        return next;
+      });
+    },
+    [activeCatalogPath],
+  );
 
   const markDirty = useCallback((id: UnitId) => {
     setDirtyIds((prev) => {
@@ -130,7 +159,8 @@ export function App() {
 
   const handleProjectOpened = useCallback((summary: ProjectSummary) => {
     setMode({ kind: "project", summary });
-    setCatalog(null);
+    // Clear the catalog cache so stale data from a previous project is gone.
+    setOpenCatalogs(new Map());
     setActiveCatalogPath(null);
     setSelectedId(null);
     setFilter("all");
@@ -141,34 +171,98 @@ export function App() {
     setBusyIds(new Set());
     setProjectView("translate");
     setError(null);
+    setCloseConfirm({ kind: "none" });
   }, []);
 
-  const handleCloseProject = useCallback(async () => {
+  // Internal: perform the close without any dirty-state checks.
+  const _doCloseProject = useCallback(async () => {
     try {
       await closeProject();
     } catch {
-      // Navigate home regardless.
+      // Navigate home regardless of backend error.
     }
     setMode({ kind: "home" });
-    setCatalog(null);
+    setOpenCatalogs(new Map());
     setActiveCatalogPath(null);
     setSelectedId(null);
     setDirtyIds(new Set());
     setDirtyCatalogPaths(new Set());
     setReports({});
     setError(null);
+    setCloseConfirm({ kind: "none" });
   }, []);
+
+  // Public entry point — raises inline confirmation when there are unsaved catalogs.
+  const handleCloseProject = useCallback(() => {
+    if (dirtyCatalogPaths.size > 0) {
+      setCloseConfirm({ kind: "pending", reason: "close" });
+    } else {
+      void _doCloseProject();
+    }
+  }, [dirtyCatalogPaths.size, _doCloseProject]);
+
+  // "Save & Close" — save all dirty catalogs, then close (abort if save fails).
+  const handleSaveAndClose = useCallback(async () => {
+    try {
+      await editorRef.current?.flushPendingEdit();
+    } catch {
+      // Best-effort flush; continue with save.
+    }
+    try {
+      const resp = await saveAllDirty();
+      if (resp.failed_path) {
+        flashError(
+          `Could not save ${shortenPath(resp.failed_path)}: ${resp.failed_reason ?? "unknown error"}. Close aborted.`,
+        );
+        setCloseConfirm({ kind: "none" });
+        return;
+      }
+    } catch (e) {
+      flashError(`Save failed: ${formatError(e)}. Close aborted.`);
+      setCloseConfirm({ kind: "none" });
+      return;
+    }
+    await _doCloseProject();
+  }, [_doCloseProject, flashError]);
+
+  // "Discard & Close" — close immediately, dropping all unsaved state.
+  const handleDiscardAndClose = useCallback(() => {
+    void _doCloseProject();
+  }, [_doCloseProject]);
 
   // ── Project-mode catalog open ─────────────────────────────────────────────
 
   const handleCatalogSelect = useCallback(
     async (absPath: string) => {
       if (absPath === activeCatalogPath) return;
+
+      // If the catalog is already cached, switch to it without re-extracting
+      // from disk — this preserves any unsaved edits the user made before
+      // switching away.
+      const cachedEntry = openCatalogs.get(absPath);
+      if (cachedEntry !== undefined) {
+        setActiveCatalogPath(absPath);
+        // Reset per-catalog UI state that does not carry over between catalogs.
+        setFilter("all");
+        setSearch("");
+        setReports({});
+        setBusyIds(new Set());
+        // Select first unit in the newly active catalog.
+        const first =
+          cachedEntry.units.find((u) => u.state === "untranslated") ??
+          cachedEntry.units[0];
+        setSelectedId(first?.id ?? null);
+        // Dirty IDs are per-active-catalog — reset when switching.
+        setDirtyIds(new Set());
+        return;
+      }
+
+      // First open: extract from disk via IPC and populate the cache.
       setLoading(true);
       setError(null);
       try {
         const response = await openCatalogInProject(absPath);
-        setCatalog(response);
+        setOpenCatalogs((prev) => new Map(prev).set(absPath, response));
         setActiveCatalogPath(absPath);
         const first =
           response.units.find((u) => u.state === "untranslated") ??
@@ -186,7 +280,7 @@ export function App() {
         setLoading(false);
       }
     },
-    [activeCatalogPath, flashError],
+    [activeCatalogPath, openCatalogs, flashError],
   );
 
   // ── Edit / translate / save / discard (project-scoped) ───────────────────
@@ -317,7 +411,8 @@ export function App() {
     if (!ok) return;
     try {
       const response = await discardChangesInProject(activeCatalogPath);
-      setCatalog(response);
+      // Legitimate "re-extract from disk" case — replace the cached entry.
+      setOpenCatalogs((prev) => new Map(prev).set(activeCatalogPath, response));
       setDirtyIds(new Set());
       setDirtyCatalogPaths((prev) => {
         const next = new Set(prev);
@@ -568,6 +663,18 @@ export function App() {
 
       {toast && <ToastBanner toast={toast} />}
 
+      {/* Close-project confirmation overlay — shown when there are unsaved
+          catalogs and the user has clicked "Close project". Three actions:
+          Save & Close, Discard & Close, Cancel. */}
+      {closeConfirm.kind === "pending" && (
+        <CloseConfirmOverlay
+          unsavedCount={dirtyCatalogPaths.size}
+          onSaveAndClose={() => void handleSaveAndClose()}
+          onDiscardAndClose={handleDiscardAndClose}
+          onCancel={() => setCloseConfirm({ kind: "none" })}
+        />
+      )}
+
       {/* Discard shortcut handler — accessible via onDiscard (no visible button
           in M4.3a; the per-catalog discard action is wired and callable via
           keyboard in later slices). */}
@@ -581,6 +688,77 @@ export function App() {
 }
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
+
+// Inline modal that guards "Close project" when there are unsaved catalogs.
+// Rendered as a fixed overlay; no native dialog dependency.
+function CloseConfirmOverlay({
+  unsavedCount,
+  onSaveAndClose,
+  onDiscardAndClose,
+  onCancel,
+}: {
+  unsavedCount: number;
+  onSaveAndClose: () => void;
+  onDiscardAndClose: () => void;
+  onCancel: () => void;
+}) {
+  // Dismiss on Escape.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onCancel]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="close-confirm-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div className="w-[360px] rounded-lg border border-border-default bg-bg-elevated shadow-xl p-5 flex flex-col gap-4">
+        <p
+          id="close-confirm-title"
+          className="text-sm font-medium text-fg-primary"
+        >
+          You have{" "}
+          <span className="text-state-proposed font-semibold">
+            {unsavedCount} unsaved {unsavedCount === 1 ? "catalog" : "catalogs"}
+          </span>
+          . What would you like to do?
+        </p>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onSaveAndClose}
+            className="w-full h-8 px-3 rounded-md border border-border-default bg-bg-surface text-xs font-medium text-fg-primary hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            Save all &amp; close
+          </button>
+          <button
+            type="button"
+            onClick={onDiscardAndClose}
+            className="w-full h-8 px-3 rounded-md border border-border-default bg-bg-surface text-xs font-medium text-severity-hard hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            Discard changes &amp; close
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full h-8 px-3 rounded-md border border-border-subtle bg-transparent text-xs font-medium text-fg-tertiary hover:bg-bg-hover hover:border-border-default hover:text-fg-secondary transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ToastBanner({
   toast,
