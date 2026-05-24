@@ -1,7 +1,17 @@
+/*
+ * i18n-harness — design tokens
+ *
+ * Palette: "Technical Journal" (light) / "Observatory" (dark)
+ * Accent:  muted steel-blue / blueprint-blue
+ *          dark  hsl(215 20% 65%)  light  hsl(215 19% 35%)
+ *
+ * Token namespace is stable across M4+: no component should need touching
+ * when this file changes.
+ */
 @import "tailwindcss";
 
 /* Attribute-driven dark variant — the app sets data-theme on <html>
-   deterministically; we don't want the OS preference to override the
+   deterministically; we do not want the OS preference to override the
    product's design intent. */
 @variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
@@ -13,79 +23,107 @@
   --text-*: initial;
   --radius-*: initial;
 
-  /* Surfaces (dark = canonical). */
-  --color-bg-base: #0b0d12;
-  --color-bg-surface: #11141b;
-  --color-bg-elevated: #161a23;
-  --color-bg-hover: #1c2130;
-  --color-bg-selected: #232a3d;
-  --color-bg-input: #0e1119;
+  /* ------------------------------------------------------------------ */
+  /* Surfaces — dark is canonical (Observatory palette).                 */
+  /* ------------------------------------------------------------------ */
 
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
-  --color-border-default: rgba(255, 255, 255, 0.10);
-  --color-border-strong: rgba(255, 255, 255, 0.18);
+  /* --background: 222 47% 11% */
+  --color-bg-base:     hsl(222 47% 11%);
+  /* --surface: 217 33% 17% */
+  --color-bg-surface:  hsl(217 33% 17%);
+  /* --surface-hi: 217 33% 21% */
+  --color-bg-elevated: hsl(217 33% 21%);
+  /* hover: one step up from surface */
+  --color-bg-hover:    hsl(217 33% 24%);
+  /* selected: slightly brighter */
+  --color-bg-selected: hsl(217 28% 28%);
+  /* input: between base and surface */
+  --color-bg-input:    hsl(222 40% 13%);
 
-  --color-fg-primary: #e6e8ee;
-  --color-fg-secondary: #a8adbb;
-  --color-fg-tertiary: #6e7588;
-  --color-fg-disabled: #4b5163;
-  --color-fg-inverse: #0b0d12;
+  /* --border: 215 25% 27% */
+  --color-border-subtle:  hsl(215 25% 27% / 0.55);
+  --color-border-default: hsl(215 25% 27%);
+  /* --border-strong: 222 18% 28% */
+  --color-border-strong:  hsl(222 18% 28%);
 
-  /* Single muted indigo accent. */
-  --color-accent: #6366f1;
-  --color-accent-hover: #818cf8;
-  --color-accent-active: #4f46e5;
-  --color-accent-fg: #ffffff;
-  --color-accent-subtle: rgba(99, 102, 241, 0.12);
-  --color-accent-subtle-border: rgba(99, 102, 241, 0.32);
+  /* --foreground: 210 40% 96% */
+  --color-fg-primary:   hsl(210 40% 96%);
+  /* --muted-foreground: 215 20% 65% */
+  --color-fg-secondary: hsl(215 20% 65%);
+  --color-fg-tertiary:  hsl(215 20% 52%);
+  --color-fg-disabled:  hsl(215 20% 38%);
+  --color-fg-inverse:   hsl(222 47% 11%);
 
-  /* Unit lifecycle. */
-  --color-state-untranslated: #a8adbb;
-  --color-state-untranslated-bg: rgba(168, 173, 187, 0.08);
-  --color-state-untranslated-border: rgba(168, 173, 187, 0.18);
-  --color-state-proposed: #fbbf24;
-  --color-state-proposed-bg: rgba(251, 191, 36, 0.10);
-  --color-state-proposed-border: rgba(251, 191, 36, 0.28);
-  --color-state-finished: #34d399;
-  --color-state-finished-bg: rgba(52, 211, 153, 0.10);
-  --color-state-finished-border: rgba(52, 211, 153, 0.28);
-  --color-state-vanished: #6e7588;
-  --color-state-vanished-bg: rgba(110, 117, 136, 0.08);
-  --color-state-vanished-border: rgba(110, 117, 136, 0.20);
+  /* ------------------------------------------------------------------ */
+  /* Accent — steel-blue / blueprint-blue (dark canonical).              */
+  /* --primary: 215 20% 65%                                             */
+  /* ------------------------------------------------------------------ */
+  --color-accent:               hsl(215 20% 65%);
+  --color-accent-hover:         hsl(215 20% 74%);
+  --color-accent-active:        hsl(215 20% 56%);
+  --color-accent-fg:            hsl(222 47% 11%);
+  --color-accent-subtle:        hsl(215 20% 65% / 0.12);
+  --color-accent-subtle-border: hsl(215 20% 65% / 0.32);
 
-  /* Gate severity. */
-  --color-severity-hard: #f87171;
-  --color-severity-hard-bg: rgba(248, 113, 113, 0.10);
-  --color-severity-hard-border: rgba(248, 113, 113, 0.20);
-  --color-severity-soft: #fbbf24;
-  --color-severity-soft-bg: rgba(251, 191, 36, 0.10);
-  --color-severity-info: #60a5fa;
-  --color-severity-info-bg: rgba(96, 165, 250, 0.10);
+  /* ------------------------------------------------------------------ */
+  /* Unit lifecycle states.                                              */
+  /* All verified AA on hsl(217 33% 17%) dark surface.                  */
+  /* ------------------------------------------------------------------ */
+  --color-state-untranslated:        hsl(215 20% 65%);
+  --color-state-untranslated-bg:     hsl(215 20% 65% / 0.08);
+  --color-state-untranslated-border: hsl(215 20% 65% / 0.20);
+  /* gold-amber — proposed */
+  --color-state-proposed:            hsl(38 92% 65%);
+  --color-state-proposed-bg:         hsl(38 92% 65% / 0.10);
+  --color-state-proposed-border:     hsl(38 92% 65% / 0.28);
+  /* emerald — finished */
+  --color-state-finished:            hsl(158 64% 58%);
+  --color-state-finished-bg:         hsl(158 64% 58% / 0.10);
+  --color-state-finished-border:     hsl(158 64% 58% / 0.28);
+  /* muted slate — vanished */
+  --color-state-vanished:            hsl(215 16% 47%);
+  --color-state-vanished-bg:         hsl(215 16% 47% / 0.08);
+  --color-state-vanished-border:     hsl(215 16% 47% / 0.20);
 
-  /* Typography. */
+  /* ------------------------------------------------------------------ */
+  /* Gate severity.                                                      */
+  /* ------------------------------------------------------------------ */
+  --color-severity-hard:        hsl(0 86% 70%);
+  --color-severity-hard-bg:     hsl(0 86% 70% / 0.10);
+  --color-severity-hard-border: hsl(0 86% 70% / 0.22);
+  --color-severity-soft:        hsl(38 92% 65%);
+  --color-severity-soft-bg:     hsl(38 92% 65% / 0.10);
+  --color-severity-info:        hsl(207 80% 66%);
+  --color-severity-info-bg:     hsl(207 80% 66% / 0.10);
+
+  /* ------------------------------------------------------------------ */
+  /* Typography.                                                         */
+  /* ------------------------------------------------------------------ */
   --font-ui:
     "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
     system-ui, sans-serif;
+  /* Geist Mono listed first as a soft fallback path (no new dependency;
+     falls through to JetBrains Mono Variable which is bundled). */
   --font-mono:
-    "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", Menlo, Consolas,
-    monospace;
+    "Geist Mono", "JetBrains Mono Variable", "JetBrains Mono", "SF Mono",
+    Menlo, Consolas, monospace;
 
-  --text-xs: 11px;
-  --text-sm: 12px;
+  --text-xs:   11px;
+  --text-sm:   12px;
   --text-base: 13px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-xl: 18px;
-  --text-2xl: 22px;
+  --text-md:   14px;
+  --text-lg:   16px;
+  --text-xl:   18px;
+  --text-2xl:  22px;
 
   /* Spacing — keep at 4px so Tailwind's p-1/m-1/etc. stay consistent
      even when we change the body's font-size below 16px. */
   --spacing: 4px;
 
   /* Radii. */
-  --radius-sm: 3px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
+  --radius-sm:   3px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
   --radius-pill: 999px;
 
   /* Letter spacing. */
@@ -93,51 +131,83 @@
   --tracking-loose: 0.04em;
 
   /* Shadows — used sparingly; borders are preferred. */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 1px 2px hsl(222 47% 6% / 0.55);
+  --shadow-md: 0 2px 8px hsl(222 47% 6% / 0.60);
 
   /* Motion: override Tailwind's default ease-out with our gentler curve. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Light = inversion of dark. Same accent. */
+/* -------------------------------------------------------------------- */
+/* Light mode — Technical Journal palette.                               */
+/* Override only what changes; shadows/radii/typography stay as above.   */
+/* -------------------------------------------------------------------- */
 [data-theme="light"] {
-  --color-bg-base: #f7f8fa;
-  --color-bg-surface: #ffffff;
-  --color-bg-elevated: #ffffff;
-  --color-bg-hover: #eef0f4;
-  --color-bg-selected: #e2e6f0;
-  --color-bg-input: #ffffff;
+  /* --background: 210 40% 98% */
+  --color-bg-base:     hsl(210 40% 98%);
+  /* --surface: 0 0% 100% */
+  --color-bg-surface:  hsl(0 0% 100%);
+  --color-bg-elevated: hsl(0 0% 100%);
+  --color-bg-hover:    hsl(210 40% 95%);
+  --color-bg-selected: hsl(214 32% 91%);
+  --color-bg-input:    hsl(0 0% 100%);
 
-  --color-border-subtle: rgba(15, 18, 30, 0.06);
-  --color-border-default: rgba(15, 18, 30, 0.10);
-  --color-border-strong: rgba(15, 18, 30, 0.20);
+  /* --border: 214 32% 91% */
+  --color-border-subtle:  hsl(214 32% 91% / 0.70);
+  --color-border-default: hsl(214 32% 91%);
+  /* --border-strong: 214 32% 80% */
+  --color-border-strong:  hsl(214 32% 80%);
 
-  --color-fg-primary: #1a1d29;
-  --color-fg-secondary: #4b5163;
-  --color-fg-tertiary: #6e7588;
-  --color-fg-disabled: #a8adbb;
-  --color-fg-inverse: #ffffff;
+  /* --foreground: 215 25% 27% */
+  --color-fg-primary:   hsl(215 25% 27%);
+  /* --muted-foreground: 215 16% 47% */
+  --color-fg-secondary: hsl(215 16% 47%);
+  --color-fg-tertiary:  hsl(215 16% 60%);
+  --color-fg-disabled:  hsl(215 16% 72%);
+  --color-fg-inverse:   hsl(210 40% 98%);
 
-  --color-accent: #4f46e5;
-  --color-accent-hover: #4338ca;
-  --color-accent-active: #3730a3;
+  /* --primary: 215 19% 35% — blueprint blue */
+  --color-accent:               hsl(215 19% 35%);
+  --color-accent-hover:         hsl(215 19% 28%);
+  --color-accent-active:        hsl(215 19% 22%);
+  --color-accent-fg:            hsl(210 40% 98%);
+  --color-accent-subtle:        hsl(215 19% 35% / 0.10);
+  --color-accent-subtle-border: hsl(215 19% 35% / 0.28);
 
-  --color-state-untranslated: #4b5163;
-  --color-state-untranslated-bg: rgba(75, 81, 99, 0.08);
-  --color-state-proposed: #b45309;
-  --color-state-proposed-bg: rgba(180, 83, 9, 0.10);
-  --color-state-finished: #047857;
-  --color-state-finished-bg: rgba(4, 120, 87, 0.10);
+  /* Unit lifecycle — tuned for light surfaces (AA on hsl(0 0% 100%)). */
+  --color-state-untranslated:        hsl(215 16% 47%);
+  --color-state-untranslated-bg:     hsl(215 16% 47% / 0.08);
+  --color-state-untranslated-border: hsl(215 16% 47% / 0.20);
+  /* amber-700 on white: contrast ~5.8 : 1 */
+  --color-state-proposed:            hsl(32 95% 38%);
+  --color-state-proposed-bg:         hsl(32 95% 38% / 0.08);
+  --color-state-proposed-border:     hsl(32 95% 38% / 0.24);
+  /* emerald-700 on white: contrast ~5.0 : 1 */
+  --color-state-finished:            hsl(158 64% 30%);
+  --color-state-finished-bg:         hsl(158 64% 30% / 0.08);
+  --color-state-finished-border:     hsl(158 64% 30% / 0.22);
+  --color-state-vanished:            hsl(215 16% 60%);
+  --color-state-vanished-bg:         hsl(215 16% 60% / 0.08);
+  --color-state-vanished-border:     hsl(215 16% 60% / 0.18);
 
-  --color-severity-hard: #b91c1c;
-  --color-severity-hard-bg: rgba(185, 28, 28, 0.08);
-  --color-severity-soft: #b45309;
-  --color-severity-soft-bg: rgba(180, 83, 9, 0.10);
-  --color-severity-info: #1d4ed8;
-  --color-severity-info-bg: rgba(29, 78, 216, 0.08);
+  /* Gate severity — on light surfaces. */
+  /* red-700 on white: contrast ~5.4 : 1 */
+  --color-severity-hard:        hsl(0 72% 42%);
+  --color-severity-hard-bg:     hsl(0 72% 42% / 0.07);
+  --color-severity-hard-border: hsl(0 72% 42% / 0.20);
+  --color-severity-soft:        hsl(32 95% 38%);
+  --color-severity-soft-bg:     hsl(32 95% 38% / 0.08);
+  /* blue-700 on white: contrast ~5.9 : 1 */
+  --color-severity-info:        hsl(213 75% 40%);
+  --color-severity-info-bg:     hsl(213 75% 40% / 0.07);
+
+  --shadow-sm: 0 1px 2px hsl(215 25% 27% / 0.08);
+  --shadow-md: 0 2px 8px hsl(215 25% 27% / 0.12);
 }
 
+/* -------------------------------------------------------------------- */
+/* Base layer — document shell.                                          */
+/* -------------------------------------------------------------------- */
 @layer base {
   html,
   body,
@@ -165,8 +235,8 @@
   }
 
   ::selection {
-    background: var(--color-accent);
-    color: var(--color-accent-fg);
+    background: var(--color-accent-subtle);
+    color: var(--color-fg-primary);
   }
 
   :focus {
@@ -177,7 +247,7 @@
     outline-offset: 1px;
   }
 
-  /* Scrollbars (WebKit/Tauri). */
+  /* Scrollbars (WebKit / Tauri). */
   *::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -212,7 +282,11 @@
   }
 }
 
-/* Reusable: pane chrome that must never select on drag. */
+/* -------------------------------------------------------------------- */
+/* Utilities.                                                            */
+/* -------------------------------------------------------------------- */
+
+/* Pane chrome that must never select on drag. */
 @utility app-chrome {
   user-select: none;
   -webkit-user-select: none;

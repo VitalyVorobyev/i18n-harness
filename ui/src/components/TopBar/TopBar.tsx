@@ -1,4 +1,6 @@
 import { cn } from "../../lib/cn";
+import type { Theme } from "../../lib/theme";
+import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
 export type View = "catalog" | "glossary" | "metrics";
 
@@ -13,6 +15,8 @@ interface Props {
   onOpen: () => void;
   onSave: () => void;
   onDiscard: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
 }
 
 export function TopBar({
@@ -26,6 +30,8 @@ export function TopBar({
   onOpen,
   onSave,
   onDiscard,
+  theme,
+  onToggleTheme,
 }: Props) {
   const dirty = dirtyCount > 0;
   const catalogView = view === "catalog";
@@ -53,10 +59,11 @@ export function TopBar({
         <span className="font-mono text-xs text-fg-tertiary tracking-loose">
           v{version}
         </span>
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} className="ml-1" />
         <div
           role="tablist"
           aria-label="View"
-          className="ml-3 flex items-center gap-1"
+          className="ml-2 flex items-center gap-1"
         >
           <TabButton
             active={catalogView}

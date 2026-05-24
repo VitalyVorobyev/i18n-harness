@@ -18,6 +18,7 @@ import {
   translateUnit,
   updateUnitTarget,
 } from "./lib/tauri";
+import { useTheme } from "./lib/theme";
 import type {
   CatalogResponse,
   GateReport,
@@ -34,6 +35,7 @@ interface Toast {
 }
 
 export function App() {
+  const [theme, setTheme] = useTheme();
   const [version, setVersion] = useState("0.0.0");
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [selectedId, setSelectedId] = useState<UnitId | null>(null);
@@ -249,6 +251,8 @@ export function App() {
         onOpen={openFile}
         onSave={onSave}
         onDiscard={onDiscard}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
       {/*
         Both views stay mounted so their local state (open file, edits,
