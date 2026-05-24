@@ -282,6 +282,37 @@ fn v2_confidence_out_of_bounds_is_malformed_response() {
     }
 }
 
+/// A singular unit served an array `translation` field must surface as
+/// `MalformedResponse` (not get an invalid `Plural` target written into
+/// the singular slot). Mirrors the P1 codex finding on the initial
+/// M4.6.1 commit.
+#[test]
+fn v2_plural_payload_for_singular_unit_is_malformed_response() {
+    let model_response = r#"{"translation":["first","second"],"confidence":0.9}"#;
+    let (host, _h) = spawn_mock_server(vec![ok_response(&ollama_envelope(model_response))]);
+
+    let backend = OllamaBackend::new()
+        .unwrap()
+        .with_host(host)
+        .with_timeout(Duration::from_secs(5));
+
+    let batch = make_batch(vec![singular_unit("u", "Hello")]);
+    let outcomes = backend.translate_batch(&batch, de_de(), None).unwrap();
+
+    match &outcomes[0] {
+        TranslationOutcome::Failed {
+            failure_kind,
+            retryable,
+            reason,
+        } => {
+            assert_eq!(*failure_kind, FailureKind::MalformedResponse);
+            assert!(!retryable);
+            assert!(reason.contains("v2-shape-mismatch"), "reason: {reason}");
+        }
+        other => panic!("expected Failed MalformedResponse, got {other:?}"),
+    }
+}
+
 /// Selecting the v1 template via `with_template_v1` makes the backend
 /// accept plain-text responses again — backwards-compatible behaviour
 /// for the CLI's `--prompt` override path.

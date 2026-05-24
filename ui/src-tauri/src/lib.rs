@@ -1402,27 +1402,36 @@ fn translate_unit_in_project(
 
     let report = i18n_harness_gate::validate(&merged, locale, None);
 
+    // M4.6.1: flagged units land in the review queue automatically. Set
+    // `merged.review_status` on the in-memory unit BEFORE writing to the
+    // catalog slot and BEFORE returning, so the UI sees the queued state
+    // immediately rather than only after the next review-map fold. The
+    // durable `review.jsonl` append happens after we drop the
+    // project_catalogs lock, to keep the lock-ordering convention
+    // (project before project_catalogs is the convention; we already
+    // released project before acquiring project_catalogs and the durable
+    // write re-takes project after dropping project_catalogs).
+    let needs_review = !merged.flags.is_empty();
+    if needs_review {
+        merged.review_status = Some(ReviewStatus::NeedsReview);
+    }
+
     if let Some(slot) = entry.catalog.find_unit_mut(&id) {
         *slot = merged.clone();
     }
     entry.dirty = true;
 
-    // M4.6.1: flagged units land in the review queue automatically. We
-    // only touch review_status when the model attached at least one
-    // semantic flag — empty-flags units stay at their previous status
-    // (None for a freshly-translated unit) so the translator's Accept
-    // action in M4.6.2 can drive the Proposed→Reviewed transition.
-    if !merged.flags.is_empty() {
-        // Drop the project_catalogs lock before acquiring the project
-        // lock to keep the existing lock-ordering convention
-        // (project_catalogs after project).
+    if needs_review {
         let source_hash = merged.source_hash.clone().unwrap_or_default();
         drop(store);
         let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
         if let Some(project) = project_guard.as_ref() {
-            // Best-effort: a failure here would only affect the review
-            // queue; the merged translation is already persisted in the
-            // catalog store, so we surface the error to the caller.
+            // A failure here would leave the in-memory unit reporting
+            // NeedsReview while review.jsonl is unaware of the change.
+            // We surface the error to the caller; the next translate will
+            // recompute and re-attempt. Empty-flag units never reach this
+            // branch (see `needs_review` above), so the No-op-Save-All
+            // path is unchanged.
             project
                 .set_review_status(
                     &abs,
