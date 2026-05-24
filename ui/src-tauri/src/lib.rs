@@ -26,7 +26,7 @@ pub struct AppState {
     catalogs: Mutex<HashMap<PathBuf, Catalog>>,
 }
 
-/// Wire-format response from [`open_catalog`].
+/// Wire-format response from the `open_catalog` Tauri command.
 #[derive(Debug, Serialize)]
 pub struct CatalogResponse {
     /// Absolute path the catalog was read from; also the handle for
