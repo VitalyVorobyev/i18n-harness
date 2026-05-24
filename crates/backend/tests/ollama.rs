@@ -329,9 +329,9 @@ fn plural_unit_zh_hans_arity_1() {
     }
 }
 
-/// 6d. Trip-wire on the model default. The first M2 release shipped the
-///     wrong constant (`gemma3:4b`, which is Gemma *3*). Pinning the prefix
-///     makes regression to a non-Gemma-4 tag a compile-failure-equivalent.
+/// 6d. Trip-wire on the model default: must be a Gemma 4 family tag. A
+///     bump to a different Gemma 4 size (`gemma4:e2b`, `gemma4:e4b`, …) is
+///     fine; silently dropping to another family is not.
 #[test]
 fn default_model_is_gemma_4_family() {
     assert!(
