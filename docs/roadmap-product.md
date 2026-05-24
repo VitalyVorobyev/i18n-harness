@@ -189,30 +189,65 @@ changes when the source text changes.
 ### M4.2 — Tauri command surface refactor + CLI `init` / `open`
 
 Replace the file-centric `open_catalog` / `save_catalog` API with a
-project-scoped one:
+project-scoped one. Lands in four sub-slices so each PR stays small
+enough to review in one sitting.
 
-- `open_project(root) -> ProjectSummary`
+#### M4.2a — Open-project surface + CLI `init` / `open` ✓
+
+Strictly additive: existing file-centric commands keep working so the
+M3 UI continues to function while M4.3 (the new shell) is in flight.
+
+Tauri commands:
+
+- `open_project(root) -> { summary: ProjectSummary, warnings }`
 - `discover_project(root) -> DraftManifest`
-- `save_manifest(manifest)`
+- `create_project(root, draft) -> { summary, warnings }`
+- `close_project()`
+- `current_project_summary() -> Option<ProjectSummary>`
 - `list_catalogs() -> Vec<CatalogRef>`
+- `save_manifest()` — persists the in-memory `toml_edit` document
+  that `Project::add_catalog` / `update_locale` / `set_backend`
+  mutate.
+
+Side effects: opening a project pins its glossary (if declared) into
+the existing glossary slot so `translate_unit` benefits immediately,
+and clears the stand-alone catalog slot so the two surfaces never
+disagree about which file is "active".
+
+CLI additions:
+
+- `harness init <dir>` — discover catalogs under `<dir>` and write
+  `i18n-harness.toml` (refuses to overwrite without `--force`).
+- `harness open <dir>` — load and validate a manifest, print summary.
+
+#### M4.2b — Per-catalog edit through project (planned)
+
 - `open_catalog_in_project(path) -> CatalogResponse`
 - `save_catalog_in_project(path)`
 - `save_all_dirty() -> Vec<SaveSummary>`
-- `translate_unit(catalog_path, unit_id)` — now threads the project's
-  glossary, backend config, and per-locale prompt override.
+- `apply_review_state(path)` — folds `review.jsonl` into the open
+  units (uses `Project::apply_review_state` from M4.1.5).
+
+#### M4.2c — Translate + correction recording (planned)
+
+- `translate_unit(catalog_path, unit_id)` — re-routed through the
+  project so it picks up glossary, backend config, and the
+  per-locale prompt override.
 - `translate_batch(catalog_path, scope, cancel_token)` — streams
   progress via Tauri events.
-- `record_correction(catalog_path, unit_id, mt_proposal, human_target)`
+- `record_correction(catalog_path, unit_id, mt_proposal,
+  human_target)`
 - `list_corrections(filters)`, `promote_to_curated(correction_id)`
+- `set_review_status(catalog_path, unit_id, status)` IPC.
+
+#### M4.2d — Evaluation + tuning bundle (planned, depends on M4.9)
+
 - `run_evaluation(prompt_path?) -> EvaluationReport`
 - `export_tuning_bundle() -> Path`
 
-The old `open_catalog` / `save_catalog` stay as thin shims that
-synthesize a single-catalog ephemeral project (so power-user
-file-open paths and the existing CLI still work).
-
-CLI additions: `harness init <dir>` (writes a draft manifest after
-auto-discovery), `harness open <dir>` (validates a manifest).
+The old `open_catalog` / `save_catalog` commands stay as thin shims
+through M4.2b/c so power-user file-open paths and the existing CLI
+still work.
 
 ### M4.3 — UI shell: sidebar + locale chips + view tabs + home screen
 

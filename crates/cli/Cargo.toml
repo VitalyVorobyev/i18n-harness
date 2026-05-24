@@ -30,6 +30,7 @@ i18n-harness-backend.workspace = true
 i18n-harness-catalog.workspace = true
 i18n-harness-adapter-qt.workspace = true
 i18n-harness-adapter-react.workspace = true
+i18n-harness-project.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

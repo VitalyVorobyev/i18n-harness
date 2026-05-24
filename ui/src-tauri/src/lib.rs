@@ -17,6 +17,7 @@ use i18n_harness_core::{Target, Unit, UnitId, UnitState};
 use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
+use i18n_harness_project::{CatalogRef, DraftManifest, Project, ProjectSummary};
 use serde::{Deserialize, Serialize};
 
 /// Process-wide state shared across Tauri commands.
@@ -27,16 +28,21 @@ use serde::{Deserialize, Serialize};
 /// round-trip on save, so it lives here rather than crossing the IPC
 /// bridge on every command.
 ///
-/// The glossary slot is populated by `load_glossary`. Once set, it is
-/// threaded into every `translate_unit` call so MT proposals respect
-/// project glossary terms — without this, the glossary editor would
-/// be cosmetic. Tactical: when M4.1 introduces a project model, this
-/// slot moves to `Project` and the lifetime is project-scoped instead
-/// of session-scoped.
+/// The glossary slot is populated by `load_glossary` or, in M4.2a, as a
+/// side effect of `open_project` when the project declares one. Once set,
+/// it is threaded into every `translate_unit` call so MT proposals respect
+/// project glossary terms.
+///
+/// The project slot (M4.2a) holds the currently-open project. It coexists
+/// with the file-centric catalog slot: opening a project doesn't auto-open
+/// any catalog, and opening a stand-alone catalog leaves the project slot
+/// untouched. The two surfaces converge in M4.2b when per-catalog edits
+/// route through the project.
 #[derive(Default)]
 pub struct AppState {
     catalog: Mutex<Option<OpenCatalog>>,
     glossary: Mutex<Option<Glossary>>,
+    project: Mutex<Option<Project>>,
 }
 
 /// The currently-open catalog plus the absolute path it was loaded
@@ -669,6 +675,148 @@ fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
     toml::to_string(&wire).map_err(|e| format!("toml serialize: {e}"))
 }
 
+// ── Project commands (M4.2a) ─────────────────────────────────────────────────
+
+/// Wire response for `open_project` / `create_project`. Carries the summary
+/// the UI binds against plus any non-fatal warnings (unknown locale ids,
+/// glossary parse warnings). Hard failures come back as `Err(String)`.
+#[derive(Debug, Serialize)]
+pub struct ProjectOpenResponse {
+    /// Compact project summary safe to send across the IPC bridge.
+    pub summary: ProjectSummary,
+    /// Human-readable warning strings (`UnknownLocale`, `Glossary(...)`).
+    /// Empty when the project loads cleanly.
+    pub warnings: Vec<String>,
+}
+
+/// Open an existing project rooted at `root`.
+///
+/// Stashes the project in [`AppState`]; replaces any previously-open project
+/// and clears the stand-alone catalog slot (the UI's old single-file session
+/// is closed when a project takes over). As a side effect, if the project
+/// declares a glossary, that glossary is also pinned in the glossary slot so
+/// existing `translate_unit` calls benefit immediately.
+#[tauri::command]
+fn open_project(
+    root: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProjectOpenResponse, String> {
+    let root_path = PathBuf::from(&root);
+    let (project, warnings) = Project::open(&root_path).map_err(|e| e.to_string())?;
+    let summary = project.summary();
+    let glossary_for_slot = project.glossary().cloned();
+
+    {
+        let mut current = state.project.lock().map_err(project_lock_poisoned)?;
+        *current = Some(project);
+    }
+    {
+        let mut g = state.glossary.lock().map_err(glossary_lock_poisoned)?;
+        *g = glossary_for_slot;
+    }
+    {
+        let mut c = state.catalog.lock().map_err(lock_poisoned)?;
+        *c = None;
+    }
+
+    Ok(ProjectOpenResponse {
+        summary,
+        warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
+    })
+}
+
+/// Discover a project from a directory that has no manifest yet.
+///
+/// Returns the draft for the UI to confirm; never writes anything. The UI
+/// follows up with `create_project` once the user has reviewed the draft.
+#[tauri::command]
+fn discover_project(root: String) -> Result<DraftManifest, String> {
+    let root_path = PathBuf::from(&root);
+    Project::discover(&root_path).map_err(|e| e.to_string())
+}
+
+/// Write `<root>/i18n-harness.toml` from `draft` and open the result.
+///
+/// Side effects mirror `open_project`: stashes the project, pre-populates the
+/// glossary slot when declared, and clears the stand-alone catalog slot.
+#[tauri::command]
+fn create_project(
+    root: String,
+    draft: DraftManifest,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProjectOpenResponse, String> {
+    let root_path = PathBuf::from(&root);
+    let (project, warnings) =
+        Project::create_from_draft(&root_path, draft).map_err(|e| e.to_string())?;
+    let summary = project.summary();
+    let glossary_for_slot = project.glossary().cloned();
+
+    {
+        let mut current = state.project.lock().map_err(project_lock_poisoned)?;
+        *current = Some(project);
+    }
+    {
+        let mut g = state.glossary.lock().map_err(glossary_lock_poisoned)?;
+        *g = glossary_for_slot;
+    }
+    {
+        let mut c = state.catalog.lock().map_err(lock_poisoned)?;
+        *c = None;
+    }
+
+    Ok(ProjectOpenResponse {
+        summary,
+        warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
+    })
+}
+
+/// Drop the currently-open project. The stand-alone catalog slot is also
+/// cleared so the next "open file" starts from a clean slate.
+#[tauri::command]
+fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    *state.project.lock().map_err(project_lock_poisoned)? = None;
+    *state.glossary.lock().map_err(glossary_lock_poisoned)? = None;
+    *state.catalog.lock().map_err(lock_poisoned)? = None;
+    Ok(())
+}
+
+/// Return the currently-open project's summary, or `None` if no project is
+/// open. The UI calls this on launch to rehydrate (when persistence lands)
+/// or to detect whether the home screen should be shown.
+#[tauri::command]
+fn current_project_summary(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<ProjectSummary>, String> {
+    let current = state.project.lock().map_err(project_lock_poisoned)?;
+    Ok(current.as_ref().map(Project::summary))
+}
+
+/// List catalogs declared in the currently-open project.
+///
+/// Errors with `"no project open"` when the project slot is empty — the UI
+/// should gate this command behind a successful `open_project`.
+#[tauri::command]
+fn list_catalogs(state: tauri::State<'_, AppState>) -> Result<Vec<CatalogRef>, String> {
+    let current = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = current.as_ref().ok_or_else(no_project)?;
+    Ok(project.catalogs().to_vec())
+}
+
+/// Persist the manifest's in-memory `toml_edit` document to disk.
+///
+/// Mutations applied through `Project::add_catalog`, `update_locale`,
+/// `set_backend`, etc. update the document in memory; this command writes
+/// the document atomically. Settings-tab edits in the UI will call this
+/// after each batch of mutations.
+#[tauri::command]
+fn save_manifest(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let current = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = current.as_ref().ok_or_else(no_project)?;
+    project.save_manifest().map_err(|e| e.to_string())
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────────────
+
 fn build_catalog_response(path: &std::path::Path, catalog: &Catalog) -> CatalogResponse {
     CatalogResponse {
         path: path.to_string_lossy().into_owned(),
@@ -690,8 +838,18 @@ fn glossary_lock_poisoned(
     "glossary state lock poisoned".to_string()
 }
 
+fn project_lock_poisoned(
+    _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Project>>>,
+) -> String {
+    "project state lock poisoned".to_string()
+}
+
 fn no_catalog() -> String {
     "no catalog open".to_string()
+}
+
+fn no_project() -> String {
+    "no project open".to_string()
 }
 
 /// Entry point invoked from `main.rs` (and from the mobile entry point
@@ -721,6 +879,13 @@ pub fn run() {
         load_glossary,
         save_glossary,
         load_metrics,
+        open_project,
+        discover_project,
+        create_project,
+        close_project,
+        current_project_summary,
+        list_catalogs,
+        save_manifest,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -734,6 +899,13 @@ pub fn run() {
         load_glossary,
         save_glossary,
         load_metrics,
+        open_project,
+        discover_project,
+        create_project,
+        close_project,
+        current_project_summary,
+        list_catalogs,
+        save_manifest,
     ]);
 
     builder
