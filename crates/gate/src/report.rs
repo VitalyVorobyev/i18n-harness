@@ -54,7 +54,15 @@ impl GateReport {
     /// Build a report from the unit id and a vector of findings.
     ///
     /// The `flags` summary is computed automatically.
-    pub(crate) fn from_findings(unit_id: UnitId, findings: Vec<Finding>) -> Self {
+    ///
+    /// # Public-API note
+    ///
+    /// Normal callers obtain `GateReport`s by calling [`crate::validate`];
+    /// this constructor is exposed so external tests (e.g., schema-stability
+    /// snapshots of the metrics writer) can build fixtures without driving
+    /// the full gate. Production code paths should continue to use
+    /// `validate`.
+    pub fn from_findings(unit_id: UnitId, findings: Vec<Finding>) -> Self {
         let flags: FlagSet = findings.iter().map(|f| f.flag).collect();
         Self {
             unit_id,

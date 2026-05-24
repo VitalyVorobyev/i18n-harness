@@ -54,6 +54,9 @@ quick-xml = "0.38"
 # is fine because those are already workspace deps with matching versions.
 ureq = { version = "3", features = ["json"] }
 
+# Cryptographic hash (resume-key file-content hash; metrics correlation).
+sha2 = "0.10"
+
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
