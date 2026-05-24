@@ -3,6 +3,7 @@ import { CatalogList } from "./components/CatalogList/CatalogList";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { HomeScreen, pushRecent } from "./components/HomeScreen/HomeScreen";
 import { Inspector } from "./components/Inspector/Inspector";
+import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
@@ -24,6 +25,7 @@ import { useTheme } from "./lib/theme";
 import type {
   CatalogResponse,
   GateReport,
+  ProjectOpenResponse,
   ProjectSummary,
   TargetEdit,
   Unit,
@@ -179,6 +181,20 @@ export function App() {
     setError(null);
     setCloseConfirm({ kind: "none" });
   }, []);
+
+  // Called after every Settings-view mutation. Updates the in-memory summary so
+  // all views reflect the new manifest state without a round trip.
+  const handleProjectMutation = useCallback(
+    (response: ProjectOpenResponse) => {
+      setMode({ kind: "project", summary: response.summary });
+      if (response.warnings.length > 0) {
+        flashInfo(
+          `Manifest updated. Warnings: ${response.warnings.join("; ")}`,
+        );
+      }
+    },
+    [flashInfo],
+  );
 
   // Internal: perform the close without any dirty-state checks.
   const _doCloseProject = useCallback(async () => {
@@ -636,29 +652,24 @@ export function App() {
                   <code className="font-mono text-xs bg-bg-surface px-1 py-0.5 rounded border border-border-subtle">
                     glossary.toml
                   </code>{" "}
-                  and update the manifest in Settings (M4.3c).
+                  and update the manifest in Settings.
                 </p>
               </div>
             )}
           </div>
 
-          {/* Settings view — placeholder for M4.3c */}
+          {/* Settings view — M4.3c manifest editor */}
           <div
             className={
-              projectView === "settings"
-                ? "flex-1 flex items-center justify-center"
-                : "hidden"
+              projectView === "settings" ? "flex-1 flex min-h-0" : "hidden"
             }
           >
-            <div className="text-center">
-              <p className="text-sm font-medium text-fg-secondary">
-                Project Settings
-              </p>
-              <p className="mt-1 text-xs text-fg-disabled">
-                Coming in M4.3c — manifest editor, locale config, backend
-                selection.
-              </p>
-            </div>
+            <ProjectSettings
+              summary={summary}
+              onMutation={handleProjectMutation}
+              flashError={flashError}
+              flashInfo={flashInfo}
+            />
           </div>
 
           {/* Quality view — placeholder for M4.3d */}

@@ -244,6 +244,20 @@ export interface GlossaryConfig {
   path: string;
 }
 
+// CatalogEntry mirrors crates/project/src/manifest.rs — the input shape for
+// add_catalog_to_project. path is PathBuf in Rust, serialized as a string.
+export interface CatalogEntry {
+  path: string;
+  format: CatalogFormat;
+  locale: string;
+}
+
+// PromptsConfig mirrors crates/project/src/manifest.rs.
+// template_dir is PathBuf in Rust, serialized as a string.
+export interface PromptsConfig {
+  template_dir: string;
+}
+
 // CatalogRef mirrors crates/project/src/project.rs.
 // Fields: absolute_path, manifest_path, format, locale, status.
 // No serde(rename_all) on the struct — field names are snake_case.
