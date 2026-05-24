@@ -7,15 +7,20 @@ import {
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
 import type {
+  BackendConfig,
+  CatalogEntry,
   CatalogResponse,
   DraftManifest,
+  GlossaryConfig,
   GlossaryLoadResponse,
   GlossaryPayload,
   GlossarySaveResponse,
+  LocaleConfig,
   LocaleInfo,
   MetricsResponse,
   ProjectOpenResponse,
   ProjectSummary,
+  PromptsConfig,
   SaveAllDirtyResponse,
   SaveSummary,
   TargetEdit,
@@ -229,6 +234,79 @@ export async function pickProjectFolder(): Promise<string | null> {
   const selected = await openDialog({
     multiple: false,
     directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+// ── M4.3c — Settings view mutation wrappers ───────────────────────────────────
+
+export async function addCatalogToProject(
+  entry: CatalogEntry,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("add_catalog_to_project", { entry });
+}
+
+export async function removeCatalogFromProject(
+  path: string,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("remove_catalog_from_project", {
+    path,
+  });
+}
+
+export async function updateLocaleInProject(
+  id: string,
+  config: LocaleConfig,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("update_locale_in_project", {
+    id,
+    config,
+  });
+}
+
+export async function removeLocaleFromProject(
+  id: string,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("remove_locale_from_project", {
+    id,
+  });
+}
+
+export async function setBackendInProject(
+  config: BackendConfig,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("set_backend_in_project", {
+    config,
+  });
+}
+
+export async function setGlossaryInProject(
+  config: GlossaryConfig,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("set_glossary_in_project", {
+    config,
+  });
+}
+
+export async function setPromptsInProject(
+  config: PromptsConfig,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("set_prompts_in_project", {
+    config,
+  });
+}
+
+export async function pickCatalogFileForProject(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: false,
+    filters: [
+      {
+        name: "Catalogs",
+        extensions: ["ts", "po", "json"],
+      },
+    ],
   });
   if (typeof selected === "string") return selected;
   return null;

@@ -279,8 +279,8 @@ sr-only text) are already rendered by the sidebar; the dirty set is threaded
 from App.tsx. Sibling quick-switch: when exactly one locale chip is active and
 the user is viewing a catalog for a different locale, the filter change also
 switches to the sibling catalog for that locale (stem heuristic: strip trailing
-`_<locale>` from the manifest-relative basename). M4.3c (Settings view) and
-M4.3d (Quality view) follow.
+`_<locale>` from the manifest-relative basename). M4.3c (Settings view) is
+shipped; M4.3d (Quality view) follows.
 
 New layout:
 
@@ -308,6 +308,25 @@ New layout:
   catalogs, backend, prompts). Translate is the default.
 - **Project settings** is its own view: edit locales, add/remove
   catalogs, set backend, edit prompt template path.
+
+#### M4.3c — Settings view (manifest editor) ✓ shipped
+
+Seven Tauri mutation commands (`add_catalog_to_project`,
+`remove_catalog_from_project`, `update_locale_in_project`,
+`remove_locale_from_project`, `set_backend_in_project`,
+`set_glossary_in_project`, `set_prompts_in_project`) — each acquires
+`&mut Project`, calls the library method, calls `save_manifest()`, and
+returns a fresh `ProjectOpenResponse` so the UI re-renders without a
+second round trip. `remove_catalog_from_project` also evicts the removed
+catalog from the `project_catalogs` store.
+
+UI: `ui/src/components/ProjectSettings/ProjectSettings.tsx` — four cards
+(Project meta read-only, Locales table with inline add/remove, Catalogs
+table with file-picker "Add catalog" flow, Backend form). Every mutation
+auto-persists; a transient "Saved" badge confirms each write. App.tsx
+wires `handleProjectMutation` to update the in-memory `summary` after
+each command. Directly addresses user feedback #6 (add/remove `.ts` files
+from a project without editing TOML by hand).
 
 ### M4.4 — PO serializer
 
