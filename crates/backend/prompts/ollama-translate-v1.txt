@@ -7,9 +7,15 @@ Task: translate ONE user-interface string into {locale}, using the {register} re
 Rules:
 - Output the translated string ONLY. No quotes, no commentary, no labels.
 - Preserve EXACTLY, untranslated: placeholders (%1, %2, %n, %s, %1$d, {count}, {{var}}),
-  markup tags (<b>...</b>, <a href="...">), escape/entity sequences (\n, \t, &amp;, &lt;),
+  markup tag DELIMITERS (the `<b>`, `</b>`, `<a href="...">` themselves),
+  escape/entity sequences (\n, \t, &amp;, &lt;),
   and accelerator markers (the & or _ before a letter, e.g. &File → &Datei).
-- Translate the text BETWEEN tags; never drop, reorder, or translate the tags themselves.
+- Translate every word in the source, INCLUDING words that sit inside markup tags.
+  The tag delimiters stay; their TEXT CONTENT must be translated. Example:
+  ⟦Click <b>Save</b>⟧ → Klicken Sie auf <b>Speichern</b>  (not <b>Save</b>)
+- Plural-form markers like `(s)`, `(es)`, or `(en)` in the source are HINTS that the
+  string is plural; they are NOT literal characters to preserve. Drop them and
+  produce the natural target-locale word for the requested plural form.
 - Preserve leading/trailing whitespace and final punctuation as in the source.
 - If the source is empty, or contains only placeholders/markup, return it unchanged.
 
@@ -25,6 +31,8 @@ NEVER write ⟦ or ⟧ in your output. Output only the translation itself.
 Structure examples (these show formatting only — translate into {locale}, not the languages shown):
 SOURCE: ⟦%1⟧
 TRANSLATION: %1
+SOURCE: ⟦{count}⟧
+TRANSLATION: {count}
 SOURCE: ⟦<b>%1</b>⟧
 TRANSLATION: <b>%1</b>
 SOURCE: ⟦&%1⟧

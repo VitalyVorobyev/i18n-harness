@@ -26,7 +26,7 @@
 //! | `{do_not_translate_block_or_(none)}` | A bullet list of DNT sources, or `"(none)"` if empty. |
 //! | `{template_version}` | The template's declared version (string, e.g. `"v1"`). |
 //! | `{locale_example_block_or_empty}` | A short block of two source/translation example pairs for the target locale (so the model sees real-language examples, not just structural ones). Empty when no curated examples exist for the locale. |
-//! | `{plural_category_line_or_empty}` | When the caller is rendering one form of a plural unit, the line `Plural form: produce the "<cat>" form (CLDR category for <locale>).`. Empty for singular renders. Driven by [`PromptContext::plural_category`]. |
+//! | `{plural_category_line_or_empty}` | When the caller is rendering one form of a plural unit, a directive naming the CLDR category, a numeric hint, and a reminder to drop English plural markers like `(s)`/`(es)`. Empty for singular renders. Driven by [`PromptContext::plural_category`]. |
 //!
 //! Unknown `{key}` patterns in the template are left **as-is** (verbatim)
 //! in the rendered output. This is deliberate: prompt bodies routinely
@@ -155,14 +155,35 @@ fn render_locale_example_block(ctx: &PromptContext<'_>) -> String {
 }
 
 /// CLDR plural-form directive. Empty for singular renders.
+///
+/// For plural renders, the line tells the model exactly which CLDR
+/// category to produce AND explicitly forbids echoing the source's
+/// plural-marker punctuation (`(s)`, `(es)`, `(en)`, etc.). Without the
+/// "drop the marker" reminder, smaller Gemma builds tend to emit
+/// `Nachricht(en)` for both the `one` and `other` forms, defeating the
+/// CLDR distinction the gate is trying to validate.
 fn render_plural_category_line(ctx: &PromptContext<'_>) -> String {
-    match ctx.plural_category {
-        None => String::new(),
-        Some(cat) => format!(
-            "Plural form: produce the \"{cat}\" form (CLDR category for {locale}).",
-            locale = ctx.locale.id,
-        ),
-    }
+    let Some(cat) = ctx.plural_category else {
+        return String::new();
+    };
+    let numeric_hint = match cat.to_string().as_str() {
+        "zero" => " (count = 0)",
+        "one" => " (count = 1, the singular)",
+        "two" => " (count = 2, the dual)",
+        "few" => " (small count: typically 2–4)",
+        "many" => " (large count)",
+        "other" => " (general plural, count > 1)",
+        _ => "",
+    };
+    format!(
+        "Plural form: produce the \"{cat}\"{numeric_hint} form for {locale}.\n\
+         Drop ONLY parenthetical English plural suffixes like `(s)`, `(es)`, `(en)` — \
+         they are hints, not literal text. \
+         Always preserve the count placeholder `%n` or `{{count}}` exactly as it \
+         appears in the source; never drop or rename it. \
+         Output the natural {locale} word for this specific count.",
+        locale = ctx.locale.id,
+    )
 }
 
 /// Walk `body` and replace `{key}` occurrences with their values from
@@ -368,9 +389,20 @@ do_not_translate = true
 
         let ctx = ctx.with_plural_category(PluralCategory::One);
         let rendered = tpl.render(&ctx);
+        // The directive names the category, the locale, gives a numeric
+        // hint, AND tells the model not to echo source plural markers.
         assert!(
-            rendered.contains("Plural form: produce the \"one\" form (CLDR category for de_DE)."),
-            "expected plural directive: {rendered}"
+            rendered.contains("\"one\""),
+            "expected category name: {rendered}"
+        );
+        assert!(rendered.contains("de_DE"), "expected locale: {rendered}");
+        assert!(
+            rendered.contains("count = 1"),
+            "expected numeric hint: {rendered}"
+        );
+        assert!(
+            rendered.contains("(s)") && rendered.contains("not literal"),
+            "expected anti-marker reminder: {rendered}"
         );
     }
 
