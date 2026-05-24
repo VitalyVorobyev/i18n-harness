@@ -65,10 +65,7 @@ fn walk_recursive(dir: &Path, depth: usize, fs: &dyn ProjectFs, out: &mut Vec<Pa
     };
 
     for entry in entries {
-        let name = entry
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         if fs.is_dir(&entry) {
             if !should_skip_dir(name) {
@@ -142,10 +139,14 @@ mod tests {
         let at_8 = root.join("a/b/c/d/e/f/g/h");
         let at_9 = root.join("a/b/c/d/e/f/g/h/i");
         fs.write_atomic(&at_8.join("ok.ts"), b"<TS></TS>").unwrap();
-        fs.write_atomic(&at_9.join("skip.ts"), b"<TS></TS>").unwrap();
+        fs.write_atomic(&at_9.join("skip.ts"), b"<TS></TS>")
+            .unwrap();
 
         let candidates = walk_candidates(root, &*fs);
-        assert!(candidates.contains(&at_8.join("ok.ts")), "depth-8 file must be found");
+        assert!(
+            candidates.contains(&at_8.join("ok.ts")),
+            "depth-8 file must be found"
+        );
         assert!(
             !candidates.contains(&at_9.join("skip.ts")),
             "depth-9 file must be skipped"
@@ -176,9 +177,11 @@ mod tests {
     fn only_candidate_extensions_returned() {
         let fs = make_fs();
         let root = Path::new("/proj");
-        fs.write_atomic(&root.join("README.md"), b"# readme").unwrap();
+        fs.write_atomic(&root.join("README.md"), b"# readme")
+            .unwrap();
         fs.write_atomic(&root.join("Makefile"), b"all:").unwrap();
-        fs.write_atomic(&root.join("de.po"), b"msgid\nmsgstr").unwrap();
+        fs.write_atomic(&root.join("de.po"), b"msgid\nmsgstr")
+            .unwrap();
 
         let candidates = walk_candidates(root, &*fs);
         assert!(candidates.contains(&root.join("de.po")));

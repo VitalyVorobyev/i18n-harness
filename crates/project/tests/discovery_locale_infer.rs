@@ -33,15 +33,19 @@ fn discover_single(filename: &str, content: &[u8]) -> Option<String> {
 #[test]
 fn app_de_ts_gives_de() {
     // Qt TS with language attr takes priority over filename inference.
-    let locale =
-        discover_single("app_de.ts", b"<?xml version=\"1.0\"?><TS language=\"de\"></TS>");
+    let locale = discover_single(
+        "app_de.ts",
+        b"<?xml version=\"1.0\"?><TS language=\"de\"></TS>",
+    );
     assert_eq!(locale.as_deref(), Some("de"));
 }
 
 #[test]
 fn app_de_de_ts_gives_de_de() {
-    let locale =
-        discover_single("app-de_DE.ts", b"<?xml version=\"1.0\"?><TS language=\"de_DE\"></TS>");
+    let locale = discover_single(
+        "app-de_DE.ts",
+        b"<?xml version=\"1.0\"?><TS language=\"de_DE\"></TS>",
+    );
     assert_eq!(locale.as_deref(), Some("de_DE"));
 }
 

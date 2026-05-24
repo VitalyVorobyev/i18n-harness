@@ -119,8 +119,8 @@ pub(crate) fn sniff_po(bytes: &[u8]) -> Option<SniffResult> {
     }
 
     let has_content_type = text.contains("Content-Type:");
-    let has_header_block = text.contains("msgid \"\"\nmsgstr \"\"")
-        || text.contains("msgid \"\"\r\nmsgstr \"\"");
+    let has_header_block =
+        text.contains("msgid \"\"\nmsgstr \"\"") || text.contains("msgid \"\"\r\nmsgstr \"\"");
 
     if !has_header_block && !has_content_type {
         // Has msgid/msgstr pairs but no header — still accept as Medium.
@@ -160,17 +160,14 @@ pub(crate) fn sniff_po(bytes: &[u8]) -> Option<SniffResult> {
 
 /// Top-level keys that indicate this JSON is a tool-config file, not a catalog.
 const TOOL_CONFIG_SIGNATURES: &[(&str, &str)] = &[
-    ("name", "version"),           // package.json
-    ("compilerOptions", ""),       // tsconfig.json
-    ("devDependencies", ""),       // package.json variant
-    ("dependencies", "scripts"),   // package.json variant
+    ("name", "version"),         // package.json
+    ("compilerOptions", ""),     // tsconfig.json
+    ("devDependencies", ""),     // package.json variant
+    ("dependencies", "scripts"), // package.json variant
 ];
 
 /// Schema URL fragments that indicate non-i18n schemas.
-const NON_I18N_SCHEMA_FRAGMENTS: &[&str] = &[
-    "json-schema.org",
-    "schemastore.org",
-];
+const NON_I18N_SCHEMA_FRAGMENTS: &[&str] = &["json-schema.org", "schemastore.org"];
 
 /// Sniff bytes as an ICU MessageFormat JSON file.
 ///
@@ -196,7 +193,8 @@ pub(crate) fn sniff_icu_json(bytes: &[u8]) -> Option<SniffResult> {
     // Reject if $schema is present and not an i18n-known schema.
     if let Some(schema_val) = obj.get("$schema") {
         if let Some(schema_str) = schema_val.as_str() {
-            let is_i18n_schema = schema_str.contains("i18n") || schema_str.contains("messageformat");
+            let is_i18n_schema =
+                schema_str.contains("i18n") || schema_str.contains("messageformat");
             let is_tool_schema = NON_I18N_SCHEMA_FRAGMENTS
                 .iter()
                 .any(|frag| schema_str.contains(frag));
@@ -254,10 +252,7 @@ pub(crate) fn sniff(path: &Path, bytes: &[u8]) -> DraftCatalog {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
+    let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
     match ext.as_str() {
         "ts" => sniff_ts_path(path, filename, bytes),
@@ -277,7 +272,9 @@ pub(crate) fn sniff(path: &Path, bytes: &[u8]) -> DraftCatalog {
 fn sniff_ts_path(path: &Path, filename: &str, bytes: &[u8]) -> DraftCatalog {
     match sniff_qt_ts(bytes) {
         Some(result) => {
-            let locale = result.locale.or_else(|| locale_infer::infer_from_filename(filename));
+            let locale = result
+                .locale
+                .or_else(|| locale_infer::infer_from_filename(filename));
             let confidence = if locale.is_some() {
                 result.confidence
             } else {
@@ -299,8 +296,7 @@ fn sniff_ts_path(path: &Path, filename: &str, bytes: &[u8]) -> DraftCatalog {
         None => {
             // Sniffer rejected it (TypeScript source or truly unknown).
             let is_ts_source = {
-                let head = std::str::from_utf8(bytes.get(..1024).unwrap_or(bytes))
-                    .unwrap_or("");
+                let head = std::str::from_utf8(bytes.get(..1024).unwrap_or(bytes)).unwrap_or("");
                 ts_js_keywords_re().is_match(head)
             };
             let reason = if is_ts_source {
@@ -325,7 +321,9 @@ fn sniff_po_path(filename: &str, bytes: &[u8]) -> DraftCatalog {
     let path = std::path::PathBuf::from(filename);
     match sniff_po(bytes) {
         Some(result) => {
-            let locale = result.locale.or_else(|| locale_infer::infer_from_filename(filename));
+            let locale = result
+                .locale
+                .or_else(|| locale_infer::infer_from_filename(filename));
             DraftCatalog {
                 path,
                 format: FormatGuess::GettextPo,
@@ -350,7 +348,9 @@ fn sniff_json_path(filename: &str, bytes: &[u8]) -> DraftCatalog {
     let path = std::path::PathBuf::from(filename);
     match sniff_icu_json(bytes) {
         Some(result) => {
-            let locale = result.locale.or_else(|| locale_infer::infer_from_filename(filename));
+            let locale = result
+                .locale
+                .or_else(|| locale_infer::infer_from_filename(filename));
             DraftCatalog {
                 path,
                 format: FormatGuess::IcuJson,
@@ -420,7 +420,8 @@ mod tests {
 
     #[test]
     fn qt_ts_basic() {
-        let result = sniff_qt_ts(b"<?xml version=\"1.0\"?><TS version=\"2.1\" language=\"de_DE\"></TS>");
+        let result =
+            sniff_qt_ts(b"<?xml version=\"1.0\"?><TS version=\"2.1\" language=\"de_DE\"></TS>");
         let r = result.unwrap();
         assert_eq!(r.locale.as_deref(), Some("de_DE"));
         assert_eq!(r.confidence, ClassificationConfidence::High);

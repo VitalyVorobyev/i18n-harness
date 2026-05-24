@@ -231,11 +231,7 @@ impl Project {
                 };
                 let locale = dc.locale.clone().unwrap_or_default();
                 // Store path as relative to root.
-                let rel = dc
-                    .path
-                    .strip_prefix(root)
-                    .unwrap_or(&dc.path)
-                    .to_path_buf();
+                let rel = dc.path.strip_prefix(root).unwrap_or(&dc.path).to_path_buf();
                 Some(CatalogEntry {
                     path: rel,
                     format,
@@ -264,16 +260,15 @@ impl Project {
             // they indicate a programming error, not user input.
             ProjectError::Io {
                 path: root.join("i18n-harness.toml"),
-                source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                source: std::io::Error::other(e.to_string()),
             }
         })?;
 
         // Ensure root exists.
-        fs.create_dir_all(root)
-            .map_err(|source| ProjectError::Io {
-                path: root.to_path_buf(),
-                source,
-            })?;
+        fs.create_dir_all(root).map_err(|source| ProjectError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
 
         let manifest_path = root.join("i18n-harness.toml");
         fs.write_atomic(&manifest_path, toml_text.as_bytes())

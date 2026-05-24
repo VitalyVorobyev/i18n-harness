@@ -20,10 +20,8 @@ use regex::Regex;
 fn locale_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
-            r"(?:[_\-\.]|^)([a-z]{2,3}(?:[_-][A-Z][a-zA-Z]{1,3})?)\.(?:ts|po|json)$",
-        )
-        .expect("locale inference regex is valid")
+        Regex::new(r"(?:[_\-\.]|^)([a-z]{2,3}(?:[_-][A-Z][a-zA-Z]{1,3})?)\.(?:ts|po|json)$")
+            .expect("locale inference regex is valid")
     })
 }
 
@@ -36,7 +34,7 @@ fn locale_regex() -> &'static Regex {
 /// # Normalization
 ///
 /// `de-DE` → `de_DE`; `zh-Hans` → `zh_Hans`. The workspace convention uses
-/// underscores throughout ([`crates/locales`]).
+/// underscores throughout (see `crates/locales`).
 pub(crate) fn infer_from_filename(filename: &str) -> Option<String> {
     locale_regex()
         .captures(filename)
@@ -55,7 +53,10 @@ mod tests {
 
     #[test]
     fn app_de_de_ts() {
-        assert_eq!(infer_from_filename("app-de_DE.ts").as_deref(), Some("de_DE"));
+        assert_eq!(
+            infer_from_filename("app-de_DE.ts").as_deref(),
+            Some("de_DE")
+        );
     }
 
     #[test]
@@ -86,6 +87,9 @@ mod tests {
 
     #[test]
     fn three_letter_language_code() {
-        assert_eq!(infer_from_filename("messages_zho.json").as_deref(), Some("zho"));
+        assert_eq!(
+            infer_from_filename("messages_zho.json").as_deref(),
+            Some("zho")
+        );
     }
 }
