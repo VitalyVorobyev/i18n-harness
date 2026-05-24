@@ -260,6 +260,14 @@ still work.
 
 ### M4.3 — UI shell: sidebar + locale chips + view tabs + home screen
 
+#### M4.3a — Project mode foundation ✓ shipped
+
+Home screen (recent projects, "Open folder", "Create from folder"), project
+sidebar (catalog list, close button), ProjectTopBar (project name, view tabs,
+theme toggle), project-scoped translate/save/discard/translate wrappers, and
+TS types + Tauri wrappers for all M4.2 commands. M4.3b (locale chips, dirty
+pills), M4.3c (Settings view), and M4.3d (Quality view) follow.
+
 New layout:
 
 ```

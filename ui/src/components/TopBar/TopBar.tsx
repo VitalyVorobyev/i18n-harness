@@ -2,9 +2,20 @@ import { cn } from "../../lib/cn";
 import type { Theme } from "../../lib/theme";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
-export type View = "catalog" | "glossary" | "metrics";
+// Views available in project mode.
+// "translate" is the default; "glossary" reuses the existing GlossaryPanel.
+// "settings" and "quality" are placeholders for M4.3c/d.
+export type View =
+  | "catalog"
+  | "glossary"
+  | "metrics"
+  | "translate"
+  | "settings"
+  | "quality";
 
-interface Props {
+// ── File-centric TopBar (pre-M4.3a; keeps the old single-file UI working) ─────
+
+interface LegacyProps {
   view: View;
   onViewChange: (v: View) => void;
   catalogPath: string | null;
@@ -19,6 +30,7 @@ interface Props {
   onToggleTheme: () => void;
 }
 
+/** @deprecated Use ProjectTopBar for M4.3+ project mode. */
 export function TopBar({
   view,
   onViewChange,
@@ -32,12 +44,9 @@ export function TopBar({
   onDiscard,
   theme,
   onToggleTheme,
-}: Props) {
+}: LegacyProps) {
   const dirty = dirtyCount > 0;
   const catalogView = view === "catalog";
-  // The Open/Save/Discard actions only make sense on the catalog view.
-  // Hide them (but keep them in layout) when the user is on Glossary or
-  // Metrics so the toolbar shape stays stable across tabs.
   return (
     <header
       className={cn(
@@ -172,6 +181,98 @@ export function TopBar({
   );
 }
 
+// ── Project-mode TopBar (M4.3a) ───────────────────────────────────────────────
+
+export type ProjectView = "translate" | "glossary" | "settings" | "quality";
+
+interface ProjectTopBarProps {
+  projectName: string;
+  view: ProjectView;
+  onViewChange: (v: ProjectView) => void;
+  theme: Theme;
+  onToggleTheme: () => void;
+  onCloseProject: () => void;
+}
+
+export function ProjectTopBar({
+  projectName,
+  view,
+  onViewChange,
+  theme,
+  onToggleTheme,
+  onCloseProject,
+}: ProjectTopBarProps) {
+  return (
+    <header
+      className={cn(
+        "app-chrome shrink-0 h-11 px-4 grid grid-cols-[1fr_auto_1fr] items-center",
+        "bg-bg-surface border-b border-border-subtle",
+      )}
+    >
+      {/* Left: project name */}
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "shrink-0 w-3.5 h-3.5 rounded-sm border border-accent-subtle-border",
+            "bg-gradient-to-br from-accent to-accent-active",
+          )}
+        />
+        <span
+          className="text-sm font-semibold text-fg-primary truncate max-w-[180px]"
+          title={projectName}
+        >
+          {projectName}
+        </span>
+      </div>
+
+      {/* Center: view tabs */}
+      <div
+        role="tablist"
+        aria-label="Project view"
+        className="flex items-center gap-1"
+      >
+        <TabButton
+          active={view === "translate"}
+          onClick={() => onViewChange("translate")}
+        >
+          Translate
+        </TabButton>
+        <TabButton
+          active={view === "glossary"}
+          onClick={() => onViewChange("glossary")}
+        >
+          Glossary
+        </TabButton>
+        <TabButton
+          active={view === "settings"}
+          onClick={() => onViewChange("settings")}
+          aria-label="Settings (coming in M4.3c)"
+        >
+          Settings
+        </TabButton>
+        <TabButton
+          active={view === "quality"}
+          onClick={() => onViewChange("quality")}
+          aria-label="Quality (coming in M4.3d)"
+        >
+          Quality
+        </TabButton>
+      </div>
+
+      {/* Right: theme toggle + close project */}
+      <div className="flex items-center gap-2 justify-end">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        <ActionButton onClick={onCloseProject} title="Close project">
+          Close project
+        </ActionButton>
+      </div>
+    </header>
+  );
+}
+
+// ── Shared primitives ─────────────────────────────────────────────────────────
+
 function ActionButton({
   children,
   onClick,
@@ -210,16 +311,19 @@ function TabButton({
   active,
   onClick,
   children,
+  "aria-label": ariaLabel,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  "aria-label"?: string;
 }) {
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
+      aria-label={ariaLabel}
       onClick={onClick}
       className={cn(
         "inline-flex items-center h-6 px-2 rounded-sm text-xs font-medium",
