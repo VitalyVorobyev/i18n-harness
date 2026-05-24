@@ -90,6 +90,11 @@ export function App() {
   // Project-mode view tab.
   const [projectView, setProjectView] = useState<ProjectView>("translate");
 
+  // Locale chips multi-select filter. Empty set = "show all".
+  const [activeLocaleFilter, setActiveLocaleFilter] = useState<Set<string>>(
+    new Set(),
+  );
+
   const editorRef = useRef<UnitEditorHandle | null>(null);
 
   // On mount, check whether a project is already open (returns None on first
@@ -170,6 +175,7 @@ export function App() {
     setReports({});
     setBusyIds(new Set());
     setProjectView("translate");
+    setActiveLocaleFilter(new Set());
     setError(null);
     setCloseConfirm({ kind: "none" });
   }, []);
@@ -430,6 +436,51 @@ export function App() {
     }
   }, [catalog, activeCatalogPath, dirtyIds, selectedId, flashInfo, flashError]);
 
+  // ── Locale filter + sibling quick-switch ────────────────────────────────────
+
+  // Naive stem heuristic: strip the trailing `_<locale>` segment from the
+  // filename (everything before the last underscore-locale suffix), then
+  // compare stems across catalogs.  Example: "app_de.ts" → stem "app";
+  // "app_fr.ts" → stem "app". Only matches when there is exactly one
+  // sibling for the target locale. Ambiguous or no-match cases fall back
+  // to filter-only behavior.
+  const handleLocaleFilterChange = useCallback(
+    (next: Set<string>) => {
+      setActiveLocaleFilter(next);
+
+      // Sibling quick-switch: only when exactly one locale is now active AND
+      // the currently-open catalog is for a *different* locale.
+      if (next.size !== 1 || mode.kind !== "project") return;
+      const [targetLocale] = [...next];
+      if (!activeCatalogPath) return;
+
+      const catalogs = mode.summary.catalogs;
+      const currentRef = catalogs.find(
+        (c) => c.absolute_path === activeCatalogPath,
+      );
+      if (!currentRef || currentRef.locale === targetLocale) return;
+
+      // Compute stem by stripping the `_<locale>` suffix from the basename.
+      function stemOf(ref: (typeof catalogs)[number]): string {
+        const basename = ref.manifest_path || ref.absolute_path;
+        const name = basename.replace(/\\/g, "/").split("/").pop() ?? basename;
+        // Strip extension, then trailing `_<locale>` (case-insensitive locale match).
+        const noExt = name.replace(/\.[^.]+$/, "");
+        const escaped = ref.locale.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return noExt.replace(new RegExp(`_${escaped}$`, "i"), "");
+      }
+
+      const currentStem = stemOf(currentRef);
+      const candidates = catalogs.filter(
+        (c) => c.locale === targetLocale && stemOf(c) === currentStem,
+      );
+      if (candidates.length === 1 && candidates[0]) {
+        void handleCatalogSelect(candidates[0].absolute_path);
+      }
+    },
+    [mode, activeCatalogPath, handleCatalogSelect],
+  );
+
   // ── Global keyboard shortcuts (project mode only) ─────────────────────────
 
   useEffect(() => {
@@ -492,6 +543,9 @@ export function App() {
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
       <ProjectTopBar
         projectName={summary.name}
+        locales={summary.locales}
+        activeLocaleFilter={activeLocaleFilter}
+        onLocaleFilterChange={handleLocaleFilterChange}
         view={projectView}
         onViewChange={setProjectView}
         theme={theme}
@@ -505,6 +559,7 @@ export function App() {
           summary={summary}
           activeCatalogPath={activeCatalogPath}
           dirtyCatalogPaths={dirtyCatalogPaths}
+          activeLocaleFilter={activeLocaleFilter}
           onCatalogSelect={handleCatalogSelect}
         />
 

@@ -265,8 +265,22 @@ still work.
 Home screen (recent projects, "Open folder", "Create from folder"), project
 sidebar (catalog list, close button), ProjectTopBar (project name, view tabs,
 theme toggle), project-scoped translate/save/discard/translate wrappers, and
-TS types + Tauri wrappers for all M4.2 commands. M4.3b (locale chips, dirty
-pills), M4.3c (Settings view), and M4.3d (Quality view) follow.
+TS types + Tauri wrappers for all M4.2 commands.
+
+#### M4.3b — Locale chips + dirty pills ✓ shipped
+
+Locale chips rendered in `ProjectTopBar` from `summary.locales`. Multi-select:
+clicking a chip toggles it in `activeLocaleFilter` lifted to App.tsx; empty
+set means "show all". A "Clear filter" affordance appears only when the set is
+non-empty. The `ProjectSidebar` accepts `activeLocaleFilter` and renders only
+catalogs whose locale is in the set (with a count badge showing "N of M
+catalogs" when filtered). Per-catalog dirty pills (orange dot + "unsaved"
+sr-only text) are already rendered by the sidebar; the dirty set is threaded
+from App.tsx. Sibling quick-switch: when exactly one locale chip is active and
+the user is viewing a catalog for a different locale, the filter change also
+switches to the sibling catalog for that locale (stem heuristic: strip trailing
+`_<locale>` from the manifest-relative basename). M4.3c (Settings view) and
+M4.3d (Quality view) follow.
 
 New layout:
 
