@@ -25,6 +25,8 @@
 //! | `{glossary_block_or_(none)}` | A list of glossary entries for the target locale, one `<src> -> <tgt>` per line, or `"(none)"` if empty. The trailing `_or_(none)` is part of the token name and self-documents the empty-case substitution. |
 //! | `{do_not_translate_block_or_(none)}` | A bullet list of DNT sources, or `"(none)"` if empty. |
 //! | `{template_version}` | The template's declared version (string, e.g. `"v1"`). |
+//! | `{locale_example_block_or_empty}` | A short block of two source/translation example pairs for the target locale (so the model sees real-language examples, not just structural ones). Empty when no curated examples exist for the locale. |
+//! | `{plural_category_line_or_empty}` | When the caller is rendering one form of a plural unit, the line `Plural form: produce the "<cat>" form (CLDR category for <locale>).`. Empty for singular renders. Driven by [`PromptContext::plural_category`]. |
 //!
 //! Unknown `{key}` patterns in the template are left **as-is** (verbatim)
 //! in the rendered output. This is deliberate: prompt bodies routinely
@@ -79,6 +81,14 @@ impl PromptTemplate {
         tokens.insert("do_not_translate_block", dnt.clone());
         tokens.insert("do_not_translate_block_or_(none)", dnt);
         tokens.insert("template_version", self.version.clone());
+        tokens.insert(
+            "locale_example_block_or_empty",
+            render_locale_example_block(ctx),
+        );
+        tokens.insert(
+            "plural_category_line_or_empty",
+            render_plural_category_line(ctx),
+        );
         substitute(&self.body, &tokens)
     }
 }
@@ -112,6 +122,46 @@ fn render_do_not_translate_block(ctx: &PromptContext<'_>) -> String {
         "(none)".to_owned()
     } else {
         lines.join("\n")
+    }
+}
+
+/// Per-locale curated example block. The block uses the same `⟦…⟧`
+/// wrappers as the template's structural examples so the model sees a
+/// consistent format. Returns the empty string for locales without a
+/// curated block — the template's `_or_empty` suffix documents this.
+///
+/// The list is short on purpose: 2–3 representative pairs per locale.
+/// Anything longer eats tokens we'd rather spend on the source itself.
+fn render_locale_example_block(ctx: &PromptContext<'_>) -> String {
+    let pairs: &[(&str, &str)] = match ctx.locale.id {
+        "de_DE" => &[
+            ("Save", "Speichern"),
+            ("Cancel", "Abbrechen"),
+            ("Open", "Öffnen"),
+        ],
+        "es_ES" => &[
+            ("Save", "Guardar"),
+            ("Cancel", "Cancelar"),
+            ("Open", "Abrir"),
+        ],
+        "zh_Hans" => &[("Save", "保存"), ("Cancel", "取消"), ("Open", "打开")],
+        _ => return String::new(),
+    };
+    let mut out = format!("Examples ({}):\n", ctx.locale.id);
+    for (src, tgt) in pairs {
+        out.push_str(&format!("SOURCE: ⟦{src}⟧\nTRANSLATION: {tgt}\n"));
+    }
+    out
+}
+
+/// CLDR plural-form directive. Empty for singular renders.
+fn render_plural_category_line(ctx: &PromptContext<'_>) -> String {
+    match ctx.plural_category {
+        None => String::new(),
+        Some(cat) => format!(
+            "Plural form: produce the \"{cat}\" form (CLDR category for {locale}).",
+            locale = ctx.locale.id,
+        ),
     }
 }
 
@@ -272,6 +322,56 @@ do_not_translate = true
         let ctx = ctx_for(&unit, locale, Register::Formal, None, &flags);
         let tpl = PromptTemplate::new("g={glossary_block}|d={do_not_translate_block}", "v1");
         assert_eq!(tpl.render(&ctx), "g=(none)|d=(none)");
+    }
+
+    #[test]
+    fn locale_example_block_varies_by_locale() {
+        let unit = Unit::untranslated_singular("x", "Hello");
+        let flags = i18n_harness_core::FlagSet::new();
+        let tpl = PromptTemplate::new("[{locale_example_block_or_empty}]", "v1");
+
+        for (id, marker) in [
+            ("de_DE", "Speichern"),
+            ("es_ES", "Guardar"),
+            ("zh_Hans", "保存"),
+        ] {
+            let locale = Locale::by_id(id).unwrap();
+            let ctx = ctx_for(&unit, locale, Register::Formal, None, &flags);
+            let rendered = tpl.render(&ctx);
+            assert!(
+                rendered.contains(&format!("Examples ({id}):")),
+                "missing Examples header for {id}: {rendered}"
+            );
+            assert!(
+                rendered.contains(marker),
+                "missing locale-specific term `{marker}` for {id}: {rendered}"
+            );
+        }
+
+        // Unknown locale → empty block (the slot is preserved as
+        // surrounding brackets with nothing between them).
+        let en = Locale::by_id("en").unwrap();
+        let ctx = ctx_for(&unit, en, Register::Neutral, None, &flags);
+        assert_eq!(tpl.render(&ctx), "[]");
+    }
+
+    #[test]
+    fn plural_category_line_is_empty_for_singular_and_set_for_plural() {
+        use i18n_harness_locales::PluralCategory;
+        let unit = Unit::untranslated_singular("x", "Hello");
+        let locale = Locale::by_id("de_DE").unwrap();
+        let flags = i18n_harness_core::FlagSet::new();
+        let tpl = PromptTemplate::new("[{plural_category_line_or_empty}]", "v1");
+
+        let ctx = ctx_for(&unit, locale, Register::Formal, None, &flags);
+        assert_eq!(tpl.render(&ctx), "[]", "singular render must be empty");
+
+        let ctx = ctx.with_plural_category(PluralCategory::One);
+        let rendered = tpl.render(&ctx);
+        assert!(
+            rendered.contains("Plural form: produce the \"one\" form (CLDR category for de_DE)."),
+            "expected plural directive: {rendered}"
+        );
     }
 
     #[test]
