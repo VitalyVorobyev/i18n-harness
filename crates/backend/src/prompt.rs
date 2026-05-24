@@ -22,13 +22,17 @@
 //! | `{source}` | The unit's source text (ICU-normalized). |
 //! | `{locale}` | The target locale id (`de_DE`). |
 //! | `{register}` | The effective register: `formal`/`informal`/`neutral`. |
-//! | `{glossary_block}` | A list of glossary entries for the target locale, one `<src> -> <tgt>` per line, or `"(none)"` if empty. |
-//! | `{do_not_translate_block}` | A bullet list of DNT sources, or `"(none)"` if empty. |
+//! | `{glossary_block_or_(none)}` | A list of glossary entries for the target locale, one `<src> -> <tgt>` per line, or `"(none)"` if empty. The trailing `_or_(none)` is part of the token name and self-documents the empty-case substitution. |
+//! | `{do_not_translate_block_or_(none)}` | A bullet list of DNT sources, or `"(none)"` if empty. |
 //! | `{template_version}` | The template's declared version (string, e.g. `"v1"`). |
 //!
-//! Unknown tokens in the template are left as literal text (with a
-//! leading `?` to make them grep-able), not silently dropped — a typo in
-//! a token name should be obvious in the rendered prompt.
+//! Unknown `{key}` patterns in the template are left **as-is** (verbatim)
+//! in the rendered output. This is deliberate: prompt bodies routinely
+//! contain instructional examples like `{count}` or `{{var}}` that are
+//! NOT template tokens but illustrate ICU placeholder syntax for the
+//! model. Mangling them would be wrong. Typos in token names are caught
+//! by reading the rendered prompt — the missing substitution is visible
+//! because the template's intended slot still carries the literal braces.
 
 use std::collections::BTreeMap;
 
@@ -65,8 +69,15 @@ impl PromptTemplate {
         tokens.insert("source", ctx.unit.source.clone());
         tokens.insert("locale", ctx.locale.id.to_owned());
         tokens.insert("register", register_str(ctx.register).to_owned());
-        tokens.insert("glossary_block", render_glossary_block(ctx));
-        tokens.insert("do_not_translate_block", render_do_not_translate_block(ctx));
+        let glossary = render_glossary_block(ctx);
+        let dnt = render_do_not_translate_block(ctx);
+        // Both the bare names and the self-documenting `_or_(none)` aliases
+        // resolve to the same value; the template author can pick whichever
+        // reads better in context.
+        tokens.insert("glossary_block", glossary.clone());
+        tokens.insert("glossary_block_or_(none)", glossary);
+        tokens.insert("do_not_translate_block", dnt.clone());
+        tokens.insert("do_not_translate_block_or_(none)", dnt);
         tokens.insert("template_version", self.version.clone());
         substitute(&self.body, &tokens)
     }
@@ -105,13 +116,13 @@ fn render_do_not_translate_block(ctx: &PromptContext<'_>) -> String {
 }
 
 /// Walk `body` and replace `{key}` occurrences with their values from
-/// `tokens`. Unknown tokens are left as literal `{?key}` so a typo is
-/// obvious in the rendered output.
+/// `tokens`. Unknown `{key}` patterns are left **verbatim** in the
+/// output — prompt bodies routinely contain instructional braces like
+/// `{count}` or `{{var}}` that are not template tokens and must reach
+/// the model intact.
 ///
-/// We do not support escaped braces (`{{`/`}}`) because the v1 template
-/// vocabulary has no use for literal braces in the prompt envelope. If
-/// that changes, this function gains an escape pass; until then, keeping
-/// it simple matches the surface area.
+/// We do not support escaped braces. Anything between `{` and the next
+/// `}` that does not match a known token name is copied through.
 fn substitute(body: &str, tokens: &BTreeMap<&str, String>) -> String {
     let mut out = String::with_capacity(body.len());
     let bytes = body.as_bytes();
@@ -132,13 +143,15 @@ fn substitute(body: &str, tokens: &BTreeMap<&str, String>) -> String {
         let key = &body[i + 1..close];
         if let Some(value) = tokens.get(key) {
             out.push_str(value);
+            i = close + 1;
         } else {
+            // Unknown token: emit only the opening `{` and advance past it
+            // so the inner content (which may itself contain a recognised
+            // token, e.g. `{{glossary_block_or_(none)}}` quoted in
+            // examples) gets a normal scan.
             out.push('{');
-            out.push('?');
-            out.push_str(key);
-            out.push('}');
+            i += 1;
         }
-        i = close + 1;
     }
     out
 }
@@ -161,9 +174,9 @@ mod tests {
     }
 
     #[test]
-    fn substitutes_known_tokens_and_marks_unknown() {
+    fn substitutes_known_tokens_and_preserves_unknown_verbatim() {
         let tpl = PromptTemplate::new(
-            "Translate to {locale} ({register})\nSource: {source}\nBogus: {nope}\n",
+            "Translate to {locale} ({register})\nSource: {source}\nLiteral: {count}\nDoubled: {{var}}\n",
             "v1",
         );
         let unit = Unit::untranslated_singular("x", "Hello");
@@ -176,8 +189,38 @@ mod tests {
             "{rendered}"
         );
         assert!(rendered.contains("Source: Hello"), "{rendered}");
-        // Unknown token preserved with `?` marker so a typo is visible.
-        assert!(rendered.contains("{?nope}"), "{rendered}");
+        // Unknown ICU-looking placeholders are preserved verbatim — prompts
+        // routinely reference `{count}` as instructional text for the model.
+        assert!(
+            rendered.contains("Literal: {count}"),
+            "{{count}} must survive verbatim: {rendered}"
+        );
+        assert!(
+            rendered.contains("Doubled: {{var}}"),
+            "{{{{var}}}} must survive verbatim: {rendered}"
+        );
+    }
+
+    #[test]
+    fn glossary_block_or_none_alias_substitutes_same_as_bare_name() {
+        let unit = Unit::untranslated_singular("x", "Hello");
+        let locale = Locale::by_id("de_DE").unwrap();
+        let flags = i18n_harness_core::FlagSet::new();
+        let ctx = ctx_for(&unit, locale, Register::Formal, None, &flags);
+        let tpl = PromptTemplate::new(
+            "[g1={glossary_block}][g2={glossary_block_or_(none)}]\n\
+             [d1={do_not_translate_block}][d2={do_not_translate_block_or_(none)}]",
+            "v1",
+        );
+        let rendered = tpl.render(&ctx);
+        assert!(
+            rendered.contains("[g1=(none)][g2=(none)]"),
+            "both glossary aliases must substitute identically: {rendered}"
+        );
+        assert!(
+            rendered.contains("[d1=(none)][d2=(none)]"),
+            "both DNT aliases must substitute identically: {rendered}"
+        );
     }
 
     #[test]

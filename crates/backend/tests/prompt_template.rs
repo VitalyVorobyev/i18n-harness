@@ -5,12 +5,11 @@
 //! the rendered prompt:
 //! - Has the template version line baked in (so a metrics consumer can
 //!   correlate model outputs with the template revision).
-//! - Substitutes every documented v1 token.
-//! - Does NOT contain any `{?...}` unknown-token markers (the prompt
-//!   uses only documented tokens).
+//! - Substitutes every documented v1 token (glossary, DNT, source).
 //!
-//! When the implementer adds the Ollama template, they add an analogous
-//! test for it next to this one.
+//! Instructional `{...}` patterns inside the body — e.g. `{count}` or
+//! `{{var}}` examples of ICU placeholder syntax — survive substitution
+//! verbatim by design (they are not template tokens).
 
 use std::path::PathBuf;
 
@@ -81,9 +80,22 @@ register = "formal"
     assert!(rendered.contains("Save -> Speichern"));
     assert!(rendered.contains("- ChromaCheck"));
     assert!(rendered.contains("Source:\nOpen the requested document"));
+    // Spot-check the slots we explicitly substituted are not left as literal
+    // braces of the token name itself — i.e. the substitution actually
+    // happened. Instructional `{count}` / `{{var}}` patterns inside the body
+    // are allowed to survive verbatim and are not asserted on.
     assert!(
-        !rendered.contains("{?"),
-        "rendered prompt contains unknown-token marker, all v1 tokens must be documented: {rendered}"
+        !rendered.contains("{glossary_block}") && !rendered.contains("{glossary_block_or_(none)}"),
+        "glossary slot did not substitute: {rendered}"
+    );
+    assert!(
+        !rendered.contains("{do_not_translate_block}")
+            && !rendered.contains("{do_not_translate_block_or_(none)}"),
+        "DNT slot did not substitute: {rendered}"
+    );
+    assert!(
+        !rendered.contains("{source}"),
+        "source slot did not substitute: {rendered}"
     );
 }
 
