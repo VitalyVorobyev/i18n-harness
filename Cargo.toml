@@ -45,6 +45,9 @@ serde_json = "1"
 toml = "0.9"
 toml_edit = "0.23"
 
+# Regex (locale inference, format sniffing)
+regex = "1"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 
