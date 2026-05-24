@@ -355,3 +355,11 @@ export interface Correction {
   flags_at_correction: unknown[];
   ts: string;
 }
+
+// CuratedExample mirrors crates/project/src/memory.rs.
+// correction is None for dangling references (correction deleted from jsonl).
+export interface CuratedExample {
+  id: CorrectionId;
+  note: string | null;
+  correction: Correction | null;
+}

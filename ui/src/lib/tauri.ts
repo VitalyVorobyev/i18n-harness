@@ -10,6 +10,8 @@ import type {
   BackendConfig,
   CatalogEntry,
   CatalogResponse,
+  Correction,
+  CuratedExample,
   DraftManifest,
   GlossaryConfig,
   GlossaryLoadResponse,
@@ -310,4 +312,38 @@ export async function pickCatalogFileForProject(): Promise<string | null> {
   });
   if (typeof selected === "string") return selected;
   return null;
+}
+
+// ── M4.3d — Quality view wrappers ─────────────────────────────────────────────
+
+/** Filter shape for listCorrectionsInProject. All fields optional (AND semantics). */
+export interface ListCorrectionsFilter {
+  catalog_path?: string | null;
+  locale?: string | null;
+  unit_id?: string | null;
+  curated_only?: boolean;
+}
+
+export async function listCorrectionsInProject(
+  filter: ListCorrectionsFilter,
+): Promise<Correction[]> {
+  return await invoke<Correction[]>("list_corrections_in_project", { filter });
+}
+
+export async function promoteCorrectionToCurated(
+  id: string,
+  note?: string | null,
+): Promise<void> {
+  return await invoke<void>("promote_correction_to_curated", {
+    id,
+    note: note ?? null,
+  });
+}
+
+export async function unCurateCorrection(id: string): Promise<boolean> {
+  return await invoke<boolean>("un_curate_correction", { id });
+}
+
+export async function listCuratedInProject(): Promise<CuratedExample[]> {
+  return await invoke<CuratedExample[]>("list_curated_in_project");
 }

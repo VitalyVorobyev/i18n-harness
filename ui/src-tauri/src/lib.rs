@@ -1475,6 +1475,23 @@ fn un_curate_correction(id: String, state: tauri::State<'_, AppState>) -> Result
     project.un_curate(&corr_id).map_err(|e| e.to_string())
 }
 
+/// Return all entries in the project's curated set.
+///
+/// Each `CuratedExample` carries its `id`, an optional `note`, and the
+/// resolved `correction` data (the full `Correction` record from
+/// `corrections.jsonl`). When the underlying correction has been deleted
+/// (file rotation, manual edit, project copy without state), the `correction`
+/// field is `None` — the dangling entry is still returned so the UI can show
+/// it and let the user remove it via `un_curate_correction`.
+#[tauri::command]
+fn list_curated_in_project(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<i18n_harness_project::CuratedExample>, String> {
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    Ok(project.curated().examples().cloned().collect())
+}
+
 /// Record a review-status change for one unit.
 ///
 /// Appends an event to `review.jsonl` via the project's store. As a side
@@ -1809,6 +1826,7 @@ pub fn run() {
         list_corrections_in_project,
         promote_correction_to_curated,
         un_curate_correction,
+        list_curated_in_project,
         set_review_status_in_project,
         add_catalog_to_project,
         remove_catalog_from_project,
@@ -1848,6 +1866,7 @@ pub fn run() {
         list_corrections_in_project,
         promote_correction_to_curated,
         un_curate_correction,
+        list_curated_in_project,
         set_review_status_in_project,
         add_catalog_to_project,
         remove_catalog_from_project,

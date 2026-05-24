@@ -280,7 +280,7 @@ from App.tsx. Sibling quick-switch: when exactly one locale chip is active and
 the user is viewing a catalog for a different locale, the filter change also
 switches to the sibling catalog for that locale (stem heuristic: strip trailing
 `_<locale>` from the manifest-relative basename). M4.3c (Settings view) is
-shipped; M4.3d (Quality view) follows.
+shipped; M4.3d (Quality view) is shipped.
 
 New layout:
 
