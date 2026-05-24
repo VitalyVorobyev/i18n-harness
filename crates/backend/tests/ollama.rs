@@ -1,4 +1,11 @@
-//! Mocked HTTP tests for [`OllamaBackend`].
+//! Mocked HTTP tests for [`OllamaBackend`] — v1 plain-text contract.
+//!
+//! Every test here exercises the v1 prompt template (`with_template_v1()`)
+//! because the v1 contract is "model emits the bare translated string"
+//! and these tests mock the model with exactly that shape. The v2
+//! strict-JSON contract has its own mocked-HTTP test file at
+//! `tests/ollama_v2.rs`; pure-function tests for the v2 parser live in
+//! `src/ollama.rs` under `mod tests`.
 //!
 //! Each test spawns a minimal `TcpListener` on a random loopback port,
 //! wires an `OllamaBackend` to that address, and asserts the outcome.
@@ -124,6 +131,7 @@ fn happy_path_singular_translation() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("greet", "Hello World")]);
@@ -149,6 +157,7 @@ fn empty_response_field_is_failed_retryable() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("a", "Hello")]);
@@ -156,7 +165,9 @@ fn empty_response_field_is_failed_retryable() {
 
     assert_eq!(outcomes.len(), 1);
     match &outcomes[0] {
-        TranslationOutcome::Failed { reason, retryable } => {
+        TranslationOutcome::Failed {
+            reason, retryable, ..
+        } => {
             assert_eq!(reason, "ollama-empty-response");
             assert!(retryable, "empty response should be retryable");
         }
@@ -173,6 +184,7 @@ fn non_json_body_is_protocol_error() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("a", "Hello")]);
@@ -195,6 +207,7 @@ fn http_503_is_network_error() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("a", "Hello")]);
@@ -217,6 +230,7 @@ fn http_401_is_auth_error() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("a", "Hello")]);
@@ -244,6 +258,7 @@ fn plural_unit_issues_one_call_per_cldr_form() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![plural_unit("p", "%n items")]);
@@ -277,6 +292,7 @@ fn plural_unit_partial_failure_marks_whole_unit_failed() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![plural_unit("p", "%n items")]);
@@ -285,7 +301,9 @@ fn plural_unit_partial_failure_marks_whole_unit_failed() {
 
     assert_eq!(outcomes.len(), 1);
     match &outcomes[0] {
-        TranslationOutcome::Failed { reason, retryable } => {
+        TranslationOutcome::Failed {
+            reason, retryable, ..
+        } => {
             assert!(
                 reason.contains("ollama-plural-form-other"),
                 "expected per-form reason, got: {reason}"
@@ -306,6 +324,7 @@ fn plural_unit_zh_hans_arity_1() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let zh = Locale::by_id("zh_Hans").expect("zh_Hans");
@@ -388,6 +407,7 @@ fn with_model_overrides_request_payload() {
         .unwrap()
         .with_host(host)
         .with_model("gemma4:e4b")
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let batch = make_batch(vec![singular_unit("u", "Hello")]);
@@ -417,6 +437,7 @@ fn order_preserved_across_three_units() {
     let backend = OllamaBackend::new()
         .unwrap()
         .with_host(host)
+        .with_template_v1()
         .with_timeout(Duration::from_secs(5));
 
     let units = vec![

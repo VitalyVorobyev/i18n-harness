@@ -25,13 +25,15 @@
 //! out to a flaky service is not. The trait surface cannot inspect the
 //! closure; the caller's word is the contract.
 
+use std::collections::BTreeMap;
+
 use i18n_harness_core::Batch;
 use i18n_harness_glossary::{Glossary, Register};
 use i18n_harness_locales::Locale;
 
 use crate::context::PromptContext;
 use crate::error::BackendError;
-use crate::outcome::{TranslatedText, TranslationOutcome};
+use crate::outcome::{FailureKind, TranslatedText, TranslationOutcome};
 use crate::trait_def::TranslationBackend;
 
 /// What a manual-backend closure returns for one unit.
@@ -157,11 +159,14 @@ fn translate_one(
                 return TranslationOutcome::Failed {
                     reason: "expected-plural-got-singular".into(),
                     retryable: false,
+                    failure_kind: FailureKind::Unspecified,
                 };
             }
             TranslationOutcome::Translated {
                 text: TranslatedText::Singular(text),
                 flags: Vec::new(),
+                confidence: None,
+                flag_notes: BTreeMap::new(),
             }
         }
         ManualResponse::Plural(forms) => {
@@ -169,6 +174,7 @@ fn translate_one(
                 return TranslationOutcome::Failed {
                     reason: "expected-singular-got-plural".into(),
                     retryable: false,
+                    failure_kind: FailureKind::Unspecified,
                 };
             }
             let expected = locale.plural_arity() as usize;
@@ -179,19 +185,24 @@ fn translate_one(
                         got = forms.len(),
                     ),
                     retryable: false,
+                    failure_kind: FailureKind::Unspecified,
                 };
             }
             TranslationOutcome::Translated {
                 text: TranslatedText::Plural(forms),
                 flags: Vec::new(),
+                confidence: None,
+                flag_notes: BTreeMap::new(),
             }
         }
         ManualResponse::Skip => TranslationOutcome::Skipped {
             reason: "manual-skip".into(),
         },
-        ManualResponse::Fail { reason, retryable } => {
-            TranslationOutcome::Failed { reason, retryable }
-        }
+        ManualResponse::Fail { reason, retryable } => TranslationOutcome::Failed {
+            reason,
+            retryable,
+            failure_kind: FailureKind::Unspecified,
+        },
     }
 }
 
@@ -272,7 +283,9 @@ mod tests {
         let batch = Batch::new(BatchKey::new("h", 0), vec![singular_unit("a", "x")]);
         let out = backend.translate_batch(&batch, de_de(), None).unwrap();
         match &out[0] {
-            TranslationOutcome::Failed { reason, retryable } => {
+            TranslationOutcome::Failed {
+                reason, retryable, ..
+            } => {
                 assert_eq!(reason, "model-empty");
                 assert!(*retryable);
             }
@@ -286,7 +299,9 @@ mod tests {
         let batch = Batch::new(BatchKey::new("h", 0), vec![plural_unit("p", "%n items")]);
         let out = backend.translate_batch(&batch, de_de(), None).unwrap();
         match &out[0] {
-            TranslationOutcome::Failed { reason, retryable } => {
+            TranslationOutcome::Failed {
+                reason, retryable, ..
+            } => {
                 assert_eq!(reason, "expected-plural-got-singular");
                 assert!(!*retryable);
             }
@@ -302,7 +317,9 @@ mod tests {
         let batch = Batch::new(BatchKey::new("h", 0), vec![plural_unit("p", "%n items")]);
         let out = backend.translate_batch(&batch, de_de(), None).unwrap();
         match &out[0] {
-            TranslationOutcome::Failed { reason, retryable } => {
+            TranslationOutcome::Failed {
+                reason, retryable, ..
+            } => {
                 assert!(reason.starts_with("plural-arity-mismatch"), "got {reason}");
                 assert!(!*retryable);
             }

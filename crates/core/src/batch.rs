@@ -70,7 +70,7 @@ impl BatchKey {
 ///   (the resume key references a single file hash), but the type does not
 ///   enforce it — that lets the M4 export-batch path pack units from
 ///   multiple files into one off-line batch without redesigning this type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Batch {
     /// Resume key for this batch. See [`BatchKey`].
     pub key: BatchKey,

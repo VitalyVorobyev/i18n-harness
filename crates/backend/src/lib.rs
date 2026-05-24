@@ -80,11 +80,11 @@ pub mod ollama;
 
 pub use context::PromptContext;
 pub use error::BackendError;
-pub use outcome::{TranslatedText, TranslationOutcome};
+pub use outcome::{FailureKind, TranslatedText, TranslationOutcome};
 pub use trait_def::TranslationBackend;
 
 #[cfg(feature = "manual")]
 pub use manual::{ManualBackend, ManualResponse};
 
 #[cfg(feature = "ollama")]
-pub use ollama::OllamaBackend;
+pub use ollama::{OllamaBackend, PromptResponseShape};

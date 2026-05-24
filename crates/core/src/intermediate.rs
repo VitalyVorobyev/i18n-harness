@@ -44,7 +44,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 ///
 /// Carrying the version on every line (rather than a header) lets streaming
 /// readers reject unknown versions per-line without buffering the whole file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IntermediateLine {
     /// On-disk schema version for this line. See [`SCHEMA_VERSION`].
     pub schema_version: u32,
@@ -70,7 +70,7 @@ impl IntermediateLine {
 /// Adapters and the CLI use the [`Self::to_jsonl`] / [`Self::from_jsonl`]
 /// helpers to round-trip; nothing in the design forces this struct to mirror
 /// a single on-disk file (you can build one from any iterator of `Unit`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Intermediate {
     /// Lines in stable order. Adapters typically produce them in
     /// `(file, unit-id)` order; the type does not enforce that.

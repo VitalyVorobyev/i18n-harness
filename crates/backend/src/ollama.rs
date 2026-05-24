@@ -6,12 +6,18 @@
 //! This module is compiled only with `--features ollama`. It brings in
 //! `ureq` (sync HTTP, no async runtime) as its only extra dependency.
 //!
-//! # Prompt template
+//! # Prompt template (v2 is the default)
 //!
-//! The template lives at `crates/backend/prompts/ollama-translate-v1.txt`.
-//! It is embedded at compile time via `include_str!` and parsed once in
-//! [`OllamaBackend::new`]. Template tokens follow the v1 vocabulary defined
-//! in [`crate::prompt`].
+//! The default template lives at `crates/backend/prompts/ollama-translate-v2.txt`
+//! and instructs the model to emit a strict-JSON object on a single line
+//! (translation + flags + confidence). It is embedded at compile time via
+//! `include_str!` and parsed once in [`OllamaBackend::new`]. Template
+//! tokens follow the v1 vocabulary defined in [`crate::prompt`].
+//!
+//! v1 (plain-text response) remains shipped for the CLI's `--prompt`
+//! override path; callers select it via [`OllamaBackend::with_template`]
+//! and the response shape switches automatically (see
+//! [`PromptResponseShape`]).
 //!
 //! # `num_ctx`
 //!
@@ -67,21 +73,29 @@
 //! it introduces JSON-alignment complexity that is not worth the risk until
 //! the per-unit quality metrics are established.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
-use i18n_harness_core::Batch;
+use i18n_harness_core::{Batch, Flag, FlagSeverity};
 use i18n_harness_glossary::{Glossary, Register};
 use i18n_harness_locales::Locale;
+use serde::Deserialize;
 
 use crate::context::PromptContext;
 use crate::error::BackendError;
-use crate::outcome::{TranslatedText, TranslationOutcome};
+use crate::outcome::{FailureKind, TranslatedText, TranslationOutcome};
 use crate::prompt::PromptTemplate;
 use crate::trait_def::TranslationBackend;
 
-/// The template text, embedded at compile time so there is no file-read at
-/// translation time.
-const TEMPLATE_BODY: &str = include_str!("../prompts/ollama-translate-v1.txt");
+/// The v2 template text. v2 is the default prompt and instructs the model
+/// to emit a single-line strict-JSON object: see
+/// `prompts/ollama-translate-v2.txt` for the schema.
+const TEMPLATE_BODY_V2: &str = include_str!("../prompts/ollama-translate-v2.txt");
+
+/// The v1 template text. Kept around for the CLI's `--prompt` override
+/// path: callers that select v1 get the plain-text response shape
+/// preserved verbatim.
+const TEMPLATE_BODY_V1: &str = include_str!("../prompts/ollama-translate-v1.txt");
 
 const DEFAULT_HOST: &str = "http://localhost:11434";
 /// Default Ollama model tag. The plan calls for Gemma 4 E4B (better
@@ -92,6 +106,27 @@ const DEFAULT_HOST: &str = "http://localhost:11434";
 pub const DEFAULT_MODEL: &str = "gemma4:e2b";
 const DEFAULT_NUM_CTX: u32 = 8192;
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+
+/// How a prompt template expects the model to format its response.
+///
+/// Selected once at construction time so the per-request parse path
+/// stays branch-free in the hot loop.
+///
+/// - [`Self::StrictJson`] — v2 contract. Response must be a single
+///   JSON object with `translation`, optional `flags`, and a `confidence`
+///   field. Anything else becomes
+///   [`TranslationOutcome::Failed`] with
+///   [`FailureKind::MalformedResponse`]; the gate then surfaces the
+///   failure inline so the prompt can be tuned.
+/// - [`Self::PlainText`] — v1 contract. The model emits the translation
+///   verbatim. No structured flags, no confidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptResponseShape {
+    /// v2: strict-JSON single-line response.
+    StrictJson,
+    /// v1: plain-text response, no structured metadata.
+    PlainText,
+}
 
 /// Ollama HTTP backend.
 ///
@@ -104,6 +139,10 @@ pub struct OllamaBackend {
     num_ctx: u32,
     request_timeout: Duration,
     template: PromptTemplate,
+    /// Tells [`Self::call_generate`] how to parse the response body.
+    /// Locked to the template at construction; flipping it without
+    /// changing the template would produce nonsense.
+    response_shape: PromptResponseShape,
     api_key: Option<String>,
 }
 
@@ -112,7 +151,7 @@ impl OllamaBackend {
     ///
     /// Reads `OLLAMA_HOST`, `OLLAMA_MODEL`, and `OLLAMA_API_KEY` once at
     /// construction. Never reads environment variables at translation
-    /// time.
+    /// time. The default template is v2 (strict-JSON contract).
     pub fn new() -> Result<Self, BackendError> {
         let host = std::env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_HOST.to_owned());
         let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_owned());
@@ -122,7 +161,8 @@ impl OllamaBackend {
             model,
             num_ctx: DEFAULT_NUM_CTX,
             request_timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
-            template: PromptTemplate::new(TEMPLATE_BODY, "v1"),
+            template: PromptTemplate::new(TEMPLATE_BODY_V2, "v2"),
+            response_shape: PromptResponseShape::StrictJson,
             api_key,
         })
     }
@@ -162,6 +202,36 @@ impl OllamaBackend {
     pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
         self.api_key = Some(key.into());
         self
+    }
+
+    /// Replace the prompt template and declare its response shape.
+    ///
+    /// The two MUST agree: a `StrictJson` template instructs the model to
+    /// emit JSON and the parser expects JSON; a `PlainText` template
+    /// instructs the model to emit a bare string and the parser wraps it
+    /// verbatim. Pairing them wrong produces useless failures.
+    ///
+    /// Used by the CLI's `--prompt` override path to load v1 or a
+    /// user-supplied template without rebuilding the backend.
+    #[must_use]
+    pub fn with_template(
+        mut self,
+        template: PromptTemplate,
+        response_shape: PromptResponseShape,
+    ) -> Self {
+        self.template = template;
+        self.response_shape = response_shape;
+        self
+    }
+
+    /// Convenience: load the v1 plain-text template. Returns `self` with
+    /// the template and response shape both set to v1.
+    #[must_use]
+    pub fn with_template_v1(self) -> Self {
+        self.with_template(
+            PromptTemplate::new(TEMPLATE_BODY_V1, "v1"),
+            PromptResponseShape::PlainText,
+        )
     }
 }
 
@@ -224,9 +294,17 @@ impl OllamaBackend {
     /// slot in the target locale, in canonical order.
     ///
     /// On any per-form failure the whole unit becomes
-    /// `Failed { reason: "ollama-plural-form-<form>: <inner>" }`. Whole-
-    /// batch errors (network, auth, protocol) bubble up via `?` and abort
-    /// the batch — matches the singular path's behaviour.
+    /// `Failed { reason: "ollama-plural-form-<form>: <inner>", kind:
+    /// <inner kind> }`. Whole-batch errors (network, auth, protocol)
+    /// bubble up via `?` and abort the batch — matches the singular
+    /// path's behaviour.
+    ///
+    /// Per-form flags and notes from the model are merged on the way out:
+    /// the union of all forms' semantic flags lands on the outcome, with
+    /// the **first** non-empty note per flag winning. Confidence is
+    /// reported as the **minimum** across forms (most pessimistic) since
+    /// the plural unit as a whole is only as confident as its weakest
+    /// form.
     fn translate_plural(
         &self,
         agent: &ureq::Agent,
@@ -234,6 +312,9 @@ impl OllamaBackend {
         ctx: &PromptContext<'_>,
     ) -> Result<TranslationOutcome, BackendError> {
         let mut forms: Vec<String> = Vec::with_capacity(locale.cldr_plural.len());
+        let mut merged_flags: Vec<Flag> = Vec::new();
+        let mut merged_notes: BTreeMap<Flag, String> = BTreeMap::new();
+        let mut min_confidence: Option<f32> = None;
         for category in locale.cldr_plural {
             // Re-render the prompt for each form so the template's
             // `{plural_category_line_or_empty}` token resolves to the
@@ -244,8 +325,23 @@ impl OllamaBackend {
             match self.call_generate(agent, &prompt)? {
                 TranslationOutcome::Translated {
                     text: TranslatedText::Singular(s),
-                    ..
-                } => forms.push(s),
+                    flags,
+                    confidence,
+                    flag_notes,
+                } => {
+                    forms.push(s);
+                    for f in flags {
+                        if !merged_flags.contains(&f) {
+                            merged_flags.push(f);
+                        }
+                    }
+                    for (f, note) in flag_notes {
+                        merged_notes.entry(f).or_insert(note);
+                    }
+                    if let Some(c) = confidence {
+                        min_confidence = Some(min_confidence.map_or(c, |prev| prev.min(c)));
+                    }
+                }
                 TranslationOutcome::Translated {
                     text: TranslatedText::Plural(_),
                     ..
@@ -256,12 +352,18 @@ impl OllamaBackend {
                     return Ok(TranslationOutcome::Failed {
                         reason: "ollama-plural-unexpected-shape".into(),
                         retryable: false,
+                        failure_kind: FailureKind::MalformedResponse,
                     });
                 }
-                TranslationOutcome::Failed { reason, retryable } => {
+                TranslationOutcome::Failed {
+                    reason,
+                    retryable,
+                    failure_kind,
+                } => {
                     return Ok(TranslationOutcome::Failed {
                         reason: format!("ollama-plural-form-{category}: {reason}"),
                         retryable,
+                        failure_kind,
                     });
                 }
                 TranslationOutcome::Skipped { reason } => {
@@ -271,7 +373,9 @@ impl OllamaBackend {
         }
         Ok(TranslationOutcome::Translated {
             text: TranslatedText::Plural(forms),
-            flags: Vec::new(),
+            flags: merged_flags,
+            confidence: min_confidence,
+            flag_notes: merged_notes,
         })
     }
 
@@ -280,7 +384,10 @@ impl OllamaBackend {
     ///
     /// Returns `Err(BackendError)` only for whole-batch failures (network,
     /// auth, protocol). Empty or malformed per-unit responses map to
-    /// `Ok(TranslationOutcome::Failed { .. })`.
+    /// `Ok(TranslationOutcome::Failed { .. })`. Malformed strict-JSON
+    /// responses are tagged [`FailureKind::MalformedResponse`] so the
+    /// Tauri layer can surface them as a gate finding instead of a
+    /// backend infrastructure error.
     fn call_generate(
         &self,
         agent: &ureq::Agent,
@@ -323,25 +430,201 @@ impl OllamaBackend {
                 message: format!("ollama returned non-JSON response: {e}"),
             })?;
 
-        let translated = parsed
+        let response_text = parsed
             .get("response")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim()
             .to_owned();
 
-        if translated.is_empty() {
+        if response_text.is_empty() {
             return Ok(TranslationOutcome::Failed {
                 reason: "ollama-empty-response".into(),
                 retryable: true,
+                failure_kind: FailureKind::Unspecified,
             });
         }
 
-        Ok(TranslationOutcome::Translated {
-            text: TranslatedText::Singular(translated),
-            flags: Vec::new(),
-        })
+        match self.response_shape {
+            PromptResponseShape::PlainText => Ok(TranslationOutcome::Translated {
+                text: TranslatedText::Singular(response_text),
+                flags: Vec::new(),
+                confidence: None,
+                flag_notes: BTreeMap::new(),
+            }),
+            // `call_generate` issues one prompt per CLDR plural form (or
+            // one prompt for a singular unit), so the model is always
+            // being asked for a SINGLE form. An array payload would
+            // mean the model ignored the per-form directive — surface
+            // that as MalformedResponse so the prompt can be tuned, not
+            // by writing a structurally invalid Plural target into a
+            // singular slot.
+            PromptResponseShape::StrictJson => {
+                Ok(parse_v2_response(&response_text, ExpectedShape::Singular))
+            }
+        }
     }
+}
+
+/// Which response shape `parse_v2_response` should accept.
+///
+/// The v2 prompt schema permits either a bare string or an array (in case
+/// a future "one call per plural unit" strategy lands). At today's call
+/// sites the model is always asked for a single form, so the parser
+/// rejects arrays as malformed; when the all-at-once strategy lands it
+/// will pass [`Self::Plural`] with the locale's CLDR arity instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedShape {
+    /// The caller wants a singular string. Array payloads become
+    /// `Failed { failure_kind: MalformedResponse }`.
+    Singular,
+    /// The caller wants a plural array of the given length. Singular
+    /// payloads, or arrays of the wrong length, become
+    /// `Failed { failure_kind: MalformedResponse }`. Not used by the
+    /// current backend (kept so the parser surface does not need a
+    /// breaking change when the all-at-once strategy lands).
+    #[allow(dead_code)]
+    Plural { arity: usize },
+}
+
+/// Parse a v2 strict-JSON response body and turn it into a
+/// [`TranslationOutcome`].
+///
+/// `expected` pins what the caller asked the model to produce; a payload
+/// of the wrong shape becomes `Failed { failure_kind: MalformedResponse,
+/// retryable: false }`. This prevents an array reply from being silently
+/// written into a singular [`i18n_harness_core::Unit`] slot — that would
+/// violate the unit invariant (`plural_arity == None` implies
+/// `Target::Singular`).
+///
+/// All parse / validation failures collapse to `Failed { failure_kind:
+/// MalformedResponse, retryable: false }`. The `reason` is short and
+/// machine-greppable so the Inspector can surface it verbatim; we
+/// deliberately do **not** include the full response body in the reason
+/// because models routinely emit thousands of tokens of preamble before
+/// the JSON object and that would dominate the UI.
+fn parse_v2_response(body: &str, expected: ExpectedShape) -> TranslationOutcome {
+    let raw: V2Response = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => {
+            return TranslationOutcome::Failed {
+                reason: format!("v2-parse-error: {e}"),
+                retryable: false,
+                failure_kind: FailureKind::MalformedResponse,
+            };
+        }
+    };
+
+    if !raw.confidence.is_finite() || !(0.0..=1.0).contains(&raw.confidence) {
+        return TranslationOutcome::Failed {
+            reason: format!("v2-confidence-out-of-bounds: {}", raw.confidence),
+            retryable: false,
+            failure_kind: FailureKind::MalformedResponse,
+        };
+    }
+
+    let text = match (raw.translation, expected) {
+        (TranslationField::Singular(s), ExpectedShape::Singular) => TranslatedText::Singular(s),
+        (TranslationField::Plural(forms), ExpectedShape::Plural { arity })
+            if forms.len() == arity =>
+        {
+            TranslatedText::Plural(forms)
+        }
+        (TranslationField::Singular(_), ExpectedShape::Plural { arity }) => {
+            return TranslationOutcome::Failed {
+                reason: format!(
+                    "v2-shape-mismatch: expected plural array of arity {arity}, got singular string"
+                ),
+                retryable: false,
+                failure_kind: FailureKind::MalformedResponse,
+            };
+        }
+        (TranslationField::Plural(forms), ExpectedShape::Singular) => {
+            return TranslationOutcome::Failed {
+                reason: format!(
+                    "v2-shape-mismatch: expected singular string, got plural array of length {}",
+                    forms.len()
+                ),
+                retryable: false,
+                failure_kind: FailureKind::MalformedResponse,
+            };
+        }
+        (TranslationField::Plural(forms), ExpectedShape::Plural { arity }) => {
+            return TranslationOutcome::Failed {
+                reason: format!(
+                    "v2-shape-mismatch: expected plural array of arity {arity}, got length {}",
+                    forms.len()
+                ),
+                retryable: false,
+                failure_kind: FailureKind::MalformedResponse,
+            };
+        }
+    };
+
+    let mut flags: Vec<Flag> = Vec::new();
+    let mut flag_notes: BTreeMap<Flag, String> = BTreeMap::new();
+    for entry in raw.flags.unwrap_or_default() {
+        if entry.kind.severity() != FlagSeverity::Semantic {
+            // The prompt forbids gate-produced kinds; if the model emits
+            // one anyway we treat the entire response as malformed
+            // rather than silently dropping the flag — silent drop would
+            // hide a prompt drift we want to see.
+            return TranslationOutcome::Failed {
+                reason: format!(
+                    "v2-non-semantic-flag: {:?} is not in the allowed set",
+                    entry.kind
+                ),
+                retryable: false,
+                failure_kind: FailureKind::MalformedResponse,
+            };
+        }
+        if !flags.contains(&entry.kind) {
+            flags.push(entry.kind);
+        }
+        if let Some(note) = entry.note {
+            if !note.is_empty() {
+                flag_notes.insert(entry.kind, note);
+            }
+        }
+    }
+
+    TranslationOutcome::Translated {
+        text,
+        flags,
+        confidence: Some(raw.confidence),
+        flag_notes,
+    }
+}
+
+/// Strict-JSON shape the v2 prompt instructs the model to emit. Unknown
+/// fields are rejected — the failure becomes a `MalformedResponse`
+/// outcome — so prompt drift is loud rather than silent.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2Response {
+    translation: TranslationField,
+    #[serde(default)]
+    flags: Option<Vec<V2Flag>>,
+    confidence: f32,
+}
+
+/// Singular vs plural shape of the `translation` field. Untagged so the
+/// model emits a bare string or a bare array; the prompt example shows
+/// both.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum TranslationField {
+    Singular(String),
+    Plural(Vec<String>),
+}
+
+/// One flag entry inside the v2 `flags` array. `note` is optional.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2Flag {
+    kind: Flag,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// Build a `ureq::Agent` with the given timeout applied globally.
@@ -389,5 +672,224 @@ fn register_from_locales(r: i18n_harness_locales::Register) -> Register {
         i18n_harness_locales::Register::Formal => Register::Formal,
         i18n_harness_locales::Register::Informal => Register::Informal,
         i18n_harness_locales::Register::Neutral => Register::Neutral,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Pure-function tests for the v2 strict-JSON parser. The mocked-HTTP
+    //! tests for end-to-end behaviour live in `tests/ollama.rs`.
+
+    use super::*;
+
+    #[test]
+    fn parse_v2_happy_path_singular() {
+        let body = r#"{"translation":"Hallo","confidence":0.92}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Translated {
+                text,
+                flags,
+                confidence,
+                flag_notes,
+            } => {
+                assert_eq!(text, TranslatedText::Singular("Hallo".into()));
+                assert!(flags.is_empty());
+                assert_eq!(confidence, Some(0.92));
+                assert!(flag_notes.is_empty());
+            }
+            other => panic!("expected Translated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_happy_path_plural() {
+        // The Plural shape is for the future "one call returns all forms"
+        // strategy; the parser surface already accepts it so adding that
+        // strategy is non-breaking.
+        let body = r#"{"translation":["1 Element","%n Elemente"],"confidence":0.8}"#;
+        match parse_v2_response(body, ExpectedShape::Plural { arity: 2 }) {
+            TranslationOutcome::Translated {
+                text: TranslatedText::Plural(forms),
+                confidence,
+                ..
+            } => {
+                assert_eq!(forms, vec!["1 Element", "%n Elemente"]);
+                assert_eq!(confidence, Some(0.8));
+            }
+            other => panic!("expected Translated plural, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_plural_payload_when_singular_expected_is_malformed() {
+        // P1 codex finding: a singular call receiving an array reply must
+        // surface as MalformedResponse so the singular Unit slot does not
+        // get a Plural target written into it (which would violate the
+        // Unit invariant `plural_arity == None ⇒ Target::Singular`).
+        let body = r#"{"translation":["form-one","form-two"],"confidence":0.8}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(reason.contains("v2-shape-mismatch"), "reason: {reason}");
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_singular_payload_when_plural_expected_is_malformed() {
+        let body = r#"{"translation":"only-one-form","confidence":0.8}"#;
+        match parse_v2_response(body, ExpectedShape::Plural { arity: 2 }) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(reason.contains("v2-shape-mismatch"), "reason: {reason}");
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_plural_wrong_arity_is_malformed() {
+        let body = r#"{"translation":["one","two","three"],"confidence":0.8}"#;
+        match parse_v2_response(body, ExpectedShape::Plural { arity: 2 }) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(reason.contains("v2-shape-mismatch"), "reason: {reason}");
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_with_flags_and_notes() {
+        let body = r#"{"translation":"Aufnahme","flags":[{"kind":"ambiguous-source","note":"could be noun or verb"},{"kind":"brand-term"}],"confidence":0.55}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Translated {
+                flags,
+                flag_notes,
+                confidence,
+                ..
+            } => {
+                assert_eq!(flags, vec![Flag::AmbiguousSource, Flag::BrandTerm]);
+                assert_eq!(
+                    flag_notes.get(&Flag::AmbiguousSource),
+                    Some(&"could be noun or verb".to_string())
+                );
+                assert!(
+                    !flag_notes.contains_key(&Flag::BrandTerm),
+                    "absent note must not insert an empty entry"
+                );
+                assert_eq!(confidence, Some(0.55));
+            }
+            other => panic!("expected Translated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_unknown_flag_kind_is_malformed() {
+        let body = r#"{"translation":"Hallo","flags":[{"kind":"made-up-flag"}],"confidence":0.9}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(reason.contains("v2-parse-error"), "reason: {reason}");
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_non_semantic_flag_is_malformed() {
+        // PlaceholderMismatch is gate-produced; the prompt forbids it.
+        let body =
+            r#"{"translation":"Hallo","flags":[{"kind":"placeholder-mismatch"}],"confidence":0.9}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(reason.contains("v2-non-semantic-flag"), "reason: {reason}");
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_confidence_out_of_bounds_is_malformed() {
+        let body = r#"{"translation":"Hallo","confidence":1.5}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed {
+                failure_kind,
+                reason,
+                ..
+            } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+                assert!(
+                    reason.contains("confidence-out-of-bounds"),
+                    "reason: {reason}"
+                );
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+
+        let body = r#"{"translation":"Hallo","confidence":-0.1}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed { failure_kind, .. } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_missing_confidence_is_malformed() {
+        // Confidence is required by the v2 contract; the prompt says so.
+        let body = r#"{"translation":"Hallo"}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed { failure_kind, .. } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_unknown_top_level_field_is_malformed() {
+        // deny_unknown_fields trips on any extension the model invents.
+        let body = r#"{"translation":"Hallo","confidence":0.9,"extra":"oops"}"#;
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed { failure_kind, .. } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_v2_non_json_body_is_malformed() {
+        let body = "Hello, here is my translation: Hallo";
+        match parse_v2_response(body, ExpectedShape::Singular) {
+            TranslationOutcome::Failed { failure_kind, .. } => {
+                assert_eq!(failure_kind, FailureKind::MalformedResponse);
+            }
+            other => panic!("expected Failed MalformedResponse, got {other:?}"),
+        }
     }
 }

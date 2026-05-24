@@ -363,6 +363,9 @@ fn render_detail(f: &Finding) -> String {
             missing,
             extra,
         }) => format!("slot {slot}: missing tags={missing:?} extra tags={extra:?}"),
+        FindingDetail::BackendMalformedResponse(detail) => {
+            format!("backend response could not be parsed: {}", detail.reason)
+        }
     }
 }
 
@@ -383,6 +386,9 @@ fn flag_name(flag: Flag) -> &'static str {
         Flag::InsufficientContext => "insufficient-context",
         Flag::LowConfidence => "low-confidence",
         Flag::MarkupTagMismatch => "markup-tag-mismatch",
+        Flag::BackendMalformedResponse => "backend-malformed-response",
+        Flag::BrandTerm => "brand-term",
+        Flag::ToneMismatch => "tone-mismatch",
     }
 }
 
@@ -601,7 +607,12 @@ fn merge_outcome(
     summary.writable_total += 1;
     let mut out = unit.clone();
     match outcome {
-        TranslationOutcome::Translated { text, flags } => {
+        TranslationOutcome::Translated {
+            text,
+            flags,
+            confidence,
+            flag_notes,
+        } => {
             summary.translated += 1;
             out.target = match text {
                 TranslatedText::Singular(s) => Target::Singular {
@@ -619,6 +630,8 @@ fn merge_outcome(
             for flag in flags {
                 out.flags.insert(*flag);
             }
+            out.confidence = *confidence;
+            out.flag_notes = flag_notes.clone();
         }
         TranslationOutcome::Skipped { .. } => {
             summary.skipped += 1;

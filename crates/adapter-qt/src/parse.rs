@@ -353,6 +353,8 @@ impl ParseState {
             source_hash,
             review_status: None,
             source_changed_since_review: false,
+            confidence: None,
+            flag_notes: std::collections::BTreeMap::new(),
         };
 
         let _ = translation_end; // computed by the children walkers but not currently retained.
