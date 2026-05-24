@@ -7,7 +7,6 @@
 //! JavaScript layer. No business logic that does not fit on a single
 //! screen of glue belongs here.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -17,13 +16,26 @@ use serde::Serialize;
 
 /// Process-wide state shared across Tauri commands.
 ///
-/// Holds opened catalogs keyed by their absolute path. The catalog
-/// carries the preserved source bytes needed for byte-stable
+/// One catalog is open at a time — opening a new one replaces the
+/// previous, so memory does not grow unbounded across opens. The
+/// catalog carries the preserved source bytes needed for byte-stable
 /// round-trip on save, so it lives here rather than crossing the IPC
-/// bridge. The frontend passes the same path back as a handle.
+/// bridge on every command.
 #[derive(Default)]
 pub struct AppState {
-    catalogs: Mutex<HashMap<PathBuf, Catalog>>,
+    catalog: Mutex<Option<OpenCatalog>>,
+}
+
+/// The currently-open catalog plus the absolute path it was loaded
+/// from. The path is the frontend's handle; both fields are read by
+/// commands added in M3.3 (`translate_unit`, `save_catalog`, …).
+#[allow(
+    dead_code,
+    reason = "fields consumed by M3.3 commands; kept now to land the storage shape"
+)]
+struct OpenCatalog {
+    path: PathBuf,
+    catalog: Catalog,
 }
 
 /// Wire-format response from the `open_catalog` Tauri command.
@@ -53,7 +65,7 @@ fn app_version() -> &'static str {
 /// Returns the units for the frontend to render. The catalog itself
 /// (including the byte buffer needed for byte-stable round-trip) is
 /// kept server-side; the frontend identifies it by path on follow-up
-/// commands.
+/// commands. Opening a new catalog replaces the previously-open one.
 #[tauri::command]
 fn open_catalog(
     path: String,
@@ -67,11 +79,11 @@ fn open_catalog(
         unit_count: catalog.units().len(),
         units: catalog.units().to_vec(),
     };
-    let mut catalogs = state
-        .catalogs
+    let mut current = state
+        .catalog
         .lock()
         .map_err(|_| "catalog state lock poisoned".to_string())?;
-    catalogs.insert(abs, catalog);
+    *current = Some(OpenCatalog { path: abs, catalog });
     Ok(response)
 }
 
