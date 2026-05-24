@@ -9,6 +9,8 @@ interface Props {
   summary: ProjectSummary;
   activeCatalogPath: string | null;
   dirtyCatalogPaths: Set<string>;
+  // Empty set = show all; non-empty = show only catalogs whose locale is in the set.
+  activeLocaleFilter: Set<string>;
   onCatalogSelect: (absolutePath: string) => void;
 }
 
@@ -16,9 +18,15 @@ export function ProjectSidebar({
   summary,
   activeCatalogPath,
   dirtyCatalogPaths,
+  activeLocaleFilter,
   onCatalogSelect,
 }: Props) {
   const totalCatalogs = summary.catalogs.length;
+
+  const visibleCatalogs =
+    activeLocaleFilter.size === 0
+      ? summary.catalogs
+      : summary.catalogs.filter((c) => activeLocaleFilter.has(c.locale));
 
   return (
     <aside
@@ -37,7 +45,9 @@ export function ProjectSidebar({
           {summary.name}
         </p>
         <p className="text-xs text-fg-tertiary mt-0.5">
-          {totalCatalogs} {totalCatalogs === 1 ? "catalog" : "catalogs"}
+          {activeLocaleFilter.size > 0
+            ? `${visibleCatalogs.length} of ${totalCatalogs} ${totalCatalogs === 1 ? "catalog" : "catalogs"}`
+            : `${totalCatalogs} ${totalCatalogs === 1 ? "catalog" : "catalogs"}`}
         </p>
       </div>
 
@@ -50,9 +60,13 @@ export function ProjectSidebar({
           <p className="px-3 py-2 text-xs text-fg-disabled">
             No catalogs declared.
           </p>
+        ) : visibleCatalogs.length === 0 ? (
+          <p className="px-3 py-2 text-xs text-fg-disabled">
+            No catalogs match the active locale filter.
+          </p>
         ) : (
           <ul>
-            {summary.catalogs.map((ref) => (
+            {visibleCatalogs.map((ref) => (
               <CatalogItem
                 key={ref.absolute_path}
                 catalogRef={ref}

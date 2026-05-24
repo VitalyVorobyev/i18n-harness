@@ -187,6 +187,9 @@ export type ProjectView = "translate" | "glossary" | "settings" | "quality";
 
 interface ProjectTopBarProps {
   projectName: string;
+  locales: string[];
+  activeLocaleFilter: Set<string>;
+  onLocaleFilterChange: (next: Set<string>) => void;
   view: ProjectView;
   onViewChange: (v: ProjectView) => void;
   theme: Theme;
@@ -196,21 +199,39 @@ interface ProjectTopBarProps {
 
 export function ProjectTopBar({
   projectName,
+  locales,
+  activeLocaleFilter,
+  onLocaleFilterChange,
   view,
   onViewChange,
   theme,
   onToggleTheme,
   onCloseProject,
 }: ProjectTopBarProps) {
+  const hasFilter = activeLocaleFilter.size > 0;
+
+  function toggleLocale(locale: string) {
+    const next = new Set(activeLocaleFilter);
+    if (next.has(locale)) {
+      next.delete(locale);
+    } else {
+      next.add(locale);
+    }
+    onLocaleFilterChange(next);
+  }
+
   return (
     <header
       className={cn(
-        "app-chrome shrink-0 h-11 px-4 grid grid-cols-[1fr_auto_1fr] items-center",
+        "app-chrome shrink-0 px-4 flex items-center gap-3",
         "bg-bg-surface border-b border-border-subtle",
+        // Height expands to two lines when there are locale chips; use min-h
+        // so the single-row case stays at h-11.
+        locales.length > 0 ? "min-h-[44px] py-1.5" : "h-11",
       )}
     >
-      {/* Left: project name */}
-      <div className="flex items-center gap-2 min-w-0">
+      {/* Left: project name + locale chips */}
+      <div className="flex items-center gap-2 min-w-0 shrink-0">
         <span
           aria-hidden="true"
           className={cn(
@@ -219,18 +240,70 @@ export function ProjectTopBar({
           )}
         />
         <span
-          className="text-sm font-semibold text-fg-primary truncate max-w-[180px]"
+          className="text-sm font-semibold text-fg-primary truncate max-w-[140px]"
           title={projectName}
         >
           {projectName}
         </span>
       </div>
 
+      {/* Locale chips — multi-select filter */}
+      {locales.length > 0 && (
+        <fieldset className="flex items-center gap-1 flex-wrap flex-1 min-w-0 border-0 p-0 m-0">
+          <legend className="sr-only">Filter by locale</legend>
+          {locales.map((locale) => {
+            const active = activeLocaleFilter.has(locale);
+            return (
+              <button
+                key={locale}
+                type="button"
+                aria-pressed={active}
+                onClick={() => toggleLocale(locale)}
+                className={cn(
+                  "inline-flex items-center h-5 px-1.5 rounded-pill border",
+                  "font-mono text-[10px] font-medium tracking-loose",
+                  "transition-colors duration-100 ease-out",
+                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+                  active
+                    ? // Filled / prominent state when filter is active
+                      "border-accent bg-accent text-accent-fg"
+                    : // Outlined / subtle state (matches sidebar locale chips)
+                      "border-border-subtle bg-bg-surface text-fg-tertiary hover:border-border-default hover:text-fg-secondary",
+                )}
+                title={
+                  active ? `Remove ${locale} filter` : `Filter to ${locale}`
+                }
+              >
+                {locale}
+              </button>
+            );
+          })}
+          {hasFilter && (
+            <button
+              type="button"
+              onClick={() => onLocaleFilterChange(new Set())}
+              className={cn(
+                "inline-flex items-center h-5 px-1.5 rounded-pill border",
+                "text-[10px] font-medium",
+                "border-border-subtle bg-transparent text-fg-tertiary",
+                "hover:border-border-default hover:text-fg-secondary",
+                "transition-colors duration-100 ease-out",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+              title="Clear locale filter"
+              aria-label="Clear locale filter"
+            >
+              Clear filter
+            </button>
+          )}
+        </fieldset>
+      )}
+
       {/* Center: view tabs */}
       <div
         role="tablist"
         aria-label="Project view"
-        className="flex items-center gap-1"
+        className="flex items-center gap-1 shrink-0"
       >
         <TabButton
           active={view === "translate"}
@@ -261,7 +334,7 @@ export function ProjectTopBar({
       </div>
 
       {/* Right: theme toggle + close project */}
-      <div className="flex items-center gap-2 justify-end">
+      <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <ActionButton onClick={onCloseProject} title="Close project">
           Close project
