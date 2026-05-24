@@ -405,16 +405,26 @@ fn load_glossary(path: String) -> Result<GlossaryLoadResponse, String> {
 #[tauri::command]
 fn load_metrics(path: String) -> Result<MetricsResponse, String> {
     let abs = PathBuf::from(&path);
-    let content = std::fs::read_to_string(&abs).map_err(|e| format!("read failed: {e}"))?;
+    // Read raw bytes, not a String. A single non-UTF-8 byte anywhere
+    // in the file would make `read_to_string` abort the whole command,
+    // turning a recoverable "bad line" scenario into a hard load
+    // failure. With raw bytes we split on '\n' and try UTF-8 decode
+    // per line, so a partially-corrupted run still surfaces the
+    // events that came before the corruption.
+    let bytes = std::fs::read(&abs).map_err(|e| format!("read failed: {e}"))?;
     let mut events: Vec<MetricEvent> = Vec::new();
     let mut error_count: usize = 0;
     let mut line_count: usize = 0;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+    for raw in bytes.split(|b| *b == b'\n') {
+        let trimmed = raw.trim_ascii();
+        if trimmed.is_empty() {
             continue;
         }
         line_count += 1;
+        let Ok(line) = std::str::from_utf8(trimmed) else {
+            error_count += 1;
+            continue;
+        };
         match serde_json::from_str::<MetricEvent>(line) {
             Ok(event) => events.push(event),
             Err(_) => {
