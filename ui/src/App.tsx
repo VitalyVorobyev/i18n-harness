@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CatalogList } from "./components/CatalogList/CatalogList";
 import { EmptyState } from "./components/EmptyState/EmptyState";
 import { Inspector } from "./components/Inspector/Inspector";
 import { TopBar } from "./components/TopBar/TopBar";
-import { UnitEditor } from "./components/UnitEditor/UnitEditor";
+import {
+  UnitEditor,
+  type UnitEditorHandle,
+} from "./components/UnitEditor/UnitEditor";
 import {
   appVersion,
   discardChanges,
@@ -40,6 +43,7 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+  const editorRef = useRef<UnitEditorHandle | null>(null);
 
   useEffect(() => {
     appVersion()
@@ -161,7 +165,16 @@ export function App() {
   );
 
   const onSave = useCallback(async () => {
-    if (!catalog || dirtyIds.size === 0) return;
+    if (!catalog) return;
+    try {
+      // Flush any pending textarea draft first — ⌘S while the editor
+      // is still focused must land that edit before save_catalog runs.
+      await editorRef.current?.flushPendingEdit();
+    } catch (e) {
+      flashError(`Save failed during flush: ${formatError(e)}`);
+      return;
+    }
+    if (dirtyIds.size === 0) return;
     try {
       const summary = await saveCatalog();
       setDirtyIds(new Set());
@@ -246,6 +259,7 @@ export function App() {
           />
           {selectedUnit ? (
             <UnitEditor
+              ref={editorRef}
               unit={selectedUnit}
               busy={selectedBusy}
               hasOllama={Boolean(catalog.language)}

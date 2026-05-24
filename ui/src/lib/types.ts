@@ -54,10 +54,11 @@ export type TargetEdit =
   | { kind: "singular"; text: string | null }
   | { kind: "plural"; form_index: number; text: string | null };
 
-// Severity classification of a gate flag. Kept in sync with
-// `i18n_harness_core::Flag::severity()` in Rust — that file is the
-// canonical mapping; this duplication is the IPC bridge.
-export type Severity = "hard" | "soft" | "info";
+// Severity classification of a gate flag. Mirrors
+// `i18n_harness_core::Flag::severity()` in Rust verbatim — that file is the
+// canonical mapping; this duplication is the IPC bridge. Add or rename a
+// flag there first, then update this file.
+export type Severity = "hard" | "soft" | "semantic";
 
 export interface Finding {
   flag: string;
@@ -82,11 +83,27 @@ const HARD_FLAGS = new Set([
   "empty-target-when-finished",
 ]);
 
-const INFO_FLAGS = new Set(["cjk-punctuation-tolerated"]);
+const SOFT_FLAGS = new Set([
+  "accel-mismatch",
+  "length-warn",
+  "cjk-punctuation-tolerated",
+  "placeholder-agreement-risk",
+  "markup-tag-mismatch",
+]);
+
+const SEMANTIC_FLAGS = new Set([
+  "ambiguous-source",
+  "idiom",
+  "insufficient-context",
+  "low-confidence",
+]);
 
 export function severityOf(flag: string): Severity {
   if (HARD_FLAGS.has(flag)) return "hard";
-  if (INFO_FLAGS.has(flag)) return "info";
+  if (SOFT_FLAGS.has(flag)) return "soft";
+  if (SEMANTIC_FLAGS.has(flag)) return "semantic";
+  // Unknown flag — be conservative: treat as soft so it surfaces but
+  // does not look like a hard blocker.
   return "soft";
 }
 

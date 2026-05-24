@@ -92,22 +92,18 @@ function FindingRow({ finding }: { finding: Finding }) {
     <li
       className={cn(
         "px-3 py-2 rounded-md border",
-        sev === "hard"
-          ? "bg-severity-hard-bg border-severity-hard-border"
-          : sev === "soft"
-            ? "bg-severity-soft-bg border-state-proposed-border"
-            : "bg-severity-info-bg border-border-default",
+        sev === "hard" && "bg-severity-hard-bg border-severity-hard-border",
+        sev === "soft" && "bg-severity-soft-bg border-state-proposed-border",
+        sev === "semantic" && "bg-severity-info-bg border-border-default",
       )}
     >
       <div className="flex items-center justify-between gap-2 mb-1">
         <span
           className={cn(
             "font-mono text-xs",
-            sev === "hard"
-              ? "text-severity-hard"
-              : sev === "soft"
-                ? "text-severity-soft"
-                : "text-severity-info",
+            sev === "hard" && "text-severity-hard",
+            sev === "soft" && "text-severity-soft",
+            sev === "semantic" && "text-severity-info",
           )}
         >
           {finding.flag}
@@ -124,44 +120,68 @@ function FindingRow({ finding }: { finding: Finding }) {
 }
 
 function summarizeDetail(detail: Finding["detail"]): string {
-  // Best-effort one-line summary. The Rust detail enum has a stable
-  // `rule` discriminator and rule-specific fields; we surface what
-  // the translator most often acts on.
+  // Best-effort one-line summary. Field names mirror the Rust
+  // `*Detail` structs in `crates/gate/src/report.rs`. When a new rule
+  // lands there, add a case here.
   const { rule, ...rest } = detail;
   switch (rule) {
     case "placeholder-mismatch":
-      return formatPair(rest, "source", "target");
+      return formatMissingExtra(rest);
     case "plural-arity-mismatch":
-      return formatPair(rest, "expected", "actual");
+      return `expected ${rest.expected ?? "?"} forms, found ${rest.found ?? "?"}${
+        rest.wrong_variant ? " (singular/plural variant wrong)" : ""
+      }`;
     case "icu-parse-error":
-      return String(rest.message ?? rule);
+      return String(rest.message ?? "ICU parse error");
     case "empty-target-when-finished":
-      return "Target is empty but state was set to finished.";
+      return `slot ${rest.slot ?? 0}: state is Finished but the target is empty.`;
     case "accel-mismatch":
-      return formatPair(rest, "source_count", "target_count");
-    case "length-warn":
-      return `Target is ~${
-        typeof rest.ratio === "number" ? rest.ratio.toFixed(2) : "?"
-      }× the source length (limit ${rest.limit ?? "?"}×).`;
+      return `source has ${rest.source_count ?? "?"} accel marker(s); target has ${
+        rest.target_count ?? "?"
+      }.`;
+    case "length-warn": {
+      const ratio =
+        typeof rest.ratio === "number" ? rest.ratio.toFixed(2) : "?";
+      const threshold =
+        typeof rest.threshold === "number" ? rest.threshold.toFixed(2) : "?";
+      return `target is ${ratio}× the source length (threshold ${threshold}×).`;
+    }
     case "markup-tag-mismatch":
-      return formatPair(rest, "source_tags", "target_tags");
+      return formatMissingExtra(rest, "tag");
     case "placeholder-agreement-risk":
-      return `Placeholder ${rest.placeholder ?? ""} risks agreement issues.`;
-    case "cjk-punctuation-tolerated":
-      return "CJK script with ASCII punctuation; convention is full-width.";
+      return `placeholder ${rest.placeholder ?? ""} follows determiner "${
+        rest.determiner ?? ""
+      }".`;
+    case "cjk-punctuation-tolerated": {
+      const chars = Array.isArray(rest.characters) ? rest.characters : [];
+      return chars.length > 0
+        ? `ASCII punctuation where CJK convention is full-width: ${chars.join(" ")}`
+        : "CJK script with ASCII punctuation.";
+    }
     default:
       return rule;
   }
 }
 
-function formatPair(
+function formatMissingExtra(
   rest: Record<string, unknown>,
-  a: string,
-  b: string,
+  noun: string = "placeholder",
 ): string {
-  const av = JSON.stringify(rest[a] ?? null);
-  const bv = JSON.stringify(rest[b] ?? null);
-  return `${a}: ${av} vs ${b}: ${bv}`;
+  const missing = Array.isArray(rest.missing) ? (rest.missing as string[]) : [];
+  const extra = Array.isArray(rest.extra) ? (rest.extra as string[]) : [];
+  const parts: string[] = [];
+  if (missing.length > 0) {
+    parts.push(`missing ${noun}(s): ${missing.map(quote).join(", ")}`);
+  }
+  if (extra.length > 0) {
+    parts.push(`extra ${noun}(s): ${extra.map(quote).join(", ")}`);
+  }
+  if (parts.length === 0) return "mismatch";
+  return parts.join("; ");
+}
+
+function quote(s: string): string {
+  return `"${s}"`;
 }
 
 function Item({
