@@ -96,10 +96,13 @@ impl UnitState {
     /// Returns true if the harness is allowed to write a new target into a
     /// unit currently in this state.
     ///
-    /// This is the single canonical source of that rule; adapters and the
-    /// backend driver consult it instead of replicating the match.
+    /// Vanished and Obsolete units are off-limits — they exist only to
+    /// preserve message ids for potential reuse and must never have their
+    /// translations rewritten. Untranslated, Proposed, and Finished are all
+    /// writable; editing a Finished unit transitions it back to Proposed (the
+    /// human is reconsidering the finalized translation).
     pub fn is_writable(self) -> bool {
-        matches!(self, Self::Untranslated | Self::Proposed)
+        matches!(self, Self::Untranslated | Self::Proposed | Self::Finished)
     }
 }
 
@@ -333,10 +336,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writable_states_are_only_untranslated_and_proposed() {
+    fn writable_states_are_untranslated_proposed_and_finished() {
         assert!(UnitState::Untranslated.is_writable());
         assert!(UnitState::Proposed.is_writable());
-        assert!(!UnitState::Finished.is_writable());
+        assert!(UnitState::Finished.is_writable());
         assert!(!UnitState::Vanished.is_writable());
         assert!(!UnitState::Obsolete.is_writable());
     }
