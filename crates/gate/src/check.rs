@@ -13,6 +13,7 @@
 //! 6. Length warn.
 //! 7. CJK punctuation.
 //! 8. Placeholder agreement risk.
+//! 9. Markup tag preservation.
 //!
 //! Each rule appends zero or more [`crate::Finding`]s to the running list.
 //! Rules do **not** short-circuit each other — if ICU parse fails for one
@@ -28,8 +29,8 @@ use i18n_harness_locales::{Locale, Register, Script};
 use crate::icu::{Message, parse, placeholder_multiset};
 use crate::report::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
-    IcuParseDetail, LengthWarnDetail, PlaceholderAgreementDetail, PlaceholderMismatchDetail,
-    PluralArityMismatchDetail,
+    IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
+    PlaceholderMismatchDetail, PluralArityMismatchDetail,
 };
 
 /// Entry point used by [`crate::validate`].
@@ -56,6 +57,7 @@ pub(crate) fn run(unit: &Unit, locale: &Locale, _glossary: Option<&Glossary>) ->
     length_warn_check(unit, locale, &target_slots, &mut findings);
     cjk_punctuation_check(locale, &target_slots, &mut findings);
     placeholder_agreement_check(locale, &target_slots, &mut findings);
+    markup_tag_check(unit, &target_slots, &mut findings);
 
     GateReport::from_findings(unit.id.clone(), findings)
 }
@@ -456,4 +458,134 @@ fn preceding_determiner(text: &str, brace: usize) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Markup tag preservation check (soft).
+///
+/// HTML-style tags in UI strings are common (`<b>`, `<i>`, `<a href=...>`,
+/// `<br/>`). When a model drops or reorders them, the rendered UI breaks.
+/// The check compares the multiset of tag NAMES (`b`, `i`, `a`, …) between
+/// source and target; attributes and case are ignored, self-closing
+/// `<br/>` is treated identically to `<br>`.
+///
+/// We **don't** parse arbitrary HTML — that is overkill for the UI-string
+/// case. We just lex `<NAME>` / `</NAME>` / `<NAME ... />` patterns. This
+/// is intentionally lenient on attribute syntax and intentionally strict
+/// on tag names: if the source uses `<b>` and the target uses `<strong>`,
+/// that is a tag-name mismatch worth flagging.
+fn markup_tag_check(unit: &Unit, slots: &[TargetSlot<'_>], findings: &mut Vec<Finding>) {
+    if slots.is_empty() {
+        return;
+    }
+    let source_tags = extract_tag_names(&unit.source);
+    if source_tags.is_empty() {
+        // No tags in source → don't flag spurious tag insertions in the
+        // target. Spurious `<` in target text would surface as an
+        // accelerator/length issue or be visible to the reviewer; flagging
+        // every model-introduced `<` would be too noisy.
+        return;
+    }
+    for slot in slots {
+        let target_tags = extract_tag_names(slot.text);
+        let (missing, extra) = multiset_diff(&source_tags, &target_tags);
+        if missing.is_empty() && extra.is_empty() {
+            continue;
+        }
+        findings.push(Finding {
+            flag: Flag::MarkupTagMismatch,
+            detail: FindingDetail::MarkupTagMismatch(MarkupTagMismatchDetail {
+                slot: slot.slot,
+                missing,
+                extra,
+            }),
+        });
+    }
+}
+
+/// Lex `<NAME>`, `</NAME>`, and `<NAME ... />` patterns out of `text` and
+/// return the tag names in document order. Lower-cases names so `<B>` and
+/// `<b>` collapse.
+///
+/// Heuristics:
+/// - A `<` followed by `/`, an ASCII letter, or `_` starts a candidate.
+/// - The name runs while characters are ASCII alphanumeric, `-`, or `_`.
+/// - Anything else (or end-of-string before `>`) aborts the candidate;
+///   the lone `<` is not counted.
+/// - Self-closing `<br/>` and opening `<br>` produce the same name; we do
+///   not distinguish them at this granularity.
+fn extract_tag_names(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        if j < bytes.len() && bytes[j] == b'/' {
+            j += 1;
+        }
+        let name_start = j;
+        while j < bytes.len() {
+            let b = bytes[j];
+            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if j == name_start {
+            // No name characters after `<` (or `</`) — not a tag.
+            i += 1;
+            continue;
+        }
+        // Now skip attributes / whitespace up to `>`. If we hit end-of-
+        // string without finding `>`, treat as not-a-tag.
+        let mut k = j;
+        while k < bytes.len() && bytes[k] != b'>' {
+            k += 1;
+        }
+        if k >= bytes.len() {
+            i += 1;
+            continue;
+        }
+        if let Ok(name) = std::str::from_utf8(&bytes[name_start..j]) {
+            out.push(name.to_ascii_lowercase());
+        }
+        i = k + 1;
+    }
+    out
+}
+
+/// Compute (missing-in-target, extra-in-target) multisets. Each side may
+/// contain duplicates (e.g. two `<b>` in source, one in target → `b` in
+/// missing).
+fn multiset_diff(source: &[String], target: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut s: Vec<String> = source.to_vec();
+    let mut t: Vec<String> = target.to_vec();
+    s.sort();
+    t.sort();
+    let mut missing = Vec::new();
+    let mut extra = Vec::new();
+    let (mut i, mut j) = (0, 0);
+    while i < s.len() && j < t.len() {
+        match s[i].cmp(&t[j]) {
+            std::cmp::Ordering::Equal => {
+                i += 1;
+                j += 1;
+            }
+            std::cmp::Ordering::Less => {
+                missing.push(s[i].clone());
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                extra.push(t[j].clone());
+                j += 1;
+            }
+        }
+    }
+    missing.extend_from_slice(&s[i..]);
+    extra.extend_from_slice(&t[j..]);
+    (missing, extra)
 }

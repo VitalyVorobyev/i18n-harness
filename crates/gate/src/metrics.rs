@@ -273,6 +273,7 @@ fn flag_rule_name(flag: Flag) -> &'static str {
         Flag::Idiom => "idiom",
         Flag::InsufficientContext => "insufficient-context",
         Flag::LowConfidence => "low-confidence",
+        Flag::MarkupTagMismatch => "markup-tag-mismatch",
     }
 }
 

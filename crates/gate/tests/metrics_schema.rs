@@ -15,8 +15,8 @@ use i18n_harness_core::{Flag, UnitId};
 use i18n_harness_gate::metrics::{METRICS_SCHEMA_VERSION, MemorySink, MetricsWriter};
 use i18n_harness_gate::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
-    IcuParseDetail, LengthWarnDetail, PlaceholderAgreementDetail, PlaceholderMismatchDetail,
-    PluralArityMismatchDetail,
+    IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
+    PlaceholderMismatchDetail, PluralArityMismatchDetail,
 };
 use serde_json::Value;
 
@@ -82,6 +82,14 @@ fn report_with_every_rule() -> GateReport {
                 determiner: "der".into(),
             }),
         },
+        Finding {
+            flag: Flag::MarkupTagMismatch,
+            detail: FindingDetail::MarkupTagMismatch(MarkupTagMismatchDetail {
+                slot: 0,
+                missing: vec!["b".into()],
+                extra: vec![],
+            }),
+        },
     ];
     GateReport::from_findings(UnitId::from("ctx::id"), findings)
 }
@@ -106,9 +114,9 @@ fn every_event_carries_the_required_top_level_keys() {
     writer.record_report(&report_with_every_rule()).unwrap();
     let events = writer.sink().events();
 
-    // 4 hard + 4 soft = 8 events; semantic findings are not written by the
+    // 4 hard + 5 soft = 9 events; semantic findings are not written by the
     // metrics writer (they are model-supplied, not gate-supplied).
-    assert_eq!(events.len(), 8, "expected one event per hard+soft finding");
+    assert_eq!(events.len(), 9, "expected one event per hard+soft finding");
 
     let lines = writer.sink().lines();
     for raw in &lines {
@@ -220,4 +228,10 @@ fn per_rule_detail_shapes_are_stable() {
     let par = &by_rule["placeholder-agreement-risk"]["detail"];
     assert!(par["placeholder"].is_string());
     assert!(par["determiner"].is_string());
+
+    // markup-tag-mismatch
+    let mtm = &by_rule["markup-tag-mismatch"]["detail"];
+    assert!(mtm["slot"].is_u64());
+    assert!(mtm["missing"].is_array());
+    assert!(mtm["extra"].is_array());
 }
