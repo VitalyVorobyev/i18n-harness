@@ -981,34 +981,67 @@ fn save_catalog_in_project(
     })
 }
 
+/// Wire response from `save_all_dirty`. Carries both the catalogs that were
+/// successfully written and (when the run stopped early) the path + reason of
+/// the first failure. Using a single response shape — rather than
+/// `Result<Vec<SaveSummary>, String>` — means the UI never loses the list of
+/// already-saved catalogs when one apply mid-batch fails, so it can refresh
+/// the right dirty pills without an extra IPC round trip.
+#[derive(Debug, Serialize)]
+pub struct SaveAllDirtyResponse {
+    /// Catalogs written, in BTreeMap iteration order (absolute path order).
+    /// Their `dirty` flag has been cleared in the in-memory store.
+    pub saved: Vec<SaveSummary>,
+    /// Absolute path of the catalog whose `apply` failed, if any. Catalogs
+    /// after this entry in the iteration order were not attempted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_path: Option<String>,
+    /// Human-readable failure reason, matched 1:1 with `failed_path`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed_reason: Option<String>,
+}
+
 /// Write every dirty catalog in the project store back to disk.
 ///
 /// Catalogs are written in BTreeMap iteration order (absolute path order),
 /// which is deterministic. On the first apply failure the function stops and
-/// returns the partial list of successes plus an `Err` describing the failing
-/// path. Successfully-written entries have their `dirty` flag cleared before
-/// the failure is surfaced.
+/// returns the catalogs written so far plus `failed_path` / `failed_reason`
+/// describing the failure. Successfully-written entries have their `dirty`
+/// flag cleared regardless of whether a later entry failed.
 #[tauri::command]
-fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<Vec<SaveSummary>, String> {
+fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<SaveAllDirtyResponse, String> {
     let mut store = state
         .project_catalogs
         .lock()
         .map_err(project_catalogs_lock_poisoned)?;
-    let mut summaries: Vec<SaveSummary> = Vec::new();
+    let mut saved: Vec<SaveSummary> = Vec::new();
     for (abs, entry) in store.iter_mut() {
         if !entry.dirty {
             continue;
         }
         let units = entry.catalog.units().to_vec();
-        i18n_harness_adapter_qt::apply(&entry.catalog, &units, abs)
-            .map_err(|e| format!("apply failed for {}: {e}", abs.display()))?;
-        entry.dirty = false;
-        summaries.push(SaveSummary {
-            path: abs.to_string_lossy().into_owned(),
-            unit_count: units.len(),
-        });
+        match i18n_harness_adapter_qt::apply(&entry.catalog, &units, abs) {
+            Ok(()) => {
+                entry.dirty = false;
+                saved.push(SaveSummary {
+                    path: abs.to_string_lossy().into_owned(),
+                    unit_count: units.len(),
+                });
+            }
+            Err(e) => {
+                return Ok(SaveAllDirtyResponse {
+                    saved,
+                    failed_path: Some(abs.to_string_lossy().into_owned()),
+                    failed_reason: Some(format!("apply failed: {e}")),
+                });
+            }
+        }
     }
-    Ok(summaries)
+    Ok(SaveAllDirtyResponse {
+        saved,
+        failed_path: None,
+        failed_reason: None,
+    })
 }
 
 /// Re-read a catalog from disk and fold the current review state back in.
