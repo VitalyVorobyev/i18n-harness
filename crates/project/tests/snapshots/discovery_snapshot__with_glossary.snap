@@ -1,0 +1,26 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 244
+expression: discover(fs)
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {
+    "de_DE": {}
+  },
+  "catalogs": [
+    {
+      "path": "/project/translations/app_de.ts",
+      "format": "qt-ts",
+      "locale": "de_DE",
+      "confidence": "high",
+      "reason": "<TS language=\"de_DE\"> seen — Qt Linguist XML",
+      "alternatives": []
+    }
+  ],
+  "glossary": {
+    "path": "glossary.toml"
+  },
+  "backend": null
+}

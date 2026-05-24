@@ -1,0 +1,41 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 127
+expression: discover(fs)
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {
+    "de": {},
+    "de_DE": {}
+  },
+  "catalogs": [
+    {
+      "path": "/project/json/de.json",
+      "format": "icu-json",
+      "locale": "de",
+      "confidence": "medium",
+      "reason": "flat JSON key→string map — likely ICU-JSON catalog",
+      "alternatives": []
+    },
+    {
+      "path": "/project/po/de.po",
+      "format": "gettext-po",
+      "locale": "de_DE",
+      "confidence": "high",
+      "reason": "gettext PO header with Language: de_DE",
+      "alternatives": []
+    },
+    {
+      "path": "/project/qt/app_de.ts",
+      "format": "qt-ts",
+      "locale": "de_DE",
+      "confidence": "high",
+      "reason": "<TS language=\"de_DE\"> seen — Qt Linguist XML",
+      "alternatives": []
+    }
+  ],
+  "glossary": null,
+  "backend": null
+}
