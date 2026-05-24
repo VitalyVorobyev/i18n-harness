@@ -14,10 +14,9 @@ export function EmptyState({ onOpen, errorMessage }: Props) {
           Open a Qt Linguist catalog
         </h1>
         <p className="m-0 mb-6 text-md text-fg-secondary leading-[1.65]">
-          Point the harness at a{" "}
-          <CodeChip>.ts</CodeChip> file. The harness reads the structure with
-          byte-stable fidelity — the model will translate the text; everything
-          around it is deterministic Rust.
+          Point the harness at a <CodeChip>.ts</CodeChip> file. The harness
+          reads the structure with byte-stable fidelity — the model will
+          translate the text; everything around it is deterministic Rust.
         </p>
 
         <div className="flex gap-3 mb-8">

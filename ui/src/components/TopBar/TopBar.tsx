@@ -36,10 +36,7 @@ export function TopBar({ catalogPath, unitCount, version, onOpen }: Props) {
           Open
           <kbd>⌘O</kbd>
         </ActionButton>
-        <ActionButton
-          disabled
-          title="Save — wired in the next milestone"
-        >
+        <ActionButton disabled title="Save — wired in the next milestone">
           Save
           <kbd>⌘S</kbd>
         </ActionButton>

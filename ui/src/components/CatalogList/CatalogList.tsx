@@ -1,8 +1,8 @@
-import { useMemo, useRef, useEffect } from "react";
-import { StateBadge } from "../StateBadge/StateBadge";
+import { useEffect, useMemo, useRef } from "react";
 import { cn } from "../../lib/cn";
 import type { Unit, UnitId, UnitRow, UnitState } from "../../lib/types";
 import { unitRow } from "../../lib/types";
+import { StateBadge } from "../StateBadge/StateBadge";
 
 type Filter = "all" | "untranslated" | "proposed" | "finished";
 
@@ -52,8 +52,8 @@ export function CatalogList({
     });
   }, [rows, filter, search]);
 
-  const listRef = useRef<HTMLUListElement | null>(null);
-  const onListKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const onListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
     if (filtered.length === 0) return;
@@ -133,17 +133,21 @@ export function CatalogList({
         )}
       </div>
 
-      <ul
+      <div
         ref={listRef}
+        role="listbox"
         tabIndex={0}
         onKeyDown={onListKey}
         aria-label="Translatable units"
+        aria-activedescendant={
+          selectedId ? `unit-${cssEscape(selectedId)}` : undefined
+        }
         className="flex-1 overflow-y-auto py-1 pb-3 outline-none focus-visible:[box-shadow:inset_0_0_0_2px_var(--color-accent)] rounded-sm"
       >
         {filtered.length === 0 ? (
-          <li className="px-4 py-6 text-sm text-fg-tertiary text-center">
+          <div className="px-4 py-6 text-sm text-fg-tertiary text-center">
             No units match this filter.
-          </li>
+          </div>
         ) : (
           filtered.map((r) => (
             <Row
@@ -154,7 +158,7 @@ export function CatalogList({
             />
           ))
         )}
-      </ul>
+      </div>
     </aside>
   );
 }
@@ -169,11 +173,19 @@ function Row({
   onClick: () => void;
 }) {
   return (
-    <li
+    <div
+      id={`unit-${row.id}`}
       data-unit-id={row.id}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       role="option"
       aria-selected={active}
+      tabIndex={-1}
       className={cn(
         "pl-[10px] pr-3 py-2 border-l-2 cursor-pointer",
         "transition-colors duration-100 ease-out",
@@ -203,11 +215,9 @@ function Row({
         )}
       </div>
       <div className="font-sans text-sm leading-snug text-fg-primary truncate">
-        {row.preview || (
-          <span className="text-fg-disabled italic">empty</span>
-        )}
+        {row.preview || <span className="text-fg-disabled italic">empty</span>}
       </div>
-    </li>
+    </div>
   );
 }
 
@@ -234,5 +244,5 @@ function cssEscape(s: string): string {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(s);
   }
-  return s.replace(/(["\\\]\[!#$%&'()*+,./:;<=>?@^`{|}~])/g, "\\$1");
+  return s.replace(/(["\\\][!#$%&'()*+,./:;<=>?@^`{|}~])/g, "\\$1");
 }

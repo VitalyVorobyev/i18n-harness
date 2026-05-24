@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { TopBar } from "./components/TopBar/TopBar";
-import { EmptyState } from "./components/EmptyState/EmptyState";
 import { CatalogList } from "./components/CatalogList/CatalogList";
-import { UnitEditor } from "./components/UnitEditor/UnitEditor";
+import { EmptyState } from "./components/EmptyState/EmptyState";
 import { Inspector } from "./components/Inspector/Inspector";
+import { TopBar } from "./components/TopBar/TopBar";
+import { UnitEditor } from "./components/UnitEditor/UnitEditor";
 import { appVersion, openCatalog, pickCatalogFile } from "./lib/tauri";
 import type { CatalogResponse, UnitId } from "./lib/types";
 

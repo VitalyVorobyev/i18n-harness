@@ -55,12 +55,17 @@ bun tauri:dev          # opens the Tauri window with Vite HMR
 bun dev
 ```
 
-Type-check + production-build the web assets:
+Standard CI gates (the same ones GitHub Actions runs):
 
 ```sh
-bun run typecheck
-bun run build
+bun run typecheck            # tsc --noEmit
+bun run lint                 # biome check  (lint + import order + format)
+bun run lint:fix             # biome check --write   (apply safe fixes)
+bun audit --prod             # production-dep vulnerability scan
+bun run build                # tsc --noEmit && vite build
 ```
+
+A change cannot land without all of these passing.
 
 Cargo-check just the Tauri shell:
 

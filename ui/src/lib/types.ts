@@ -58,8 +58,7 @@ export interface UnitRow {
 
 export function unitRow(unit: Unit): UnitRow {
   const isPlural = unit.plural_arity != null;
-  const totals =
-    unit.target.kind === "plural" ? unit.target.forms.length : 1;
+  const totals = unit.target.kind === "plural" ? unit.target.forms.length : 1;
   const filled =
     unit.target.kind === "plural"
       ? unit.target.forms.filter((t) => t != null).length

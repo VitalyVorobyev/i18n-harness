@@ -7,7 +7,9 @@ interface Props {
 export function Inspector({ unit }: Props) {
   const isPlural = unit.plural_arity != null;
   const placeholders = unit.placeholders ?? [];
-  const placeholderCount = Array.isArray(placeholders) ? placeholders.length : 0;
+  const placeholderCount = Array.isArray(placeholders)
+    ? placeholders.length
+    : 0;
   const provenance = unit.provenance;
 
   return (
@@ -25,9 +27,7 @@ export function Inspector({ unit }: Props) {
 
         <Item label="Plural arity">
           {isPlural ? (
-            <CodeText>
-              {unit.plural_arity}&nbsp;forms
-            </CodeText>
+            <CodeText>{unit.plural_arity}&nbsp;forms</CodeText>
           ) : (
             <Muted>singular</Muted>
           )}
@@ -88,9 +88,7 @@ function Item({
 }
 
 function CodeText({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="font-mono text-sm text-fg-primary">{children}</span>
-  );
+  return <span className="font-mono text-sm text-fg-primary">{children}</span>;
 }
 
 function Muted({ children }: { children: React.ReactNode }) {

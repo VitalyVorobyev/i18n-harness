@@ -1,5 +1,5 @@
-import type { UnitState } from "../../lib/types";
 import { cn } from "../../lib/cn";
+import type { UnitState } from "../../lib/types";
 
 interface Props {
   state: UnitState;
@@ -39,12 +39,13 @@ export function StateBadge({ state, variant = "pill" }: Props) {
   if (variant === "dot") {
     return (
       <span
+        role="img"
+        aria-label={LABELS[state]}
+        title={LABELS[state]}
         className={cn(
           "inline-block w-1.5 h-1.5 rounded-pill shrink-0",
           DOT[state],
         )}
-        title={LABELS[state]}
-        aria-label={LABELS[state]}
       />
     );
   }

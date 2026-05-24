@@ -61,6 +61,8 @@ cargo run   -p i18n-harness-cli -- --help
 # Desktop UI (Tauri + Vite + React, see ui/README.md for details)
 cd ui && bun install
 cd ui && bun run typecheck
+cd ui && bun run lint           # Biome — single tool for lint + format
+cd ui && bun audit --prod       # Production-dep vulnerability scan
 cd ui && bun run build
 cd ui && bun tauri:dev
 ```

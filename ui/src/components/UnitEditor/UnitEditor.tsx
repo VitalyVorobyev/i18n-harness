@@ -1,8 +1,8 @@
-import { useState, useMemo } from "react";
-import { StateBadge } from "../StateBadge/StateBadge";
-import { tokenize, type Token } from "../../lib/highlight";
+import { useMemo, useState } from "react";
 import { cn } from "../../lib/cn";
+import { type Token, tokenize } from "../../lib/highlight";
 import type { Unit } from "../../lib/types";
+import { StateBadge } from "../StateBadge/StateBadge";
 
 interface Props {
   unit: Unit;

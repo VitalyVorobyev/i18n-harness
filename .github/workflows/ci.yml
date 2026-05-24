@@ -57,7 +57,9 @@ jobs:
       matrix:
         cmd:
           - { name: "typecheck", run: "bun run typecheck" }
+          - { name: "lint",      run: "bun run lint" }
           - { name: "build",     run: "bun run build" }
+          - { name: "audit",     run: "bun audit --prod" }
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
