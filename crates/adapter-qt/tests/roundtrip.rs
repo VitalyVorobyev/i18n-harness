@@ -196,6 +196,40 @@ fn extract_normalizes_placeholders_to_icu() {
     );
 }
 
+/// XML entity references in `<source>` and `<comment>` bodies (`&amp;`,
+/// `&lt;`, `&gt;`, `&quot;`, `&apos;`) must be decoded into their literal
+/// characters in `Unit::source` — otherwise the backend prompt loses the
+/// accelerator marker (`&File` → `File`) and the gate cannot fire its
+/// accel-mismatch rule. Discovered by the first Gemma 4 measurement run.
+#[test]
+fn xml_entity_references_in_source_are_decoded() {
+    let fixture = fixtures_dir().join("showcase.ts");
+    let cat = extract(&fixture).expect("extract");
+
+    let file_unit = cat
+        .units()
+        .iter()
+        .find(|u| u.id.as_str() == "MainWindow::&File::menu")
+        .unwrap_or_else(|| {
+            let ids: Vec<&str> = cat.units().iter().map(|u| u.id.as_str()).collect();
+            panic!("expected `MainWindow::&File::menu` in unit ids: {ids:?}")
+        });
+    assert_eq!(
+        file_unit.source, "&File",
+        "source must contain the literal `&` accelerator marker, not just `File`",
+    );
+
+    let html_unit = cat
+        .units()
+        .iter()
+        .find(|u| u.source.contains("Click"))
+        .expect("expected a unit whose source starts with `Click`");
+    assert_eq!(
+        html_unit.source, "Click <b>Save</b> to continue.",
+        "source must preserve `<b>` / `</b>` (encoded as `&lt;` / `&gt;` in XML)",
+    );
+}
+
 fn byte_diff_summary(a: &[u8], b: &[u8]) -> String {
     let common = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let line = a[..common].iter().filter(|&&b| b == b'\n').count() + 1;

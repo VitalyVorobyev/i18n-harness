@@ -464,6 +464,26 @@ fn read_text_until_close(reader: &mut Reader<&[u8]>, tag: &[u8]) -> Result<Strin
                     out.push_str(s);
                 }
             }
+            Event::GeneralRef(r) => {
+                // quick-xml v0.38 splits XML entity references (`&amp;`,
+                // `&lt;`, …) out of the surrounding text into separate
+                // events. Resolve the five predefined entities; any other
+                // entity name is reconstructed as `&<name>;` because this
+                // adapter does not maintain a custom DTD.
+                let name = std::str::from_utf8(r.as_ref()).unwrap_or("");
+                match name {
+                    "amp" => out.push('&'),
+                    "lt" => out.push('<'),
+                    "gt" => out.push('>'),
+                    "quot" => out.push('"'),
+                    "apos" => out.push('\''),
+                    _ => {
+                        out.push('&');
+                        out.push_str(name);
+                        out.push(';');
+                    }
+                }
+            }
             _ => {}
         }
         buf.clear();
