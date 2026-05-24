@@ -220,7 +220,7 @@ CLI additions:
   `i18n-harness.toml` (refuses to overwrite without `--force`).
 - `harness open <dir>` — load and validate a manifest, print summary.
 
-#### M4.2b — Per-catalog edit through project (planned)
+#### M4.2b — Per-catalog edit through project ✓
 
 - `open_catalog_in_project(path) -> CatalogResponse`
 - `save_catalog_in_project(path)`
