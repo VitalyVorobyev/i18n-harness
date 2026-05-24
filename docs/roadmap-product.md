@@ -228,17 +228,26 @@ CLI additions:
 - `apply_review_state(path)` — folds `review.jsonl` into the open
   units (uses `Project::apply_review_state` from M4.1.5).
 
-#### M4.2c — Translate + correction recording (planned)
+#### M4.2c.1 — Translate + correction recording ✓ (shipped)
 
-- `translate_unit(catalog_path, unit_id)` — re-routed through the
-  project so it picks up glossary, backend config, and the
-  per-locale prompt override.
+Single-shot project-scoped commands over the IPC bridge:
+
+- `translate_unit_in_project(catalog_path, unit_id)` — project-scoped
+  sibling of `translate_unit`; picks up glossary, locale config, and
+  backend kind from the project; updates the project-catalog store.
+- `record_correction_in_project(req)` — appends an accepted human edit
+  to `corrections.jsonl`; returns the content-addressed correction id.
+- `list_corrections_in_project(filter)` — reads and filters `corrections.jsonl`.
+- `promote_correction_to_curated(id, note)` — adds a correction to `curated.toml`.
+- `un_curate_correction(id)` — removes a correction from `curated.toml`.
+- `set_review_status_in_project(catalog_path, unit_id, input)` — appends
+  a review event to `review.jsonl` and updates the in-memory unit.
+
+#### M4.2c.2 — Bulk translate with cancellation (planned; depends on M4.8 cancellation primitive)
+
 - `translate_batch(catalog_path, scope, cancel_token)` — streams
-  progress via Tauri events.
-- `record_correction(catalog_path, unit_id, mt_proposal,
-  human_target)`
-- `list_corrections(filters)`, `promote_to_curated(correction_id)`
-- `set_review_status(catalog_path, unit_id, status)` IPC.
+  progress via Tauri events. Deferred until the cancellation primitive
+  design is settled by rust-architect.
 
 #### M4.2d — Evaluation + tuning bundle (planned, depends on M4.9)
 
