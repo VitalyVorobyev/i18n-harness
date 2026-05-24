@@ -58,6 +58,16 @@ enum Command {
     /// the post-translation catalog atomically. Gate-clean units are promoted
     /// to Finished; flagged units stay Proposed.
     Translate(TranslateArgs),
+
+    /// Discover catalogs under `<dir>`, build a draft manifest, and write it
+    /// to `<dir>/i18n-harness.toml`. Refuses to overwrite an existing manifest
+    /// unless `--force` is passed.
+    Init(InitArgs),
+
+    /// Open the project at `<dir>` (loads and validates
+    /// `<dir>/i18n-harness.toml`) and print its summary. Exits non-zero if
+    /// the manifest is missing or invalid.
+    Open(OpenArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -83,6 +93,22 @@ struct GateArgs {
     /// If set, append one JSONL event per finding to this file.
     #[arg(long)]
     metrics: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct InitArgs {
+    /// Directory to scan and write a manifest into.
+    dir: PathBuf,
+
+    /// Overwrite an existing `i18n-harness.toml` if present.
+    #[arg(long)]
+    force: bool,
+}
+
+#[derive(Parser, Debug)]
+struct OpenArgs {
+    /// Project root containing `i18n-harness.toml`.
+    dir: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -151,6 +177,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::RoundTrip(args) => round_trip(args),
         Command::Gate(args) => gate(args),
         Command::Translate(args) => translate(args),
+        Command::Init(args) => init(args),
+        Command::Open(args) => open(args),
     }
 }
 
@@ -602,6 +630,106 @@ fn merge_outcome(
         }
     }
     out
+}
+
+fn init(args: InitArgs) -> Result<()> {
+    use i18n_harness_project::{ClassificationConfidence, Project};
+
+    let dir = args.dir;
+    if !dir.is_dir() {
+        return Err(anyhow!("{} is not a directory", dir.display()));
+    }
+    let manifest_path = dir.join("i18n-harness.toml");
+    if manifest_path.exists() && !args.force {
+        return Err(anyhow!(
+            "{} already exists; pass --force to overwrite",
+            manifest_path.display()
+        ));
+    }
+
+    let draft = Project::discover(&dir).with_context(|| format!("discover {}", dir.display()))?;
+
+    println!("Discovered project at {}", dir.display());
+    println!("  name:     {}", draft.name);
+    println!("  locales:  {}", format_locales(&draft.locales));
+    println!("  catalogs: {}", draft.catalogs.len());
+    for c in &draft.catalogs {
+        let rel = c.path.strip_prefix(&dir).unwrap_or(&c.path);
+        let conf = match c.confidence {
+            ClassificationConfidence::High => "high",
+            ClassificationConfidence::Medium => "medium",
+            ClassificationConfidence::Low => "low",
+        };
+        let loc = c.locale.as_deref().unwrap_or("?");
+        println!(
+            "    {:>6}  {:<10}  {:<8}  {}",
+            conf,
+            format!("{:?}", c.format),
+            loc,
+            rel.display()
+        );
+    }
+    if draft.glossary.is_some() {
+        println!("  glossary: glossary.toml");
+    }
+
+    let (project, warnings) = Project::create_from_draft(&dir, draft)
+        .with_context(|| format!("create_from_draft {}", dir.display()))?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+    println!(
+        "Wrote {} ({} catalogs, {} locales)",
+        project.paths().manifest().display(),
+        project.catalogs().len(),
+        project.locale_ids().count(),
+    );
+    Ok(())
+}
+
+fn open(args: OpenArgs) -> Result<()> {
+    use i18n_harness_project::Project;
+
+    let dir = args.dir;
+    let (project, warnings) =
+        Project::open(&dir).with_context(|| format!("open project {}", dir.display()))?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+    let s = project.summary();
+    println!("Project:    {}", s.name);
+    println!("Root:       {}", s.root);
+    println!("Schema:     {}", s.schema);
+    println!("Locales:    {}", s.locales.join(", "));
+    println!("Catalogs:   {}", s.catalogs.len());
+    for c in &s.catalogs {
+        println!(
+            "  {:<10}  {:<8}  {}",
+            format!("{:?}", c.format),
+            c.locale,
+            c.manifest_path
+        );
+    }
+    if let Some(g) = &s.glossary_path {
+        println!("Glossary:   {g}");
+    }
+    if let Some(b) = &s.backend {
+        let model = b.model.as_deref().unwrap_or("-");
+        let host = b.host.as_deref().unwrap_or("-");
+        println!("Backend:    {:?} model={model} host={host}", b.kind);
+    }
+    println!("State dir:  {}", s.state_dir);
+    Ok(())
+}
+
+fn format_locales(
+    locales: &std::collections::BTreeMap<String, i18n_harness_project::LocaleConfig>,
+) -> String {
+    if locales.is_empty() {
+        "—".to_string()
+    } else {
+        locales.keys().cloned().collect::<Vec<_>>().join(", ")
+    }
 }
 
 fn file_hash(path: &std::path::Path) -> Result<String> {
