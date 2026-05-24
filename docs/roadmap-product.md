@@ -159,6 +159,33 @@ host = "http://localhost:11434"
 template_dir = "prompts"    # optional; falls back to crate-embedded v2
 ```
 
+### M4.1.5 — Core extensions: `Unit.source_hash` + `ReviewStatus`
+
+Two small additive changes to `crates/core` (and the Qt adapter that
+populates them) that the post-M4.1 milestones depend on. Driven by
+external design input in
+[`feedback-2026-05-24-chatgpt.md`](feedback-2026-05-24-chatgpt.md)
+§§1–2 and the decisions captured during the M4.1c session.
+
+- **`Unit.source_hash: Option<String>`** — short SHA-256 over
+  `(source ‖ disambiguation ‖ comment ‖ location)`, populated by
+  `adapter-qt::extract`. On re-open, comparing the hash to a stored
+  prior value lets the UI surface "source changed since you last
+  approved this translation" without re-translating. The M4.3 sidebar
+  badge and the M4.7 review queue both rely on it.
+- **`Unit.review_status: Option<ReviewStatus>`** —
+  `New | MachineTranslated | NeedsReview | Reviewed | Approved | Locked | Rejected | Conflict`,
+  orthogonal to Qt's structural `state`. The Qt round-trip stays
+  byte-stable (review status is gitignored project state under
+  `.i18n-harness/`, never written into the `.ts` file); the editor
+  uses review status for filtering and the M4.7 review queue.
+- The new fields default to `None` so existing fixtures and the
+  round-trip contract are unchanged.
+
+Verification: round-trip suite stays byte-identical; an extra unit
+test confirms `source_hash` is stable across identical extracts and
+changes when the source text changes.
+
 ### M4.2 — Tauri command surface refactor + CLI `init` / `open`
 
 Replace the file-centric `open_catalog` / `save_catalog` API with a
@@ -268,18 +295,25 @@ Option<f32>` (shown in inspector; does not block).
 
 Auto-promotion rule: a unit may only auto-promote to `Finished` if
 `flags.is_empty()` AND gate is clean AND target is complete. Flagged
-units stay `Proposed`. The translator clears flags via an explicit
-"Accept" action.
+units land with `review_status = NeedsReview` (see M4.1.5) and stay
+`Proposed`. The translator clears flags via an explicit "Accept"
+action, which moves `review_status` to `Reviewed` (or `Approved`
+on Save All).
 
 UI: inspector renders flags as severity-style chips with the model's
 per-flag note; unit list shows a flag badge next to the state badge.
 
 ### M4.7 — Review queue
 
-- "Needs review" filter on the unit list inside the Translate tab.
+- "Needs review" filter on the unit list inside the Translate tab,
+  driven by `Unit.review_status == NeedsReview` (M4.1.5) and the
+  per-unit `flags` from M4.6.
+- "Source changed" filter, driven by comparing the current extract's
+  `Unit.source_hash` against the last-saved value.
 - Project-wide flag count badge in the sidebar ("12 flagged across
-  project"); clicking opens a virtual catalog view listing every
-  flagged unit across catalogs and locales.
+  project, 3 source-changed"); clicking opens a virtual catalog view
+  listing every flagged or source-changed unit across catalogs and
+  locales.
 
 ### M4.8 — Bulk translate
 
@@ -297,15 +331,19 @@ Sections:
 1. **Headline numbers per locale** — % accepted-as-is / % edited / %
    rejected / % flagged; 30-day acceptance-rate sparkline.
 2. **Translation memory** — searchable `(source, mt_proposal,
-   human_target)` table. "Promote to golden" per row; bulk promote
-   from a filter.
+   human_target, provenance)` table; each row exposes which prompt
+   version + model + glossary version produced its proposal (from
+   `CorrectionProvenance`, captured at correction time per M4.1d).
+   "Promote to golden" per row; bulk promote from a filter.
 3. **Curated set** — the project's tuning examples. Editable notes;
    size counter; "Export tuning bundle" button.
 4. **Prompt evaluation** — current prompt template + version + last
    evaluated score. "Run evaluation" re-runs the current prompt over
    the curated set using the local Ollama backend and computes
-   per-locale acceptance rate. Honest about cost (shows estimated
-   runtime before starting).
+   per-locale acceptance rate. Because every correction carries its
+   provenance, evaluations can compare "current prompt vs prompt that
+   produced this golden example" honestly. Honest about cost (shows
+   estimated runtime before starting).
 5. **Tuning bundle export** — writes
    `.i18n-harness/tuning/<ISO-timestamp>/`:
    - `examples.jsonl` — every curated pair
