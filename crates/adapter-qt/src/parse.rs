@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 use i18n_harness_core::{
-    Placeholder, PlaceholderKind, Provenance, Target, Unit, UnitId, UnitState,
+    Placeholder, PlaceholderKind, Provenance, Target, Unit, UnitId, UnitState, compute_source_hash,
 };
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -180,6 +180,7 @@ impl ParseState {
     ) -> Result<(), ParseError> {
         let mut source_text: Option<String> = None;
         let mut comment: Option<String> = None; // disambiguation
+        let mut extracomment: Option<String> = None; // developer comment; hashed but not stored
         let mut translation_open: Option<(usize, usize)> = None; // (start of <, end of >)
         let mut translation_body_start: Option<usize> = None;
         let mut translation_body_end: Option<usize> = None;
@@ -214,6 +215,14 @@ impl ParseState {
                     QName(b"comment") => {
                         let txt = read_text_until_close(reader, b"comment")?;
                         comment = Some(txt);
+                    }
+                    QName(b"extracomment") => {
+                        let txt = read_text_until_close(reader, b"extracomment")?;
+                        // Multiple <extracomment> blocks concatenate with \n in source order.
+                        extracomment = Some(match extracomment.take() {
+                            Some(prev) => format!("{prev}\n{txt}"),
+                            None => txt,
+                        });
                     }
                     QName(b"translation") => {
                         let event_end = reader.buffer_position() as usize;
@@ -319,6 +328,19 @@ impl ParseState {
             }
         };
 
+        // Compute source_hash for active units; vanished/obsolete get None
+        // because the harness never translates them (§3.3 of the design doc).
+        let source_hash = if matches!(state_from_attr, UnitState::Vanished | UnitState::Obsolete) {
+            None
+        } else {
+            Some(compute_source_hash(
+                &icu_source,
+                comment.as_deref().unwrap_or(""),
+                extracomment.as_deref().unwrap_or(""),
+                numerus,
+            ))
+        };
+
         let unit = Unit {
             id: UnitId::from(id_str.clone()),
             source: icu_source,
@@ -328,6 +350,9 @@ impl ParseState {
             flags: Default::default(),
             provenance: Provenance::default(),
             state: state_from_attr,
+            source_hash,
+            review_status: None,
+            source_changed_since_review: false,
         };
 
         let _ = translation_end; // computed by the children walkers but not currently retained.

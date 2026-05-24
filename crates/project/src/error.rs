@@ -124,6 +124,30 @@ pub enum ProjectError {
         source: toml::de::Error,
     },
 
+    // ── Review ────────────────────────────────────────────────────────────
+    /// A review-status operation referenced a catalog that is not in the
+    /// manifest. Caller: ensure the catalog is registered via `add_catalog`
+    /// before recording reviews against it.
+    #[error("review op references unknown catalog: {}", path.display())]
+    UnknownCatalog {
+        /// Manifest-relative or absolute path that did not match a known
+        /// `[[catalogs]]` entry.
+        path: PathBuf,
+    },
+
+    /// A JSONL line in `review.jsonl` cannot be parsed. The store is
+    /// line-recoverable — the fold skips the bad line and surfaces this error
+    /// rather than aborting.
+    #[error("malformed review event line {line_no} in {}: {source}", path.display())]
+    ReviewEventParse {
+        /// File that contains the bad line.
+        path: PathBuf,
+        /// 1-based line number of the bad record.
+        line_no: usize,
+        /// Underlying JSON error.
+        source: serde_json::Error,
+    },
+
     // ── I/O ───────────────────────────────────────────────────────────────
     /// Generic filesystem failure. `path` names the file being accessed;
     /// `source` is the OS-level error.

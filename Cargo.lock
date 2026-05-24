@@ -1519,8 +1519,10 @@ dependencies = [
 name = "i18n-harness-core"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
 ]
 
@@ -1557,6 +1559,7 @@ version = "0.1.0"
 name = "i18n-harness-project"
 version = "0.1.0"
 dependencies = [
+ "i18n-harness-adapter-qt",
  "i18n-harness-core",
  "i18n-harness-glossary",
  "i18n-harness-locales",

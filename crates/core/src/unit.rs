@@ -16,9 +16,11 @@
 //! `Catalog` representation, not here.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::flag::FlagSet;
 use crate::placeholder::Placeholder;
+use crate::review::ReviewStatus;
 
 /// Stable identifier for a unit within a single catalog file.
 ///
@@ -221,6 +223,53 @@ pub struct Unit {
 
     /// Lifecycle state. See [`UnitState`].
     pub state: UnitState,
+
+    /// Short content-addressed digest of the translator-visible identity of the
+    /// source for this unit.
+    ///
+    /// Populated by the adapter on extract; `None` when the adapter does not
+    /// (yet) compute one (PO and ICU-JSON adapters in early M4 ship `None` and
+    /// start filling it in later milestones without a `Unit` schema bump).
+    ///
+    /// Format: `"sha256:<12 hex chars>"` — the first 48 bits of a SHA-256 over
+    /// the components defined in the M4.1.5 design §2.
+    ///
+    /// # What this guarantees
+    ///
+    /// - Stable across repeated extracts of the *same* on-disk bytes for the
+    ///   same unit.
+    /// - Changes when the source text, the disambiguation comment, or the
+    ///   developer comment changes.
+    ///
+    /// # What this explicitly does NOT guarantee
+    ///
+    /// - Collision resistance at cryptographic strength. The hash is truncated
+    ///   to 48 bits; this is enough for one project's corpus (~10k units), not
+    ///   enough for cross-project comparison.
+    /// - That a missing `source_hash` (`None`) implies the unit is new.
+    ///   `None` means the adapter that produced this unit did not compute one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+
+    /// Translator-facing review state, **orthogonal to [`UnitState`]**.
+    ///
+    /// Where [`UnitState`] mirrors the catalog's structural state, `review_status`
+    /// records the reviewer's process state. `None` is the canonical default for
+    /// a freshly-extracted unit; the project crate fills it in from
+    /// `<state_dir>/review.jsonl` on load. **Never serialized into the catalog
+    /// file.**
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_status: Option<ReviewStatus>,
+
+    /// True when this unit's `review_status` was recorded against an earlier
+    /// `source_hash` that no longer matches the current extract.
+    ///
+    /// Derived at project-open time by comparing `source_hash` against the hash
+    /// stored in `review.jsonl` at the time of the last status change. **Not
+    /// serialized** — recomputed on every open so it cannot drift from the truth
+    /// on disk.
+    #[serde(skip)]
+    pub source_changed_since_review: bool,
 }
 
 impl Unit {
@@ -236,8 +285,47 @@ impl Unit {
             flags: FlagSet::new(),
             provenance: Provenance::default(),
             state: UnitState::Untranslated,
+            source_hash: None,
+            review_status: None,
+            source_changed_since_review: false,
         }
     }
+}
+
+/// Compute the M4.1.5 source hash for a unit.
+///
+/// `disambiguation` and `extracomment` are the empty string when the catalog
+/// format does not record them (PO has no Qt-style comment distinction;
+/// ICU-JSON typically has neither). The plural flag is derived from the unit's
+/// `plural_arity.is_some()`.
+///
+/// # Algorithm
+///
+/// ```text
+/// input = source ‖ 0x1F ‖ disambiguation ‖ 0x1F ‖ extracomment ‖ 0x1F ‖ "P"|"S"
+/// digest = SHA-256(input)
+/// result = "sha256:" + hex(digest)[..12]
+/// ```
+///
+/// See `docs/m4.1.5-source-hash-review-status-design.md` §2 for the rationale.
+pub fn compute_source_hash(
+    source: &str,
+    disambiguation: &str,
+    extracomment: &str,
+    plural: bool,
+) -> String {
+    const SEP: u8 = 0x1F; // ASCII unit-separator
+    let mut hasher = Sha256::new();
+    hasher.update(source.as_bytes());
+    hasher.update([SEP]);
+    hasher.update(disambiguation.as_bytes());
+    hasher.update([SEP]);
+    hasher.update(extracomment.as_bytes());
+    hasher.update([SEP]);
+    hasher.update(if plural { b"P" } else { b"S" });
+    let digest = hasher.finalize();
+    let hex = format!("{digest:x}");
+    format!("sha256:{}", &hex[..12])
 }
 
 #[cfg(test)]
@@ -282,5 +370,160 @@ mod tests {
         };
         assert!(!t.is_empty());
         assert!(!t.is_complete());
+    }
+
+    // ── compute_source_hash ───────────────────────────────────────────────────
+
+    #[test]
+    fn hash_is_stable_across_calls() {
+        let h1 = compute_source_hash("Open file", "menu", "", false);
+        let h2 = compute_source_hash("Open file", "menu", "", false);
+        assert_eq!(h1, h2, "hash must be deterministic");
+    }
+
+    #[test]
+    fn hash_changes_with_each_input() {
+        let base = compute_source_hash("Open file", "menu", "some context", false);
+        assert_ne!(
+            base,
+            compute_source_hash("Open filX", "menu", "some context", false),
+            "changing source must change hash"
+        );
+        assert_ne!(
+            base,
+            compute_source_hash("Open file", "menX", "some context", false),
+            "changing disambiguation must change hash"
+        );
+        assert_ne!(
+            base,
+            compute_source_hash("Open file", "menu", "some contexX", false),
+            "changing extracomment must change hash"
+        );
+        assert_ne!(
+            base,
+            compute_source_hash("Open file", "menu", "some context", true),
+            "flipping plural must change hash"
+        );
+    }
+
+    #[test]
+    fn hash_format_matches_prefix_and_length() {
+        let h = compute_source_hash("Hello", "", "", false);
+        assert!(
+            h.starts_with("sha256:"),
+            "hash must start with 'sha256:': {h}"
+        );
+        let hex_part = h.trim_start_matches("sha256:");
+        assert_eq!(hex_part.len(), 12, "hex part must be exactly 12 chars: {h}");
+        assert!(
+            hex_part.chars().all(|c| c.is_ascii_hexdigit()),
+            "hex part must be lowercase hex: {h}"
+        );
+    }
+
+    #[test]
+    fn empty_input_hash_is_deterministic_and_pinned() {
+        // Pin this value: if the algorithm changes, this test fails loudly.
+        let h = compute_source_hash("", "", "", false);
+        // Preimage: b"\x1F\x1F\x1FS"
+        // Verify format first (correctness), then pin the value.
+        assert!(h.starts_with("sha256:"), "unexpected format: {h}");
+        assert_eq!(h.len(), 19, "unexpected length: {h}");
+        // Pinned value — changing the algorithm requires updating this assert.
+        assert_eq!(
+            h, "sha256:2ea032865565",
+            "empty-input hash changed — algorithm was modified"
+        );
+    }
+
+    #[test]
+    fn unit_serde_round_trip_with_new_fields() {
+        let mut unit = Unit::untranslated_singular("ctx::hello", "Hello");
+        unit.source_hash = Some("sha256:aabbccddeeff".to_owned());
+        unit.review_status = Some(ReviewStatus::Approved);
+        unit.source_changed_since_review = true; // must NOT appear in JSON
+
+        let json = serde_json::to_string(&unit).expect("serialize");
+
+        // source_changed_since_review is skipped
+        assert!(
+            !json.contains("source_changed_since_review"),
+            "skipped field leaked into JSON: {json}"
+        );
+
+        let restored: Unit = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.source_hash, Some("sha256:aabbccddeeff".to_owned()));
+        assert_eq!(restored.review_status, Some(ReviewStatus::Approved));
+        // Derived field resets to false on deserialize.
+        assert!(!restored.source_changed_since_review);
+    }
+
+    #[test]
+    fn unit_serde_backward_compat_without_new_fields() {
+        // A JSONL line without source_hash or review_status (old format)
+        // must deserialize cleanly with None defaults.
+        let json = r#"{"id":"ctx::hi","source":"Hi","target":{"kind":"singular","text":null},"placeholders":[],"plural_arity":null,"flags":[],"provenance":{"file":"","line":null,"byte_offset":null},"state":"untranslated"}"#;
+        let unit: Unit = serde_json::from_str(json).expect("deserialize old format");
+        assert!(unit.source_hash.is_none());
+        assert!(unit.review_status.is_none());
+        assert!(!unit.source_changed_since_review);
+    }
+
+    #[test]
+    fn unit_with_none_fields_omits_them_in_json() {
+        let unit = Unit::untranslated_singular("ctx::x", "X");
+        let json = serde_json::to_string(&unit).expect("serialize");
+        assert!(
+            !json.contains("source_hash"),
+            "None source_hash must be omitted: {json}"
+        );
+        assert!(
+            !json.contains("review_status"),
+            "None review_status must be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn review_status_serde_uses_kebab_case() {
+        let s = serde_json::to_string(&ReviewStatus::MachineTranslated).expect("serialize");
+        assert_eq!(s, r#""machine-translated""#);
+        let s = serde_json::to_string(&ReviewStatus::NeedsReview).expect("serialize");
+        assert_eq!(s, r#""needs-review""#);
+    }
+}
+
+#[cfg(test)]
+mod hash_proptest {
+    use proptest::prelude::*;
+
+    use super::compute_source_hash;
+
+    proptest! {
+        /// Over 1000 random (source, disambiguation, extracomment, plural) tuples,
+        /// two different tuples should produce different hashes with overwhelming
+        /// probability (birthday bound for 48-bit hash and 1000 inputs is ~1 in 10^9).
+        #[test]
+        fn no_hash_collisions_over_random_tuples(
+            s1 in ".*",
+            d1 in ".*",
+            e1 in ".*",
+            p1: bool,
+            s2 in ".*",
+            d2 in ".*",
+            e2 in ".*",
+            p2: bool,
+        ) {
+            let h1 = compute_source_hash(&s1, &d1, &e1, p1);
+            let h2 = compute_source_hash(&s2, &d2, &e2, p2);
+            // Only assert inequality when the inputs actually differ.
+            if (s1 != s2) || (d1 != d2) || (e1 != e2) || (p1 != p2) {
+                prop_assert_ne!(
+                    h1,
+                    h2,
+                    "collision between ({:?},{:?},{:?},{:?}) and ({:?},{:?},{:?},{:?})",
+                    s1, d1, e1, p1, s2, d2, e2, p2
+                );
+            }
+        }
     }
 }

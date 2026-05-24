@@ -32,6 +32,7 @@ pub struct ProjectPaths {
     metrics: PathBuf,
     corrections: PathBuf,
     curated: PathBuf,
+    review: PathBuf,
     batches: PathBuf,
     tuning_root: PathBuf,
     prompts_template_dir: Option<PathBuf>,
@@ -69,6 +70,7 @@ impl ProjectPaths {
         let metrics = state_dir.join("metrics.jsonl");
         let corrections = state_dir.join("corrections.jsonl");
         let curated = state_dir.join("curated.toml");
+        let review = state_dir.join("review.jsonl");
         let batches = state_dir.join("state").join("batches.jsonl");
         let tuning_root = state_dir.join("tuning");
         let prompts_template_dir = prompts_config.map(|pc| root.join(&pc.template_dir));
@@ -81,6 +83,7 @@ impl ProjectPaths {
             metrics,
             corrections,
             curated,
+            review,
             batches,
             tuning_root,
             prompts_template_dir,
@@ -121,6 +124,11 @@ impl ProjectPaths {
     /// Absolute path to `<state_dir>/curated.toml`.
     pub fn curated(&self) -> &Path {
         &self.curated
+    }
+
+    /// Absolute path to `<state_dir>/review.jsonl`.
+    pub fn review(&self) -> &Path {
+        &self.review
     }
 
     /// Absolute path to `<state_dir>/state/batches.jsonl`.

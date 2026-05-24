@@ -4,10 +4,12 @@
 //!
 //! See `docs/m4.1-project-crate-design.md` §1.3, §2, §1.4.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
+use i18n_harness_core::{ReviewStatus, Unit, UnitId};
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, Value};
@@ -27,6 +29,7 @@ use crate::memory::{
     NewCorrection,
 };
 use crate::paths::ProjectPaths;
+use crate::review::{ReviewEvent, ReviewRecord, ReviewStore};
 
 // ── Wire-shape summary types ──────────────────────────────────────────────────
 
@@ -119,6 +122,12 @@ pub struct Project {
     correction_store: CorrectionStore,
     /// In-memory curated set. Reloaded on every promote/un-curate.
     curated: CuratedSet,
+    /// Lazy review store — the file is not opened until first use.
+    review_store: ReviewStore,
+    /// Cached folded review map. Populated on first `review_map()` call;
+    /// cleared (set to `None`) after each successful `set_review_status` so
+    /// the next read re-folds the file.
+    review_map_cache: RefCell<Option<crate::review::ReviewMap>>,
 }
 
 impl std::fmt::Debug for Project {
@@ -131,6 +140,10 @@ impl std::fmt::Debug for Project {
             .finish_non_exhaustive()
     }
 }
+
+// ReviewStore and RefCell<Option<...>> don't implement Debug; the manual impl
+// above is needed to avoid the derive issue. Both fields are intentionally
+// omitted from the debug output — they are implementation details.
 
 impl Project {
     // ── Open ──────────────────────────────────────────────────────────────────
@@ -266,6 +279,9 @@ impl Project {
         // Load curated.toml if present (empty set if absent or empty file).
         let curated = load_curated(&paths, &*fs, &correction_store)?;
 
+        // Build the review store (lazy — the file is not opened here).
+        let review_store = ReviewStore::new(paths.review().to_path_buf(), Arc::clone(&fs));
+
         let project = Self {
             root: root.to_path_buf(),
             fs,
@@ -276,6 +292,8 @@ impl Project {
             catalogs,
             correction_store,
             curated,
+            review_store,
+            review_map_cache: RefCell::new(None),
         };
 
         Ok((project, warnings))
@@ -769,6 +787,155 @@ impl Project {
     /// Borrow the in-memory curated set.
     pub fn curated(&self) -> &CuratedSet {
         &self.curated
+    }
+
+    // ── Review status ─────────────────────────────────────────────────────────
+
+    /// Borrow the project's review store.
+    ///
+    /// Cheap — the store opens lazily on first append or read.
+    pub fn reviews(&self) -> &ReviewStore {
+        &self.review_store
+    }
+
+    /// Record a review-status change.
+    ///
+    /// Generates `ts` from `SystemTime::now`, builds a [`ReviewEvent`] with
+    /// `schema = 1`, serialises it as one-line JSON, and appends it to
+    /// `<state_dir>/review.jsonl`. Invalidates the cached fold so the next
+    /// `review_map` / `apply_review_state` call sees the new value.
+    ///
+    /// `status = None` is a deliberate "clear this unit's record" event — the
+    /// fold removes the entry from the in-memory map.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProjectError::Io`] if the append fails.
+    /// - [`ProjectError::UnknownCatalog`] if `catalog` is not in
+    ///   `self.catalogs()`.
+    pub fn set_review_status(
+        &self,
+        catalog: &Path,
+        unit_id: &UnitId,
+        status: Option<ReviewStatus>,
+        source_hash_at_review: String,
+        reviewer_note: Option<String>,
+    ) -> Result<(), ProjectError> {
+        // Validate that the catalog is known.
+        if self.catalog(catalog).is_none() {
+            return Err(ProjectError::UnknownCatalog {
+                path: catalog.to_path_buf(),
+            });
+        }
+
+        let ts = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| String::from("1970-01-01T00:00:00Z"));
+
+        // Determine manifest-relative path for the catalog.
+        let catalog_ref = self.catalog(catalog).expect("checked above");
+        let catalog_manifest = PathBuf::from(&catalog_ref.manifest_path);
+
+        let event = ReviewEvent {
+            schema: 1,
+            ts,
+            catalog: catalog_manifest,
+            unit_id: unit_id.clone(),
+            status,
+            source_hash: source_hash_at_review,
+            reviewer_note: reviewer_note.unwrap_or_default(),
+        };
+
+        self.review_store.append(&event)?;
+
+        // Invalidate cache so next read re-folds.
+        *self.review_map_cache.borrow_mut() = None;
+
+        Ok(())
+    }
+
+    /// Look up the current review status for one unit.
+    ///
+    /// Returns `None` if the unit has no record in the review store.
+    pub fn review_status_of(&self, catalog: &Path, unit_id: &UnitId) -> Option<ReviewRecord> {
+        let map = self.review_map();
+        // Try manifest-relative path first, then absolute.
+        let by_manifest = self
+            .catalog(catalog)
+            .map(|r| PathBuf::from(&r.manifest_path))
+            .and_then(|mp| map.get(&(mp, unit_id.clone())));
+        if let Some(r) = by_manifest {
+            return Some(r.clone());
+        }
+        // Fallback: direct key lookup if caller passed manifest-relative directly.
+        map.get(&(catalog.to_path_buf(), unit_id.clone())).cloned()
+    }
+
+    /// Return the folded review map: every `(catalog, unit_id)` with a current
+    /// record.
+    ///
+    /// Cached; cleared after each `set_review_status` call. The map key uses
+    /// manifest-relative catalog paths.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying JSONL file is unreadable (I/O error). This
+    /// matches the `CuratedSet` precedent; callers that need explicit error
+    /// handling can call `self.reviews().read_folded()` directly.
+    pub fn review_map(&self) -> std::cell::Ref<'_, crate::review::ReviewMap> {
+        // Populate cache if empty.
+        {
+            let cache = self.review_map_cache.borrow();
+            if cache.is_some() {
+                drop(cache);
+                return std::cell::Ref::map(self.review_map_cache.borrow(), |c| {
+                    c.as_ref().expect("just checked")
+                });
+            }
+        }
+        // Cache is None; fold the file.
+        let (map, _errs) = self
+            .review_store
+            .read_folded()
+            .expect("review.jsonl read failed");
+        *self.review_map_cache.borrow_mut() = Some(map);
+        std::cell::Ref::map(self.review_map_cache.borrow(), |c| {
+            c.as_ref().expect("just populated")
+        })
+    }
+
+    /// Populate `unit.review_status` and `unit.source_changed_since_review`
+    /// for every unit in `units` based on the current fold and each unit's
+    /// `source_hash`.
+    ///
+    /// This is the load-bearing helper for the M4.2 Tauri layer — every
+    /// catalog-open call site routes the extracted units through it before
+    /// handing them to the UI.
+    ///
+    /// The `catalog` path is resolved to a manifest-relative path for the map
+    /// lookup. If the catalog is not registered, no units are modified (the map
+    /// will simply contain no matching keys).
+    pub fn apply_review_state(&self, catalog: &Path, units: &mut [Unit]) {
+        let manifest_path = self
+            .catalog(catalog)
+            .map(|r| PathBuf::from(&r.manifest_path))
+            .unwrap_or_else(|| catalog.to_path_buf());
+
+        let map = self.review_map();
+
+        for unit in units.iter_mut() {
+            let key = (manifest_path.clone(), unit.id.clone());
+            if let Some(record) = map.get(&key) {
+                unit.review_status = Some(record.status);
+                // Compute source_changed_since_review only when the current
+                // extract produced a hash; if source_hash is None (vanished,
+                // obsolete, or adapter not yet populating it) we leave the flag
+                // false regardless of the stored hash (§6.5 of the design doc).
+                if let Some(current) = &unit.source_hash {
+                    unit.source_changed_since_review = current != &record.source_hash_at_review;
+                }
+            }
+        }
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
