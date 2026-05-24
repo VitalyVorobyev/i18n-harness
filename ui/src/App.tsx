@@ -5,6 +5,7 @@ import { HomeScreen, pushRecent } from "./components/HomeScreen/HomeScreen";
 import { Inspector } from "./components/Inspector/Inspector";
 import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
+import { QualityPanel } from "./components/QualityPanel/QualityPanel";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
 import {
@@ -672,21 +673,17 @@ export function App() {
             />
           </div>
 
-          {/* Quality view — placeholder for M4.3d */}
+          {/* Quality view — M4.3d */}
           <div
             className={
-              projectView === "quality"
-                ? "flex-1 flex items-center justify-center"
-                : "hidden"
+              projectView === "quality" ? "flex-1 flex min-h-0" : "hidden"
             }
           >
-            <div className="text-center">
-              <p className="text-sm font-medium text-fg-secondary">Quality</p>
-              <p className="mt-1 text-xs text-fg-disabled">
-                Coming in M4.3d — acceptance rate, translation memory, prompt
-                evaluation.
-              </p>
-            </div>
+            <QualityPanel
+              summary={summary}
+              flashError={flashError}
+              flashInfo={flashInfo}
+            />
           </div>
         </div>
       </div>

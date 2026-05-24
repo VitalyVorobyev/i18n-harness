@@ -511,7 +511,7 @@ impl CuratedSet {
 /// been deleted (file rotation, manual edit, project copy without state). The
 /// dangling reference is preserved in `curated.toml` so the user can see it
 /// and decide whether to remove it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CuratedExample {
     /// The correction's content-addressed id.
     pub id: CorrectionId,
