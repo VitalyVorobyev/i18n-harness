@@ -1,0 +1,33 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 91
+expression: discover(fs)
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {
+    "de_DE": {},
+    "fr_FR": {}
+  },
+  "catalogs": [
+    {
+      "path": "/project/locale/de.po",
+      "format": "gettext-po",
+      "locale": "de_DE",
+      "confidence": "high",
+      "reason": "gettext PO header with Language: de_DE",
+      "alternatives": []
+    },
+    {
+      "path": "/project/locale/fr.po",
+      "format": "gettext-po",
+      "locale": "fr_FR",
+      "confidence": "high",
+      "reason": "gettext PO header with Language: fr_FR",
+      "alternatives": []
+    }
+  ],
+  "glossary": null,
+  "backend": null
+}

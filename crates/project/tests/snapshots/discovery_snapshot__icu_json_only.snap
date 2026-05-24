@@ -1,0 +1,42 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 105
+expression: discover(fs)
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {
+    "de": {},
+    "en": {},
+    "fr": {}
+  },
+  "catalogs": [
+    {
+      "path": "/project/i18n/de.json",
+      "format": "icu-json",
+      "locale": "de",
+      "confidence": "medium",
+      "reason": "flat JSON key→string map — likely ICU-JSON catalog",
+      "alternatives": []
+    },
+    {
+      "path": "/project/i18n/en.json",
+      "format": "icu-json",
+      "locale": "en",
+      "confidence": "medium",
+      "reason": "flat JSON key→string map — likely ICU-JSON catalog",
+      "alternatives": []
+    },
+    {
+      "path": "/project/i18n/fr.json",
+      "format": "icu-json",
+      "locale": "fr",
+      "confidence": "medium",
+      "reason": "flat JSON key→string map — likely ICU-JSON catalog",
+      "alternatives": []
+    }
+  ],
+  "glossary": null,
+  "backend": null
+}

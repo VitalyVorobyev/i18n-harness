@@ -1,0 +1,51 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 219
+expression: discover(fs)
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {
+    "de_DE": {},
+    "es_ES": {},
+    "fr_FR": {},
+    "zh_Hans": {}
+  },
+  "catalogs": [
+    {
+      "path": "/project/a.ts",
+      "format": "qt-ts",
+      "locale": "de_DE",
+      "confidence": "high",
+      "reason": "<TS language=\"de_DE\"> seen — Qt Linguist XML",
+      "alternatives": []
+    },
+    {
+      "path": "/project/d1/d2/d3/d.ts",
+      "format": "qt-ts",
+      "locale": "fr_FR",
+      "confidence": "high",
+      "reason": "<TS language=\"fr_FR\"> seen — Qt Linguist XML",
+      "alternatives": []
+    },
+    {
+      "path": "/project/d1/d2/d3/d4/d5/d6/d7/d8/too_deep.ts",
+      "format": "qt-ts",
+      "locale": "zh_Hans",
+      "confidence": "high",
+      "reason": "<TS language=\"zh_Hans\"> seen — Qt Linguist XML",
+      "alternatives": []
+    },
+    {
+      "path": "/project/d1/d2/d3/d4/d5/d6/d7/deep.ts",
+      "format": "qt-ts",
+      "locale": "es_ES",
+      "confidence": "high",
+      "reason": "<TS language=\"es_ES\"> seen — Qt Linguist XML",
+      "alternatives": []
+    }
+  ],
+  "glossary": null,
+  "backend": null
+}

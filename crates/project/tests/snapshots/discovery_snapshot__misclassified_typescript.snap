@@ -1,0 +1,13 @@
+---
+source: crates/project/tests/discovery_snapshot.rs
+assertion_line: 148
+expression: draft
+---
+{
+  "root": "/project",
+  "name": "project",
+  "locales": {},
+  "catalogs": [],
+  "glossary": null,
+  "backend": null
+}
