@@ -593,8 +593,14 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
   // Refetch corrections when dropdown/checkbox filters change.
   // filterUnitId is intentionally excluded here: unit-id changes go through
   // the debounced handleUnitIdChange path instead to avoid a fetch per keystroke.
+  // Cancel any pending debounce timer so stale unit-id requests cannot race
+  // a freshly-triggered filter-change fetch.
   // biome-ignore lint/correctness/useExhaustiveDependencies: filterUnitId handled via debounce
   useEffect(() => {
+    if (unitIdTimerRef.current !== null) {
+      clearTimeout(unitIdTimerRef.current);
+      unitIdTimerRef.current = null;
+    }
     void fetchCorrections(
       filterCatalog,
       filterLocale,
