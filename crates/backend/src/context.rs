@@ -17,7 +17,7 @@
 
 use i18n_harness_core::{FlagSet, Unit};
 use i18n_harness_glossary::{Glossary, Register};
-use i18n_harness_locales::Locale;
+use i18n_harness_locales::{Locale, PluralCategory};
 
 /// Everything a backend can see when it translates one unit.
 ///
@@ -56,11 +56,26 @@ pub struct PromptContext<'a> {
     /// previous run's soft flags the model can condition on). The backend
     /// is free to ignore this; it is read-only signal.
     pub flags_so_far: &'a FlagSet,
+
+    /// Which CLDR plural category to produce on this prompt render.
+    ///
+    /// - `None` — singular unit, or "render the singular path" of a plural
+    ///   unit. The template's `{plural_category_line_or_empty}` resolves
+    ///   to the empty string.
+    /// - `Some(cat)` — caller is iterating per-form on a plural unit. The
+    ///   renderer substitutes the line `Plural form: produce the
+    ///   "<cat>" form (CLDR category for <locale>).`.
+    ///
+    /// Backends iterate `locale.cldr_plural` and update this field for
+    /// each form; the rest of the context is constant across forms.
+    pub plural_category: Option<PluralCategory>,
 }
 
 impl<'a> PromptContext<'a> {
     /// Construct a context with all required fields. Convenience for
-    /// tests; the CLI builds the same shape inline.
+    /// tests; the CLI builds the same shape inline. `plural_category` is
+    /// `None` by default — set it via [`Self::with_plural_category`] when
+    /// rendering one form of a plural unit.
     pub fn new(
         unit: &'a Unit,
         locale: &'a Locale,
@@ -74,7 +89,17 @@ impl<'a> PromptContext<'a> {
             register,
             glossary,
             flags_so_far,
+            plural_category: None,
         }
+    }
+
+    /// Return a copy of this context with [`Self::plural_category`] set.
+    /// The rest of the context is unchanged — used by backends iterating
+    /// over CLDR plural forms.
+    #[must_use]
+    pub fn with_plural_category(mut self, category: PluralCategory) -> Self {
+        self.plural_category = Some(category);
+        self
     }
 
     /// Iterate `(source, target)` glossary pairs for the context's

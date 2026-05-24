@@ -233,14 +233,14 @@ impl OllamaBackend {
         locale: &Locale,
         ctx: &PromptContext<'_>,
     ) -> Result<TranslationOutcome, BackendError> {
-        let base_prompt = self.template.render(ctx);
         let mut forms: Vec<String> = Vec::with_capacity(locale.cldr_plural.len());
         for category in locale.cldr_plural {
-            let directive = format!(
-                "\nPlural form: produce the \"{category}\" form (CLDR category for {locale_id}).\n",
-                locale_id = locale.id,
-            );
-            let prompt = format!("{base_prompt}{directive}");
+            // Re-render the prompt for each form so the template's
+            // `{plural_category_line_or_empty}` token resolves to the
+            // current CLDR category. The rest of the context is constant
+            // across forms.
+            let per_form_ctx = ctx.with_plural_category(*category);
+            let prompt = self.template.render(&per_form_ctx);
             match self.call_generate(agent, &prompt)? {
                 TranslationOutcome::Translated {
                     text: TranslatedText::Singular(s),
