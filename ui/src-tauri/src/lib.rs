@@ -36,13 +36,25 @@ use serde::{Deserialize, Serialize};
 /// The project slot (M4.2a) holds the currently-open project. It coexists
 /// with the file-centric catalog slot: opening a project doesn't auto-open
 /// any catalog, and opening a stand-alone catalog leaves the project slot
-/// untouched. The two surfaces converge in M4.2b when per-catalog edits
-/// route through the project.
+/// untouched.
+///
+/// The `project_catalogs` slot (M4.2b) is the multi-catalog dirty store
+/// used when working in project mode. It is keyed by absolute path and
+/// populated by `open_catalog_in_project`. The two stores — `catalog`
+/// (singular, file-centric) and `project_catalogs` (multi, project-scoped)
+/// — are independent. Closing a project clears both.
 #[derive(Default)]
 pub struct AppState {
     catalog: Mutex<Option<OpenCatalog>>,
     glossary: Mutex<Option<Glossary>>,
     project: Mutex<Option<Project>>,
+    project_catalogs: Mutex<std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
+}
+
+/// An entry in the project-scoped multi-catalog store.
+struct OpenCatalogEntry {
+    catalog: Catalog,
+    dirty: bool,
 }
 
 /// The currently-open catalog plus the absolute path it was loaded
@@ -770,13 +782,22 @@ fn create_project(
     })
 }
 
-/// Drop the currently-open project. The stand-alone catalog slot is also
+/// Drop the currently-open project. The stand-alone catalog slot, the
+/// project-scoped multi-catalog store, and the glossary slot are also
 /// cleared so the next "open file" starts from a clean slate.
+///
+/// Locks are acquired and released one at a time to avoid any lock-order
+/// issue.
 #[tauri::command]
 fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
     *state.project.lock().map_err(project_lock_poisoned)? = None;
     *state.glossary.lock().map_err(glossary_lock_poisoned)? = None;
     *state.catalog.lock().map_err(lock_poisoned)? = None;
+    state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?
+        .clear();
     Ok(())
 }
 
@@ -815,6 +836,263 @@ fn save_manifest(state: tauri::State<'_, AppState>) -> Result<(), String> {
     project.save_manifest().map_err(|e| e.to_string())
 }
 
+// ── Project-scoped per-catalog commands (M4.2b) ───────────────────────────────
+
+/// Open a catalog that belongs to the currently-open project.
+///
+/// The catalog must be declared in the project manifest — either by its
+/// manifest-relative path (e.g. `"translations/app_de.ts"`) or by its
+/// resolved absolute path. The extracted units have their `review_status`
+/// and `source_changed_since_review` fields populated by
+/// `Project::apply_review_state` before they are returned. The catalog is
+/// stashed in the per-project multi-catalog store keyed by absolute path;
+/// subsequent edit/save commands use that key.
+///
+/// Errors if no project is open, or if `catalog_path` does not match any
+/// declared catalog.
+#[tauri::command]
+fn open_catalog_in_project(
+    catalog_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CatalogResponse, String> {
+    let path = PathBuf::from(&catalog_path);
+
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+    let catalog_ref = project
+        .catalog(&path)
+        .ok_or_else(|| format!("catalog not in project: {catalog_path}"))?;
+    let abs = PathBuf::from(&catalog_ref.absolute_path);
+
+    let mut catalog =
+        i18n_harness_adapter_qt::extract(&abs).map_err(|e| format!("extract failed: {e}"))?;
+    project.apply_review_state(&abs, catalog.units_mut());
+
+    let response = build_catalog_response(&abs, &catalog);
+    drop(project_guard);
+
+    state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?
+        .insert(
+            abs,
+            OpenCatalogEntry {
+                catalog,
+                dirty: false,
+            },
+        );
+
+    Ok(response)
+}
+
+/// Write a target edit into a catalog that is open in the project store.
+///
+/// Mirrors the state-transition rules of `update_unit_target`: promotes
+/// `Untranslated → Proposed` on first text, demotes `Proposed/Finished →
+/// Untranslated` when the target is fully cleared, and refuses edits on
+/// `Vanished`/`Obsolete` units. Sets `dirty = true` on the entry on any
+/// successful mutation.
+///
+/// Errors if the catalog is not in the project store or the unit is not
+/// found / not writable.
+#[tauri::command]
+fn update_unit_target_in_project(
+    catalog_path: String,
+    unit_id: String,
+    edit: TargetEdit,
+    state: tauri::State<'_, AppState>,
+) -> Result<Unit, String> {
+    let abs = PathBuf::from(&catalog_path);
+    let mut store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
+    let id = UnitId::from(unit_id);
+    let unit = entry
+        .catalog
+        .find_unit_mut(&id)
+        .ok_or_else(|| format!("unit not found: {id}"))?;
+
+    if !unit.state.is_writable() {
+        return Err(format!(
+            "unit {id} is {state:?} — vanished/obsolete units are not writable",
+            state = unit.state,
+        ));
+    }
+    match (&mut unit.target, edit) {
+        (Target::Singular { text }, TargetEdit::Singular { text: new }) => *text = new,
+        (Target::Plural { forms }, TargetEdit::Plural { form_index, text }) => {
+            let i = form_index as usize;
+            if i >= forms.len() {
+                return Err(format!(
+                    "plural form index {i} out of range (have {})",
+                    forms.len()
+                ));
+            }
+            forms[i] = text;
+        }
+        (Target::Singular { .. }, TargetEdit::Plural { .. }) => {
+            return Err("cannot apply plural edit to singular unit".into());
+        }
+        (Target::Plural { .. }, TargetEdit::Singular { .. }) => {
+            return Err("cannot apply singular edit to plural unit".into());
+        }
+    }
+    match unit.state {
+        UnitState::Untranslated if !unit.target.is_empty() => {
+            unit.state = UnitState::Proposed;
+        }
+        UnitState::Proposed | UnitState::Finished if unit.target.is_empty() => {
+            unit.state = UnitState::Untranslated;
+            unit.flags = Default::default();
+        }
+        _ => {}
+    }
+    let result = unit.clone();
+    entry.dirty = true;
+    Ok(result)
+}
+
+/// Write a single project-catalog back to disk using the byte-stable adapter.
+///
+/// Clears `dirty` on success. Errors if the catalog is not in the project
+/// store.
+#[tauri::command]
+fn save_catalog_in_project(
+    catalog_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<SaveSummary, String> {
+    let abs = PathBuf::from(&catalog_path);
+    let mut store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
+    let units = entry.catalog.units().to_vec();
+    i18n_harness_adapter_qt::apply(&entry.catalog, &units, &abs)
+        .map_err(|e| format!("apply failed: {e}"))?;
+    entry.dirty = false;
+    Ok(SaveSummary {
+        path: abs.to_string_lossy().into_owned(),
+        unit_count: units.len(),
+    })
+}
+
+/// Write every dirty catalog in the project store back to disk.
+///
+/// Catalogs are written in BTreeMap iteration order (absolute path order),
+/// which is deterministic. On the first apply failure the function stops and
+/// returns the partial list of successes plus an `Err` describing the failing
+/// path. Successfully-written entries have their `dirty` flag cleared before
+/// the failure is surfaced.
+#[tauri::command]
+fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<Vec<SaveSummary>, String> {
+    let mut store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    let mut summaries: Vec<SaveSummary> = Vec::new();
+    for (abs, entry) in store.iter_mut() {
+        if !entry.dirty {
+            continue;
+        }
+        let units = entry.catalog.units().to_vec();
+        i18n_harness_adapter_qt::apply(&entry.catalog, &units, abs)
+            .map_err(|e| format!("apply failed for {}: {e}", abs.display()))?;
+        entry.dirty = false;
+        summaries.push(SaveSummary {
+            path: abs.to_string_lossy().into_owned(),
+            unit_count: units.len(),
+        });
+    }
+    Ok(summaries)
+}
+
+/// Re-read a catalog from disk and fold the current review state back in.
+///
+/// Replaces the in-memory entry in the project store and clears `dirty`.
+/// Returns the same shape as `open_catalog_in_project`. Errors if the
+/// catalog is not in the project store or if no project is open.
+#[tauri::command]
+fn discard_changes_in_project(
+    catalog_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<CatalogResponse, String> {
+    let abs = PathBuf::from(&catalog_path);
+
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+    // Confirm the catalog is in the store before doing I/O.
+    {
+        let store = state
+            .project_catalogs
+            .lock()
+            .map_err(project_catalogs_lock_poisoned)?;
+        if !store.contains_key(&abs) {
+            return Err(no_catalog_in_project());
+        }
+    }
+
+    let mut catalog =
+        i18n_harness_adapter_qt::extract(&abs).map_err(|e| format!("extract failed: {e}"))?;
+    project.apply_review_state(&abs, catalog.units_mut());
+
+    let response = build_catalog_response(&abs, &catalog);
+    drop(project_guard);
+
+    state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?
+        .insert(
+            abs,
+            OpenCatalogEntry {
+                catalog,
+                dirty: false,
+            },
+        );
+
+    Ok(response)
+}
+
+/// Return the absolute paths of all catalogs currently open in the project
+/// store, in BTreeMap order (i.e. lexicographic absolute-path order).
+///
+/// The UI uses this to render per-catalog dirty-state pills. Returns an
+/// empty vec when no catalogs have been opened via `open_catalog_in_project`.
+#[tauri::command]
+fn list_open_catalogs(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    Ok(store
+        .keys()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
+
+/// Return whether the named catalog has unsaved edits.
+///
+/// Returns `false` if the catalog is not in the project store (treat
+/// unknown = clean from the UI's perspective).
+#[tauri::command]
+fn is_catalog_dirty(
+    catalog_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    let abs = PathBuf::from(&catalog_path);
+    let store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    Ok(store.get(&abs).is_some_and(|e| e.dirty))
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn build_catalog_response(path: &std::path::Path, catalog: &Catalog) -> CatalogResponse {
@@ -844,12 +1122,24 @@ fn project_lock_poisoned(
     "project state lock poisoned".to_string()
 }
 
+fn project_catalogs_lock_poisoned(
+    _: std::sync::PoisonError<
+        std::sync::MutexGuard<'_, std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
+    >,
+) -> String {
+    "project_catalogs state lock poisoned".to_string()
+}
+
 fn no_catalog() -> String {
     "no catalog open".to_string()
 }
 
 fn no_project() -> String {
     "no project open".to_string()
+}
+
+fn no_catalog_in_project() -> String {
+    "catalog not open in project".to_string()
 }
 
 /// Entry point invoked from `main.rs` (and from the mobile entry point
@@ -886,6 +1176,13 @@ pub fn run() {
         current_project_summary,
         list_catalogs,
         save_manifest,
+        open_catalog_in_project,
+        update_unit_target_in_project,
+        save_catalog_in_project,
+        save_all_dirty,
+        discard_changes_in_project,
+        list_open_catalogs,
+        is_catalog_dirty,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -906,6 +1203,13 @@ pub fn run() {
         current_project_summary,
         list_catalogs,
         save_manifest,
+        open_catalog_in_project,
+        update_unit_target_in_project,
+        save_catalog_in_project,
+        save_all_dirty,
+        discard_changes_in_project,
+        list_open_catalogs,
+        is_catalog_dirty,
     ]);
 
     builder
