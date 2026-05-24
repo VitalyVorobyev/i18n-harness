@@ -17,7 +17,10 @@ use i18n_harness_core::{Target, Unit, UnitId, UnitState};
 use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
-use i18n_harness_project::{CatalogRef, DraftManifest, Project, ProjectSummary};
+use i18n_harness_project::{
+    CatalogRef, Correction, CorrectionId, CorrectionProvenance, DraftManifest, NewCorrection,
+    Project, ProjectSummary,
+};
 use serde::{Deserialize, Serialize};
 
 /// Process-wide state shared across Tauri commands.
@@ -687,6 +690,97 @@ fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
     toml::to_string(&wire).map_err(|e| format!("toml serialize: {e}"))
 }
 
+// ── M4.2c wire shapes ────────────────────────────────────────────────────────
+
+/// Provenance of the MT proposal in a correction record, mirroring
+/// [`CorrectionProvenance`] with serde derives so it crosses the IPC bridge.
+/// All fields default to empty string; the caller fills only what the backend
+/// made available.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct CorrectionProvenanceWire {
+    /// Backend name as registered by the `TranslationBackend` trait.
+    #[serde(default)]
+    pub backend: String,
+    /// Model identifier as the backend reports it.
+    #[serde(default)]
+    pub model: String,
+    /// Free-form model version / revision string.
+    #[serde(default)]
+    pub model_version: String,
+    /// Prompt template version identifier.
+    #[serde(default)]
+    pub prompt_template_version: String,
+    /// Hash of the glossary content at correction time.
+    #[serde(default)]
+    pub glossary_version: String,
+}
+
+/// IPC payload for `record_correction_in_project`.
+#[derive(Debug, Deserialize)]
+pub struct RecordCorrectionRequest {
+    /// Absolute or manifest-relative catalog path.
+    pub catalog_path: String,
+    /// Target locale id.
+    pub locale: String,
+    /// Unit that was corrected.
+    pub unit_id: String,
+    /// Source text.
+    pub source: String,
+    /// MT proposal that was edited (empty for manual-from-scratch).
+    pub mt_proposal: String,
+    /// The accepted human translation.
+    pub human_target: String,
+    /// Provenance of `mt_proposal`.
+    #[serde(default)]
+    pub provenance: CorrectionProvenanceWire,
+    /// Flags the unit carried at correction time.
+    #[serde(default)]
+    pub flags_at_correction: Vec<i18n_harness_core::Flag>,
+}
+
+/// IPC response from `record_correction_in_project`.
+#[derive(Debug, Serialize)]
+pub struct CorrectionIdResponse {
+    /// The assigned correction id in `"corr_<12-hex>"` form.
+    pub id: String,
+}
+
+/// Filter passed to `list_corrections_in_project`. All fields are optional;
+/// an all-default filter returns every record (AND semantics for non-None fields).
+#[derive(Debug, Default, Deserialize)]
+pub struct ListCorrectionsFilter {
+    /// Restrict to this catalog (absolute or manifest-relative path).
+    #[serde(default)]
+    pub catalog_path: Option<String>,
+    /// Restrict to this target locale id.
+    #[serde(default)]
+    pub locale: Option<String>,
+    /// Restrict to this unit id.
+    #[serde(default)]
+    pub unit_id: Option<String>,
+    /// If true, restrict to corrections that are in the curated set.
+    ///
+    /// Note: `CorrectionFilter` has no `curated_only` field; this flag is
+    /// honoured by filtering the result list against the project's curated set
+    /// after the JSONL scan.
+    #[serde(default)]
+    pub curated_only: bool,
+}
+
+/// IPC payload for `set_review_status_in_project`. Wraps the three fields
+/// `Project::set_review_status` accepts beyond catalog + unit.
+#[derive(Debug, Deserialize)]
+pub struct ReviewStatusInput {
+    /// The new review status. `None` clears the unit's record.
+    pub status: Option<i18n_harness_core::ReviewStatus>,
+    /// Source-hash value from the unit at review time (empty if not available).
+    #[serde(default)]
+    pub source_hash_at_review: String,
+    /// Free-form reviewer note.
+    #[serde(default)]
+    pub reviewer_note: Option<String>,
+}
+
 // ── Project commands (M4.2a) ─────────────────────────────────────────────────
 
 /// Wire response for `open_project` / `create_project`. Carries the summary
@@ -1126,6 +1220,295 @@ fn is_catalog_dirty(
     Ok(store.get(&abs).is_some_and(|e| e.dirty))
 }
 
+// ── M4.2c.1 — project-routed translate, corrections, review status ────────────
+
+/// Translate one unit through the currently-open project, using the project's
+/// glossary, locale config, and default backend. Only the project-catalog store
+/// is updated; the singular file-centric `catalog` slot is not touched.
+///
+/// Requires the catalog to be open in the project store (call
+/// `open_catalog_in_project` first). Returns the merged unit plus the gate
+/// report.
+///
+/// Available only when the crate is built with the `ollama` feature.
+#[cfg(feature = "ollama")]
+#[tauri::command]
+fn translate_unit_in_project(
+    catalog_path: String,
+    unit_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<TranslateResult, String> {
+    use i18n_harness_backend::{OllamaBackend, TranslationBackend, TranslationOutcome};
+    use i18n_harness_core::{Batch, BatchKey, FlagSet};
+    use i18n_harness_project::BackendKind;
+
+    let abs = PathBuf::from(&catalog_path);
+
+    // Resolve locale and backend config from the project slot first.
+    let (locale, glossary) = {
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+        // Find the catalog in the project to determine the locale id.
+        let catalog_ref = project
+            .catalog(&abs)
+            .ok_or_else(|| "catalog not open in project".to_string())?;
+        let locale_id = &catalog_ref.locale;
+
+        // Three-layer locale merge; fall back to workspace-only if the
+        // project doesn't declare this locale id (defensive, not the common path).
+        let locale = project
+            .locale(locale_id)
+            .map(|r| r.workspace_locale())
+            .or_else(|| Locale::by_id(locale_id))
+            .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
+
+        // Validate the backend config: if the project declares a non-Ollama
+        // backend, we refuse rather than silently falling back.
+        if let Some(backend_cfg) = &project.manifest().backends.default {
+            if backend_cfg.kind != BackendKind::Ollama {
+                return Err(format!(
+                    "backend kind {:?} not supported yet",
+                    backend_cfg.kind,
+                ));
+            }
+        }
+
+        let glossary = project.glossary().cloned();
+        (locale, glossary)
+    };
+
+    let mut store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
+
+    let id = UnitId::from(unit_id);
+    let original = entry
+        .catalog
+        .find_unit_mut(&id)
+        .ok_or_else(|| format!("unit not found: {id}"))?
+        .clone();
+    if !original.state.is_writable() {
+        return Err(format!(
+            "unit {id} is {state:?} — not translatable",
+            state = original.state,
+        ));
+    }
+
+    let batch = Batch::new(BatchKey::new("ui", 0), vec![original.clone()]);
+    let backend =
+        OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
+    let backend_name = backend.name().to_string();
+    let outcomes = backend
+        .translate_batch(&batch, locale, glossary.as_ref())
+        .map_err(|e| format!("backend `{backend_name}` failed: {e}"))?;
+    let outcome = outcomes
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("backend `{backend_name}` returned no outcomes"))?;
+
+    let mut merged = original.clone();
+    match outcome {
+        TranslationOutcome::Translated { text, flags } => {
+            merged.target = match text {
+                i18n_harness_backend::TranslatedText::Singular(s) => {
+                    Target::Singular { text: Some(s) }
+                }
+                i18n_harness_backend::TranslatedText::Plural(forms) => Target::Plural {
+                    forms: forms.into_iter().map(Some).collect(),
+                },
+            };
+            merged.state = UnitState::Proposed;
+            let mut flagset = FlagSet::new();
+            for f in flags {
+                flagset.insert(f);
+            }
+            merged.flags = flagset;
+        }
+        TranslationOutcome::Skipped { reason } => {
+            return Err(format!("backend skipped: {reason}"));
+        }
+        TranslationOutcome::Failed { reason, .. } => {
+            return Err(format!("backend failed: {reason}"));
+        }
+    }
+
+    let report = i18n_harness_gate::validate(&merged, locale, None);
+    if report.is_clean() && merged.target.is_complete() {
+        merged.state = UnitState::Finished;
+    }
+
+    if let Some(slot) = entry.catalog.find_unit_mut(&id) {
+        *slot = merged.clone();
+    }
+    entry.dirty = true;
+
+    Ok(TranslateResult {
+        unit: merged,
+        report,
+    })
+}
+
+/// Record an accepted human edit in the project's `corrections.jsonl`.
+///
+/// `catalog_path` may be absolute or manifest-relative; the command resolves
+/// it against the project's catalog index and errors with
+/// `"catalog not registered in project"` if no match is found. Returns the
+/// content-addressed correction id.
+#[tauri::command]
+fn record_correction_in_project(
+    req: RecordCorrectionRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<CorrectionIdResponse, String> {
+    use i18n_harness_project::CorrectionFilter;
+
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+    let (_, manifest_relative) = resolve_catalog_path(project, &req.catalog_path)?;
+
+    let new_corr = NewCorrection {
+        catalog: manifest_relative,
+        locale: req.locale,
+        unit_id: UnitId::from(req.unit_id),
+        source: req.source,
+        mt_proposal: req.mt_proposal,
+        human_target: req.human_target,
+        provenance: CorrectionProvenance {
+            backend: req.provenance.backend,
+            model: req.provenance.model,
+            model_version: req.provenance.model_version,
+            prompt_template_version: req.provenance.prompt_template_version,
+            glossary_version: req.provenance.glossary_version,
+        },
+        flags_at_correction: req.flags_at_correction,
+    };
+    let _ = CorrectionFilter::default(); // suppress unused import warning
+    let id = project
+        .record_correction(new_corr)
+        .map_err(|e| e.to_string())?;
+
+    Ok(CorrectionIdResponse { id: id.to_string() })
+}
+
+/// List corrections stored in the project, optionally filtered.
+///
+/// `catalog_path` in the filter (if provided) may be absolute or
+/// manifest-relative; it is resolved before the scan. The `curated_only` flag
+/// post-filters to corrections that appear in the curated set.
+#[tauri::command]
+fn list_corrections_in_project(
+    filter: ListCorrectionsFilter,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Correction>, String> {
+    use i18n_harness_project::CorrectionFilter;
+
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+    let catalog_manifest = filter
+        .catalog_path
+        .as_deref()
+        .map(|p| resolve_catalog_path(project, p).map(|(_, rel)| rel))
+        .transpose()?;
+
+    let cf = CorrectionFilter {
+        catalog: catalog_manifest,
+        locale: filter.locale,
+        unit_id: filter.unit_id.map(UnitId::from),
+        since: None,
+    };
+
+    let mut corrections = project.list_corrections(cf).map_err(|e| e.to_string())?;
+
+    if filter.curated_only {
+        let curated = project.curated();
+        corrections.retain(|c| curated.contains(&c.id));
+    }
+
+    Ok(corrections)
+}
+
+/// Promote a correction to the project's curated set.
+///
+/// `id` must be a `"corr_<12-hex>"` string previously returned by
+/// `record_correction_in_project`. Returns `"invalid correction id"` if the
+/// string cannot be parsed.
+#[tauri::command]
+fn promote_correction_to_curated(
+    id: String,
+    note: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let corr_id = parse_correction_id(&id)?;
+    let mut project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_mut().ok_or_else(no_project)?;
+    project
+        .promote_to_curated(corr_id, note)
+        .map_err(|e| e.to_string())
+}
+
+/// Remove a correction from the project's curated set.
+///
+/// Idempotent: returns `false` if the id was not in the curated set, `true`
+/// if it was removed. Returns `"invalid correction id"` if `id` cannot be
+/// parsed.
+#[tauri::command]
+fn un_curate_correction(id: String, state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    let corr_id = parse_correction_id(&id)?;
+    let mut project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_mut().ok_or_else(no_project)?;
+    project.un_curate(&corr_id).map_err(|e| e.to_string())
+}
+
+/// Record a review-status change for one unit.
+///
+/// Appends an event to `review.jsonl` via the project's store. As a side
+/// effect, the in-memory unit (if the catalog is currently open in the project
+/// store) has its `review_status` field set immediately so the UI reflects the
+/// change without re-opening the catalog.
+///
+/// Review state lives in `review.jsonl`, not in the catalog file, so the
+/// catalog's `dirty` flag is not set.
+#[tauri::command]
+fn set_review_status_in_project(
+    catalog_path: String,
+    unit_id: String,
+    input: ReviewStatusInput,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let abs = PathBuf::from(&catalog_path);
+
+    {
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let uid = UnitId::from(unit_id.clone());
+        project
+            .set_review_status(
+                &abs,
+                &uid,
+                input.status,
+                input.source_hash_at_review,
+                input.reviewer_note,
+            )
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Update the in-memory unit if the catalog is open; silently skip if not.
+    if let Ok(mut store) = state.project_catalogs.lock() {
+        if let Some(entry) = store.get_mut(&abs) {
+            let uid = UnitId::from(unit_id);
+            if let Some(unit) = entry.catalog.find_unit_mut(&uid) {
+                unit.review_status = input.status;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn build_catalog_response(path: &std::path::Path, catalog: &Catalog) -> CatalogResponse {
@@ -1175,6 +1558,31 @@ fn no_catalog_in_project() -> String {
     "catalog not open in project".to_string()
 }
 
+/// Return `(absolute_path, manifest_relative_path)` for a catalog path that
+/// may be absolute or manifest-relative. Errors with
+/// `"catalog not registered in project"` if no registered catalog matches.
+fn resolve_catalog_path(project: &Project, input: &str) -> Result<(PathBuf, PathBuf), String> {
+    let input_path = PathBuf::from(input);
+    let catalog_ref = project
+        .catalog(&input_path)
+        .ok_or_else(|| "catalog not registered in project".to_string())?;
+    let absolute = PathBuf::from(&catalog_ref.absolute_path);
+    let manifest_relative = PathBuf::from(&catalog_ref.manifest_path);
+    Ok((absolute, manifest_relative))
+}
+
+/// Parse a `"corr_<12-hex>"` string into a [`CorrectionId`].
+///
+/// Returns a generic `"invalid correction id"` on failure to avoid leaking
+/// internal format details to the caller.
+fn parse_correction_id(s: &str) -> Result<CorrectionId, String> {
+    if s.starts_with("corr_") && s.len() == 17 && s[5..].chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(CorrectionId(s.to_owned()))
+    } else {
+        Err("invalid correction id".to_string())
+    }
+}
+
 /// Entry point invoked from `main.rs` (and from the mobile entry point
 /// macro when the crate is built for iOS/Android).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1216,6 +1624,12 @@ pub fn run() {
         discard_changes_in_project,
         list_open_catalogs,
         is_catalog_dirty,
+        translate_unit_in_project,
+        record_correction_in_project,
+        list_corrections_in_project,
+        promote_correction_to_curated,
+        un_curate_correction,
+        set_review_status_in_project,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -1243,6 +1657,11 @@ pub fn run() {
         discard_changes_in_project,
         list_open_catalogs,
         is_catalog_dirty,
+        record_correction_in_project,
+        list_corrections_in_project,
+        promote_correction_to_curated,
+        un_curate_correction,
+        set_review_status_in_project,
     ]);
 
     builder
