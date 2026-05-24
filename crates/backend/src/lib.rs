@@ -87,4 +87,4 @@ pub use trait_def::TranslationBackend;
 pub use manual::{ManualBackend, ManualResponse};
 
 #[cfg(feature = "ollama")]
-pub use ollama::OllamaBackend;
+pub use ollama::{OllamaBackend, PromptResponseShape};
