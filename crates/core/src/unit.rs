@@ -93,15 +93,32 @@ pub enum UnitState {
 }
 
 impl UnitState {
-    /// Returns true if the harness is allowed to write a new target into a
-    /// unit currently in this state.
+    /// Returns true if the harness batch pipeline (CLI `harness translate`) is
+    /// allowed to select this unit as a translation candidate and write a new
+    /// target into it.
+    ///
+    /// `Finished` is intentionally excluded: a Finished unit has already been
+    /// accepted by the translator or confirmed by the gate; the batch pipeline
+    /// must not overwrite it. `Vanished` and `Obsolete` are always off-limits —
+    /// they exist only to preserve message ids for potential reuse.
+    ///
+    /// For the interactive UI edit path, use [`Self::is_ui_editable`].
+    pub fn is_writable(self) -> bool {
+        matches!(self, Self::Untranslated | Self::Proposed)
+    }
+
+    /// Returns true if the interactive UI editor is allowed to write a new
+    /// target into a unit currently in this state.
     ///
     /// Vanished and Obsolete units are off-limits — they exist only to
     /// preserve message ids for potential reuse and must never have their
     /// translations rewritten. Untranslated, Proposed, and Finished are all
-    /// writable; editing a Finished unit transitions it back to Proposed (the
-    /// human is reconsidering the finalized translation).
-    pub fn is_writable(self) -> bool {
+    /// editable in the UI; editing a Finished unit transitions it back to
+    /// Proposed (the human is reconsidering the finalized translation).
+    ///
+    /// Note: unlike [`Self::is_writable`], this includes `Finished`. The batch
+    /// CLI pipeline uses `is_writable`; the Tauri command handlers use this.
+    pub fn is_ui_editable(self) -> bool {
         matches!(self, Self::Untranslated | Self::Proposed | Self::Finished)
     }
 }
@@ -336,12 +353,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writable_states_are_untranslated_proposed_and_finished() {
+    fn batch_writable_states_are_only_untranslated_and_proposed() {
+        // is_writable() is the batch-pipeline predicate: Finished must be
+        // excluded so the CLI does not re-translate already-accepted units.
         assert!(UnitState::Untranslated.is_writable());
         assert!(UnitState::Proposed.is_writable());
-        assert!(UnitState::Finished.is_writable());
+        assert!(!UnitState::Finished.is_writable());
         assert!(!UnitState::Vanished.is_writable());
         assert!(!UnitState::Obsolete.is_writable());
+    }
+
+    #[test]
+    fn ui_editable_states_include_finished() {
+        // is_ui_editable() is the interactive editor predicate: Finished is
+        // included so the translator can revise accepted translations.
+        assert!(UnitState::Untranslated.is_ui_editable());
+        assert!(UnitState::Proposed.is_ui_editable());
+        assert!(UnitState::Finished.is_ui_editable());
+        assert!(!UnitState::Vanished.is_ui_editable());
+        assert!(!UnitState::Obsolete.is_ui_editable());
     }
 
     #[test]

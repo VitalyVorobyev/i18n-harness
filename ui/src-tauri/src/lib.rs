@@ -306,9 +306,9 @@ fn update_unit_target(
         .catalog
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
-    if !unit.state.is_writable() {
+    if !unit.state.is_ui_editable() {
         return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not writable",
+            "unit {id} is {state:?} — vanished/obsolete units are not editable",
             state = unit.state,
         ));
     }
@@ -1015,9 +1015,9 @@ fn update_unit_target_in_project(
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
 
-    if !unit.state.is_writable() {
+    if !unit.state.is_ui_editable() {
         return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not writable",
+            "unit {id} is {state:?} — vanished/obsolete units are not editable",
             state = unit.state,
         ));
     }
