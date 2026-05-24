@@ -641,13 +641,15 @@ impl Project {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-/// Build the catalog index, checking existence on disk (strict open mode).
+/// Build the catalog index, checking existence and format on disk (strict open mode).
 fn build_catalog_refs(
     manifest: &ProjectManifest,
     paths: &ProjectPaths,
     fs: &dyn ProjectFs,
     warnings: &mut Vec<ProjectWarning>,
 ) -> Result<Vec<CatalogRef>, ProjectError> {
+    use crate::discovery::sniff::{confirms_format, guess_format};
+
     let mut refs = Vec::with_capacity(manifest.catalogs.len());
 
     for entry in &manifest.catalogs {
@@ -655,6 +657,22 @@ fn build_catalog_refs(
 
         if !fs.exists(&abs) {
             return Err(ProjectError::CatalogNotFound { path: abs });
+        }
+
+        // Read up to 64 KiB for format sniffing.
+        let bytes = fs.read(&abs).map_err(|source| ProjectError::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        let prefix = &bytes[..bytes.len().min(64 * 1024)];
+
+        if !confirms_format(prefix, entry.format) {
+            let sniffed = guess_format(prefix);
+            return Err(ProjectError::CatalogFormatMismatch {
+                path: abs,
+                declared: entry.format,
+                sniffed,
+            });
         }
 
         // Warn if locale id doesn't resolve (but keep the entry).

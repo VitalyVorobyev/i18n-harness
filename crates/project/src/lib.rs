@@ -26,6 +26,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod discovery;
 pub mod error;
 pub mod fs;
 pub mod locale;
@@ -43,10 +44,17 @@ pub use fs::{InMemoryFs, ProjectFs, RealFs};
 pub use locale::{ResolvedLocale, ResolvedLocaleView};
 
 pub use manifest::{
-    BackendBlock, BackendConfig, BackendKind, CatalogEntry, CatalogFormat, FormatGuess,
-    GlossaryConfig, LocaleConfig, PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig,
-    RegisterOverride, SCHEMA_VERSION,
+    BackendBlock, BackendConfig, BackendKind, CatalogEntry, CatalogFormat, GlossaryConfig,
+    LocaleConfig, PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, RegisterOverride,
+    SCHEMA_VERSION,
 };
+
+// `FormatGuess` is canonically defined in `manifest.rs` and re-exported from
+// `discovery` for callers that import it from there. Both paths stay public
+// for backward source compatibility.
+pub use manifest::FormatGuess;
+
+pub use discovery::{ClassificationConfidence, DraftAlternative, DraftCatalog, DraftManifest};
 
 pub use memory::CorrectionId;
 
