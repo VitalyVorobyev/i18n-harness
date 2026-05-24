@@ -333,11 +333,20 @@ fn cjk_punctuation_check(locale: &Locale, slots: &[TargetSlot<'_>], findings: &m
 /// Determiners that, immediately preceding a placeholder in the target,
 /// make gender/case agreement undeterminable at translation time.
 /// Lowercased; matched case-insensitively.
+///
+/// The German list also covers common preposition+article contractions
+/// (`zum`/`zur`/`im`/`vom`/`am`/`beim`) — these stand in for `dem`/`der`
+/// in real UI strings and produce the same agreement problem. The Spanish
+/// list covers `del` (de+el) and `al` (a+el) for the same reason.
 const DETERMINERS: &[&str] = &[
-    // German (definite/indefinite, common cases)
+    // German — definite/indefinite articles (nominative/accusative/dative/genitive)
     "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
-    // Spanish
+    // German — preposition+article contractions (very common in UI strings)
+    "zum", "zur", "im", "vom", "am", "beim", "ans", "ins",
+    // Spanish — definite/indefinite articles
     "el", "la", "los", "las", "un", "una", "unos", "unas",
+    // Spanish — preposition+article contractions
+    "del", "al",
 ];
 
 fn placeholder_agreement_check(

@@ -10,7 +10,7 @@
 
 use i18n_harness_core::{Flag, FlagSet, Placeholder, Target, Unit, UnitId, UnitState};
 use i18n_harness_gate::validate;
-use i18n_harness_locales::{Locale, PluralCategory, Register, Script};
+use i18n_harness_locales::Locale;
 
 /// A test fixture row: a unit, the locale to validate against, and the
 /// flags the gate must produce. Soft flags that must NOT fire are listed
@@ -23,26 +23,16 @@ struct Fixture {
     forbidden: &'static [Flag],
 }
 
-/// The de_DE locale, looked up through the public table. Held in a static
-/// to avoid re-scanning the table on every fixture row.
 fn de_de() -> &'static Locale {
     Locale::by_id("de_DE").expect("de_DE present")
 }
 
-/// A handcrafted Han-script locale for testing the CJK punctuation rule.
-/// Per the M1 brief, we do not add `zh_Hans` to the production table until
-/// M3; this fixture is local to the gate tests only.
-static ZH_HANS_FIXTURE: Locale = Locale {
-    id: "zh_Hans",
-    cldr_plural: &[PluralCategory::Other],
-    register: Register::Neutral,
-    variant: "zh_Hans",
-    script: Script::Han,
-    length_warn_ratio: 1.5,
-};
+fn es_es() -> &'static Locale {
+    Locale::by_id("es_ES").expect("es_ES present")
+}
 
 fn zh_hans() -> &'static Locale {
-    &ZH_HANS_FIXTURE
+    Locale::by_id("zh_Hans").expect("zh_Hans present")
 }
 
 fn make_singular(id: &str, source: &str, target: Option<&str>, state: UnitState) -> Unit {
@@ -384,6 +374,66 @@ fn gate_rule_table_drives_every_check() {
             locale: de_de(),
             expected: &[],
             forbidden: &[Flag::PlaceholderAgreementRisk],
+        },
+        Fixture {
+            name: "placeholder-agreement/positive/german-contraction-zur",
+            unit: make_singular(
+                "msg::zur",
+                "Go to {name}",
+                Some("Wechseln zur {name}"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::PlaceholderAgreementRisk],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "placeholder-agreement/positive/german-contraction-zum",
+            unit: make_singular(
+                "msg::zum",
+                "Click {name}",
+                Some("Zum {name} navigieren"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::PlaceholderAgreementRisk],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "placeholder-agreement/positive/german-contraction-im",
+            unit: make_singular(
+                "msg::im",
+                "In {place}",
+                Some("Im {place} suchen"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::PlaceholderAgreementRisk],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "placeholder-agreement/positive/spanish-contraction-del",
+            unit: make_singular(
+                "msg::del",
+                "From {file}",
+                Some("Importar del {file}"),
+                UnitState::Proposed,
+            ),
+            locale: es_es(),
+            expected: &[Flag::PlaceholderAgreementRisk],
+            forbidden: &[],
+        },
+        Fixture {
+            name: "placeholder-agreement/positive/spanish-contraction-al",
+            unit: make_singular(
+                "msg::al",
+                "To {target}",
+                Some("Ir al {target}"),
+                UnitState::Proposed,
+            ),
+            locale: es_es(),
+            expected: &[Flag::PlaceholderAgreementRisk],
+            forbidden: &[],
         },
         Fixture {
             name: "clean/all-rules-quiet",

@@ -599,13 +599,14 @@ fn merge_outcome(
 }
 
 fn file_hash(path: &std::path::Path) -> Result<String> {
-    use std::hash::{Hash, Hasher};
+    use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).with_context(|| format!("read {} for hash", path.display()))?;
-    // Non-cryptographic; enough to disambiguate batches of the same file
-    // across runs. A real content hash (SHA-256) lands when we wire the
-    // resumable-batch persistence; the resume key is a string slot per the
-    // core::Batch contract, so swapping in is a one-line change.
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    Ok(format!("{:016x}", h.finish()))
+    // SHA-256 hex (lower-case). The `core::Batch` contract treats the
+    // hash as an opaque string; this commits us to a specific algorithm
+    // for the on-disk resume-key persistence that lands with M3's batch-
+    // state recovery. Using a cryptographic hash from the start avoids a
+    // forced migration once persisted state references it.
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Ok(format!("{:x}", hasher.finalize()))
 }
