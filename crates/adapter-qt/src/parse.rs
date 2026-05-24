@@ -43,6 +43,7 @@ pub fn extract(path: &Path) -> Result<Catalog, ExtractError> {
     Ok(Catalog {
         source_path: path.to_path_buf(),
         source_bytes: bytes,
+        language: state.language,
         edit_points: state.edit_points,
         units: state.units,
     })
@@ -69,6 +70,7 @@ impl From<quick_xml::events::attributes::AttrError> for ParseError {
 #[derive(Default)]
 struct ParseState {
     saw_ts_root: bool,
+    language: Option<String>,
     current_context: Option<String>,
     units: Vec<Unit>,
     edit_points: Vec<EditPoint>,
@@ -143,6 +145,9 @@ impl ParseState {
         match e.name() {
             QName(b"TS") => {
                 self.saw_ts_root = true;
+                if let Some(v) = attr_value(e, b"language")? {
+                    self.language = Some(v);
+                }
             }
             QName(b"context") => {
                 self.current_context = None;

@@ -1,27 +1,53 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "../../lib/cn";
 import { type Token, tokenize } from "../../lib/highlight";
-import type { Unit } from "../../lib/types";
+import type { TargetEdit, Unit, UnitId } from "../../lib/types";
 import { StateBadge } from "../StateBadge/StateBadge";
 
 interface Props {
   unit: Unit;
+  busy: boolean;
+  hasOllama: boolean;
+  onEdit: (id: UnitId, edit: TargetEdit) => void;
+  onTranslate: (id: UnitId) => void;
 }
 
-export function UnitEditor({ unit }: Props) {
+export function UnitEditor({
+  unit,
+  busy,
+  hasOllama,
+  onEdit,
+  onTranslate,
+}: Props) {
   const pluralTarget = unit.target.kind === "plural" ? unit.target : null;
   const isPlural = pluralTarget !== null && pluralTarget.forms.length > 1;
   const formCount = pluralTarget?.forms.length ?? 1;
   const [activeForm, setActiveForm] = useState(0);
   const safeForm = Math.min(activeForm, Math.max(0, formCount - 1));
 
-  const targetText = useMemo(() => {
-    if (pluralTarget) return pluralTarget.forms[safeForm] ?? null;
-    if (unit.target.kind === "singular") return unit.target.text;
-    return null;
-  }, [pluralTarget, safeForm, unit.target]);
-
   const provenance = formatProvenance(unit);
+  const writable = unit.state === "untranslated" || unit.state === "proposed";
+
+  // Local draft state so typing feels native; commits on blur (and the
+  // server replies with the canonical unit).
+  const initialDraft = useMemo(
+    () => readTarget(unit, safeForm),
+    [unit, safeForm],
+  );
+  const [draft, setDraft] = useState(initialDraft);
+  useEffect(() => {
+    setDraft(initialDraft);
+  }, [initialDraft]);
+
+  const commit = () => {
+    if (draft === initialDraft) return;
+    const text = draft.length === 0 ? null : draft;
+    const edit: TargetEdit =
+      pluralTarget != null
+        ? { kind: "plural", form_index: safeForm, text }
+        : { kind: "singular", text };
+    onEdit(unit.id, edit);
+  };
 
   return (
     <section className="flex-1 flex flex-col overflow-hidden min-w-0 bg-bg-base">
@@ -61,18 +87,48 @@ export function UnitEditor({ unit }: Props) {
             ) : null
           }
         >
-          {targetText == null || targetText.length === 0 ? (
-            <EmptyTextBlock />
-          ) : (
-            <TextBlock value={targetText} />
-          )}
+          <TargetEditor
+            value={draft}
+            disabled={!writable || busy}
+            onChange={setDraft}
+            onBlur={commit}
+          />
         </Section>
       </div>
 
-      <footer className="shrink-0 px-5 py-3 border-t border-border-subtle bg-bg-surface">
+      <footer className="shrink-0 px-5 py-3 border-t border-border-subtle bg-bg-surface flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => onTranslate(unit.id)}
+          disabled={!writable || busy || !hasOllama}
+          title={
+            !hasOllama
+              ? "Catalog has no <TS language=…> — translation needs a locale"
+              : busy
+                ? "Translation in progress…"
+                : "Translate via the Ollama backend"
+          }
+          className={cn(
+            "inline-flex items-center gap-2 h-8 px-3 rounded-md text-sm font-medium",
+            "transition-colors duration-100 ease-out",
+            "text-accent-fg bg-accent",
+            "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
+            "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
+          )}
+        >
+          {busy ? (
+            <>
+              <Spinner />
+              Translating…
+            </>
+          ) : (
+            <>Translate</>
+          )}
+        </button>
         <div className="text-xs text-fg-tertiary">
-          Editing &amp; save arrive in the next milestone. This view is
-          read-only.
+          {writable
+            ? "Edit the target; blur to save in memory. ⌘S persists to disk."
+            : "Vanished and obsolete units are not writable."}
         </div>
       </footer>
     </section>
@@ -118,16 +174,35 @@ function TextBlock({ value }: { value: string }) {
   );
 }
 
-function EmptyTextBlock() {
+function TargetEditor({
+  value,
+  disabled,
+  onChange,
+  onBlur,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+  onBlur: () => void;
+}) {
   return (
-    <div
+    <textarea
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      placeholder={disabled ? "" : "Type the translation here…"}
+      spellCheck
       className={cn(
-        "p-4 rounded-md border border-border-subtle bg-bg-surface",
-        "font-sans text-md leading-[1.65] text-fg-disabled italic",
+        "w-full min-h-[120px] p-4 rounded-md border resize-vertical",
+        "font-mono text-md leading-[1.65] text-fg-primary",
+        "bg-bg-input border-border-subtle whitespace-pre-wrap break-words",
+        "placeholder:text-fg-disabled placeholder:italic placeholder:font-sans",
+        "transition-colors duration-100 ease-out",
+        "focus:border-accent focus:outline-none focus-visible:outline-none",
+        "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
       )}
-    >
-      No target text yet.
-    </div>
+    />
   );
 }
 
@@ -198,6 +273,20 @@ function PluralTabs({
       ))}
     </div>
   );
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="w-3 h-3 border-2 border-white/40 border-t-white rounded-pill animate-spin"
+    />
+  );
+}
+
+function readTarget(unit: Unit, formIndex: number): string {
+  if (unit.target.kind === "singular") return unit.target.text ?? "";
+  return unit.target.forms[formIndex] ?? "";
 }
 
 function formatProvenance(unit: Unit): string | null {

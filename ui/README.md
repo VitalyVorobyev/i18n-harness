@@ -28,19 +28,22 @@ ui/
     └── src/                main.rs (entry), lib.rs (commands)
 ```
 
-## What it does today (M3.0–M3.2)
+## What it does today (M3.0 – M3.3)
 
-- Open a Qt Linguist `.ts` file via a native dialog.
-- List every unit on the left with state badges, search, and
-  filter chips (All / Untranslated / Proposed / Finished).
-- Show the selected unit's source and target side-by-side with
-  monospace text, placeholder highlighting (`{count}`, `%1`, `&File`),
-  and per-form tabs for plural units.
-- An inspector pane showing the unit's state, plural arity,
-  placeholder count, and provenance.
-
-Read-only. Editing, save, and translation come in follow-up phases
-(M3.3+).
+- Open a Qt Linguist `.ts` file via a native dialog (⌘O).
+- List every unit on the left with state badges, search, filter
+  chips, keyboard arrow navigation, and per-row dirty markers.
+- Edit the target inline. Singular targets use one textarea; plural
+  targets get one tab per CLDR form. Empty edits demote state back to
+  `Untranslated`; any text promotes to `Proposed`.
+- **Translate** the selected unit through the Ollama backend
+  (Gemma 4 by default). The gate runs on the result and findings
+  appear in the right-hand inspector, grouped by severity. A
+  gate-clean translation auto-promotes to `Finished`.
+- **Save** (⌘S) writes the catalog back via the byte-stable Qt
+  adapter. **Discard** reverts every in-memory edit to disk.
+- Locale badge in the top bar shows the language declared in the
+  `.ts` root (`de_DE`, `es_ES`, `zh_Hans`).
 
 ## Development
 

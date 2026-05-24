@@ -22,10 +22,8 @@ export interface Provenance {
   byte_offset: number | null;
 }
 
-// Placeholder + Flag are opaque to the UI for now — we read them through
-// but don't introspect their shape.
+// Placeholder is opaque to the UI for now.
 export type Placeholder = unknown;
-export type FlagSet = unknown;
 
 export interface Unit {
   id: UnitId;
@@ -33,7 +31,7 @@ export interface Unit {
   target: Target;
   placeholders: Placeholder[];
   plural_arity: number | null;
-  flags: FlagSet;
+  flags: unknown;
   provenance: Provenance;
   state: UnitState;
 }
@@ -41,7 +39,55 @@ export interface Unit {
 export interface CatalogResponse {
   path: string;
   unit_count: number;
+  language: string | null;
   units: Unit[];
+}
+
+export interface SaveSummary {
+  path: string;
+  unit_count: number;
+}
+
+// Mirrors the Rust enum #[serde(tag = "kind", rename_all = "kebab-case")]
+// in ui/src-tauri/src/lib.rs.
+export type TargetEdit =
+  | { kind: "singular"; text: string | null }
+  | { kind: "plural"; form_index: number; text: string | null };
+
+// Severity classification of a gate flag. Kept in sync with
+// `i18n_harness_core::Flag::severity()` in Rust — that file is the
+// canonical mapping; this duplication is the IPC bridge.
+export type Severity = "hard" | "soft" | "info";
+
+export interface Finding {
+  flag: string;
+  detail: { rule: string; [k: string]: unknown };
+}
+
+export interface GateReport {
+  unit_id: UnitId;
+  findings: Finding[];
+  flags: unknown;
+}
+
+export interface TranslateResult {
+  unit: Unit;
+  report: GateReport;
+}
+
+const HARD_FLAGS = new Set([
+  "placeholder-mismatch",
+  "plural-arity-mismatch",
+  "icu-parse-error",
+  "empty-target-when-finished",
+]);
+
+const INFO_FLAGS = new Set(["cjk-punctuation-tolerated"]);
+
+export function severityOf(flag: string): Severity {
+  if (HARD_FLAGS.has(flag)) return "hard";
+  if (INFO_FLAGS.has(flag)) return "info";
+  return "soft";
 }
 
 // Derived UI shape: per-row data used by the catalog list.

@@ -58,6 +58,24 @@ fn extract_then_render_with_no_changes_is_byte_identical() {
 }
 
 #[test]
+fn extract_reads_language_from_ts_root() {
+    let cases = [
+        ("showcase.ts", "de_DE"),
+        ("es_ES.ts", "es_ES"),
+        ("zh_Hans.ts", "zh_Hans"),
+    ];
+    for (name, expected) in cases {
+        let fixture = fixtures_dir().join(name);
+        let catalog = extract(&fixture).expect("extract");
+        assert_eq!(
+            catalog.language(),
+            Some(expected),
+            "{name} should declare language={expected}",
+        );
+    }
+}
+
+#[test]
 fn extract_recognises_message_states() {
     use i18n_harness_core::UnitState;
     let fixture = fixtures_dir().join("showcase.ts");

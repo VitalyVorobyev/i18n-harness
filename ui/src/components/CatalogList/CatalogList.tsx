@@ -11,6 +11,7 @@ interface Props {
   selectedId: UnitId | null;
   filter: Filter;
   search: string;
+  dirtyIds: Set<UnitId>;
   onSelect: (id: UnitId) => void;
   onFilterChange: (f: Filter) => void;
   onSearchChange: (s: string) => void;
@@ -21,6 +22,7 @@ export function CatalogList({
   selectedId,
   filter,
   search,
+  dirtyIds,
   onSelect,
   onFilterChange,
   onSearchChange,
@@ -154,6 +156,7 @@ export function CatalogList({
               key={r.id}
               row={r}
               active={r.id === selectedId}
+              dirty={dirtyIds.has(r.id)}
               onClick={() => onSelect(r.id)}
             />
           ))
@@ -166,10 +169,12 @@ export function CatalogList({
 function Row({
   row,
   active,
+  dirty,
   onClick,
 }: {
   row: UnitRow;
   active: boolean;
+  dirty: boolean;
   onClick: () => void;
 }) {
   return (
@@ -205,6 +210,16 @@ function Row({
         >
           {row.id}
         </span>
+        {dirty && (
+          <span
+            role="img"
+            className="text-state-proposed font-bold leading-none"
+            aria-label="Unsaved changes"
+            title="Unsaved changes"
+          >
+            •
+          </span>
+        )}
         {row.isPlural && (
           <span
             className="font-mono text-xs text-fg-tertiary px-1 rounded-sm bg-bg-elevated"
