@@ -351,42 +351,65 @@ file shape.
 
 ### M4.6 — Human-attention flagging
 
-Switch the Ollama prompt from text-only to **strict JSON output**.
-New template `crates/backend/prompts/ollama-translate-v2.txt`:
+Split into two slices: the Rust-side protocol (M4.6.1) and the UI
+consumption layer (M4.6.2).
+
+#### M4.6.1 — Rust-side flagging protocol ✓ shipped
+
+Switched the Ollama prompt from text-only to **strict JSON output**
+(`crates/backend/prompts/ollama-translate-v2.txt`, the new default). The
+v1 plain-text template remains available via
+`OllamaBackend::with_template_v1()` for the CLI's `--prompt` override.
 
 ```
-You MUST respond with one JSON object on a single line:
 {"translation":"<the translated string>",
- "flags":[{"kind":"ambiguous_source","note":"..."}],
+ "flags":[{"kind":"ambiguous-source","note":"..."}],
  "confidence":0.87}
-
-Allowed flag kinds:
-- ambiguous_source     : source could mean multiple things
-- insufficient_context : source is too short/generic to translate confidently
-- idiom                : source uses idiom/wordplay; literal translation loses meaning
-- low_confidence       : you self-report unsure for unspecified reason
-- brand_term           : term looks like a product/brand name not in glossary
-- tone_mismatch        : source register is ambiguous or hard to carry into target
 ```
 
-Parsing: strict serde schema. Malformed responses become a gate finding
-(`backend-malformed-response`, hard severity) — no silent retry; surface
-the failure so the prompt can be tuned.
+Allowed flag kinds (kebab-case, matching `Flag` serde renderings):
+`ambiguous-source`, `insufficient-context`, `idiom`, `low-confidence`,
+`brand-term`, `tone-mismatch`. Gate-produced kinds
+(`placeholder-mismatch`, `plural-arity-mismatch`, etc.) are forbidden in
+the model's output; the parser rejects them as malformed.
 
-Data model: extend the existing `Flag` enum in
-`crates/backend/src/outcome.rs` to include `BrandTerm` and
-`ToneMismatch`; propagate into `Unit.flags`. Add `Unit.confidence:
-Option<f32>` (shown in inspector; does not block).
+Parsing is strict serde. Malformed responses become a hard gate finding
+`BackendMalformedResponse(reason)` (`Flag::BackendMalformedResponse`,
+`Hard` severity, surfaced inline alongside the unit) instead of being
+lost behind a generic backend error. The Tauri command
+`translate_unit_in_project` returns `Ok` with a synthesized `GateReport`
+in that case; only network / backend-unavailable failures still bubble
+up as `Err`. No silent retry, no fallback — the failure is visible so
+the prompt can be tuned.
 
-Auto-promotion rule: a unit may only auto-promote to `Finished` if
-`flags.is_empty()` AND gate is clean AND target is complete. Flagged
-units land with `review_status = NeedsReview` (see M4.1.5) and stay
-`Proposed`. The translator clears flags via an explicit "Accept"
-action, which moves `review_status` to `Reviewed` (or `Approved`
-on Save All).
+Data model:
 
-UI: inspector renders flags as severity-style chips with the model's
-per-flag note; unit list shows a flag badge next to the state badge.
+- `Flag` (in `crates/core/src/flag.rs`) gained `BrandTerm` and
+  `ToneMismatch` (semantic severity) and `BackendMalformedResponse`
+  (hard severity). New finding detail type
+  `BackendMalformedResponseDetail { reason }` in the gate.
+- `Unit` (in `crates/core/src/unit.rs`) gained `confidence:
+  Option<f32>` and `flag_notes: BTreeMap<Flag, String>` — both default
+  to empty / `None`, so existing JSONL files deserialize unchanged.
+- `TranslationOutcome::Translated` gained `confidence` and
+  `flag_notes`; `Failed` gained a `FailureKind` enum (`Unspecified`,
+  `Network`, `BackendUnavailable`, `MalformedResponse`) so the caller
+  can route by category.
+
+Auto-promotion rule **disabled** for translate (per M4.3a.1 user
+feedback): translate always lands as `Proposed`. When the LLM attached
+at least one semantic flag, `translate_unit_in_project` additionally
+sets `review_status = NeedsReview` so the unit appears in the M4.7
+review queue. Empty-flag units stay at their previous review status
+(`None` for a freshly-translated unit) — the M4.6.2 "Accept" button is
+the path to `Reviewed`.
+
+#### M4.6.2 — UI surface for flagging (planned)
+
+Inspector renders flags as severity-style chips with the model's
+per-flag note; unit list shows a flag badge next to the state badge;
+the editor shows the confidence value. "Accept" button clears flags
+and moves `review_status` to `Reviewed` (or `Approved` on Save All).
 
 ### M4.7 — Review queue
 

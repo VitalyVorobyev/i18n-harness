@@ -81,6 +81,26 @@ impl GateReport {
     pub fn has_hard(&self) -> bool {
         self.flags.has_hard()
     }
+
+    /// Build a `GateReport` containing a single
+    /// [`FindingDetail::BackendMalformedResponse`] finding.
+    ///
+    /// This is the **only** sanctioned way to surface a malformed-response
+    /// backend failure as a gate report: it pins the finding's
+    /// flag/detail pairing so callers (UI command handlers, the CLI
+    /// driver) cannot accidentally drift from the contract. The returned
+    /// report has hard severity because there is no translation to ship.
+    pub fn backend_malformed_response(unit_id: UnitId, reason: impl Into<String>) -> Self {
+        Self::from_findings(
+            unit_id,
+            vec![Finding {
+                flag: i18n_harness_core::Flag::BackendMalformedResponse,
+                detail: FindingDetail::BackendMalformedResponse(BackendMalformedResponseDetail {
+                    reason: reason.into(),
+                }),
+            }],
+        )
+    }
 }
 
 /// One finding: the [`Flag`] kind plus the structured payload describing
@@ -134,6 +154,16 @@ pub enum FindingDetail {
     /// `<b>Save</b>` → `Save`); we also catch reordered or differently-
     /// named tags.
     MarkupTagMismatch(MarkupTagMismatchDetail),
+
+    /// The translation backend returned a response the strict parser
+    /// could not validate (unknown flag kind, confidence out of range,
+    /// JSON shape wrong). NOT produced by the gate's [`crate::validate`]
+    /// — call sites that drive a backend construct a `GateReport`
+    /// carrying this finding when they see a
+    /// `TranslationOutcome::Failed` with `FailureKind::MalformedResponse`,
+    /// so the failure renders inline in the Inspector instead of being
+    /// lost behind a generic backend error.
+    BackendMalformedResponse(BackendMalformedResponseDetail),
 }
 
 /// Detail for [`Flag::PlaceholderMismatch`].
@@ -247,4 +277,42 @@ pub struct MarkupTagMismatchDetail {
     /// Tag names present in the target but absent (or over-counted) in
     /// the source.
     pub extra: Vec<String>,
+}
+
+/// Detail for [`Flag::BackendMalformedResponse`].
+///
+/// Produced by the Tauri command handlers (not by the gate validator)
+/// when a translation backend returns a response the strict parser
+/// could not validate. `reason` is the short, machine-greppable string
+/// the backend supplied (e.g., `"v2-confidence-out-of-bounds: 1.5"`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendMalformedResponseDetail {
+    /// Short, machine-greppable description of what went wrong, supplied
+    /// by the backend. Surfaced verbatim in the Inspector.
+    pub reason: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use i18n_harness_core::Flag;
+
+    #[test]
+    fn backend_malformed_response_helper_pins_flag_detail_pairing() {
+        let report = GateReport::backend_malformed_response(
+            UnitId::from("ctx::greet"),
+            "v2-confidence-out-of-bounds: 1.5",
+        );
+        assert!(report.has_hard(), "malformed-response must be hard");
+        assert_eq!(report.findings.len(), 1);
+        let finding = &report.findings[0];
+        assert_eq!(finding.flag, Flag::BackendMalformedResponse);
+        match &finding.detail {
+            FindingDetail::BackendMalformedResponse(detail) => {
+                assert_eq!(detail.reason, "v2-confidence-out-of-bounds: 1.5");
+            }
+            other => panic!("expected BackendMalformedResponse, got {other:?}"),
+        }
+        assert!(report.flags.contains(Flag::BackendMalformedResponse));
+    }
 }

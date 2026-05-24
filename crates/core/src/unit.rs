@@ -15,10 +15,12 @@
 //! `<location>`, gettext's `#:` comments, etc.) lives in the adapter's own
 //! `Catalog` representation, not here.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::flag::FlagSet;
+use crate::flag::{Flag, FlagSet};
 use crate::placeholder::Placeholder;
 use crate::review::ReviewStatus;
 
@@ -211,7 +213,11 @@ pub struct Provenance {
 ///   that.
 /// - That the source text is non-empty — adapters may extract empty messages
 ///   (Qt allows them).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `Eq` is intentionally not derived: [`Self::confidence`] is `Option<f32>`
+/// and `f32` does not satisfy `Eq`. Use `PartialEq` for comparison in tests
+/// (the same rationale that drove the `GateReport` `Eq` exclusion).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Unit {
     /// Stable identifier within the catalog file.
     pub id: UnitId,
@@ -290,6 +296,40 @@ pub struct Unit {
     /// on disk.
     #[serde(skip)]
     pub source_changed_since_review: bool,
+
+    /// Model-supplied self-reported confidence in this unit's translation, in
+    /// `[0.0, 1.0]`. `None` means "no model has translated this unit yet" or
+    /// "the backend that produced this translation does not report
+    /// confidence" (e.g., the legacy v1 plain-text Ollama path).
+    ///
+    /// # What this guarantees
+    ///
+    /// - Populated by the backend (prompt v2 onwards). The backend is trusted
+    ///   to bounds-check before constructing the outcome; no clamping happens
+    ///   here.
+    ///
+    /// # What this explicitly does NOT guarantee
+    ///
+    /// - That low confidence implies a bad translation, or that high
+    ///   confidence implies a good one. Confidence is a self-report; the
+    ///   gate does not consult it.
+    /// - That the value is within `[0.0, 1.0]` after manual edits to the
+    ///   intermediate JSONL — the deserializer accepts any `f32`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+
+    /// Per-flag explanatory notes supplied by the translation backend.
+    ///
+    /// Populated only for flags in the **semantic** group (see
+    /// [`crate::FlagSeverity::Semantic`]) and only when the backend has
+    /// anything to say. Gate-produced hard/soft flags never appear here —
+    /// the structured detail for those lives in the `GateReport`, not on
+    /// the unit.
+    ///
+    /// Default is empty. Old intermediate JSONL files without this field
+    /// deserialize cleanly.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub flag_notes: BTreeMap<Flag, String>,
 }
 
 impl Unit {
@@ -308,6 +348,8 @@ impl Unit {
             source_hash: None,
             review_status: None,
             source_changed_since_review: false,
+            confidence: None,
+            flag_notes: BTreeMap::new(),
         }
     }
 }
@@ -493,13 +535,60 @@ mod tests {
 
     #[test]
     fn unit_serde_backward_compat_without_new_fields() {
-        // A JSONL line without source_hash or review_status (old format)
-        // must deserialize cleanly with None defaults.
+        // A JSONL line without source_hash, review_status, confidence, or
+        // flag_notes (older format) must deserialize cleanly with default
+        // (None / empty) values.
         let json = r#"{"id":"ctx::hi","source":"Hi","target":{"kind":"singular","text":null},"placeholders":[],"plural_arity":null,"flags":[],"provenance":{"file":"","line":null,"byte_offset":null},"state":"untranslated"}"#;
         let unit: Unit = serde_json::from_str(json).expect("deserialize old format");
         assert!(unit.source_hash.is_none());
         assert!(unit.review_status.is_none());
         assert!(!unit.source_changed_since_review);
+        assert!(unit.confidence.is_none());
+        assert!(unit.flag_notes.is_empty());
+    }
+
+    #[test]
+    fn unit_with_confidence_and_flag_notes_round_trips() {
+        // M4.6.1: confidence + flag_notes must survive a full serde
+        // round-trip and stay byte-stable across re-encodes.
+        let mut unit = Unit::untranslated_singular("ctx::greeting", "Hello");
+        unit.confidence = Some(0.87);
+        unit.flag_notes
+            .insert(Flag::AmbiguousSource, "could be noun or verb".to_string());
+        unit.flag_notes
+            .insert(Flag::BrandTerm, "Acme is the product name".to_string());
+
+        let json1 = serde_json::to_string(&unit).expect("serialize");
+        let restored: Unit = serde_json::from_str(&json1).expect("deserialize");
+        assert_eq!(restored.confidence, Some(0.87));
+        assert_eq!(restored.flag_notes.len(), 2);
+        assert_eq!(
+            restored.flag_notes.get(&Flag::AmbiguousSource),
+            Some(&"could be noun or verb".to_string())
+        );
+        assert_eq!(
+            restored.flag_notes.get(&Flag::BrandTerm),
+            Some(&"Acme is the product name".to_string())
+        );
+
+        // Second encode must be byte-identical (BTreeMap iteration order is
+        // stable; the on-disk JSONL line must be diff-friendly).
+        let json2 = serde_json::to_string(&restored).expect("re-serialize");
+        assert_eq!(json1, json2, "round-trip must be byte-stable");
+    }
+
+    #[test]
+    fn unit_with_default_confidence_and_notes_omits_them_in_json() {
+        let unit = Unit::untranslated_singular("ctx::x", "X");
+        let json = serde_json::to_string(&unit).expect("serialize");
+        assert!(
+            !json.contains("confidence"),
+            "None confidence must be omitted: {json}"
+        );
+        assert!(
+            !json.contains("flag_notes"),
+            "empty flag_notes must be omitted: {json}"
+        );
     }
 
     #[test]

@@ -64,6 +64,15 @@ pub enum Flag {
     /// `<tag>` / `</tag>` multisets, treating tag NAMES as opaque and
     /// ignoring attribute differences.
     MarkupTagMismatch,
+    /// The translation backend returned a response we could not parse
+    /// against the strict v2 contract (unknown flag kind, confidence out
+    /// of `[0.0, 1.0]`, JSON shape wrong). Not produced by the gate
+    /// validator itself; the Tauri command handlers construct a
+    /// `GateReport` with this flag when the backend signals
+    /// `FailureKind::MalformedResponse` so the failure surfaces inline
+    /// alongside the unit instead of being lost behind a generic
+    /// backend error. Hard severity: there is no translation to ship.
+    BackendMalformedResponse,
 
     // ── Model-supplied semantic (M2+) ──────────────────────────────────────
     /// The source is ambiguous; the model picked one reading but is not
@@ -75,6 +84,14 @@ pub enum Flag {
     InsufficientContext,
     /// The model's overall confidence in this translation is low.
     LowConfidence,
+    /// The source contains what looks like a product/brand name that is not
+    /// covered by the glossary's do-not-translate list. The model translated
+    /// it tentatively and asks for human confirmation.
+    BrandTerm,
+    /// The source register (formal/informal/marketing/etc.) is hard to carry
+    /// into the target locale; the model produced one reading but the
+    /// register match is uncertain.
+    ToneMismatch,
 }
 
 /// Severity of a [`Flag`], used by the CLI and UI to group findings.
@@ -99,7 +116,8 @@ impl Flag {
             Self::PlaceholderMismatch
             | Self::PluralArityMismatch
             | Self::IcuParseError
-            | Self::EmptyTargetWhenFinished => FlagSeverity::Hard,
+            | Self::EmptyTargetWhenFinished
+            | Self::BackendMalformedResponse => FlagSeverity::Hard,
             Self::AccelMismatch
             | Self::LengthWarn
             | Self::CjkPunctuationTolerated
@@ -108,7 +126,9 @@ impl Flag {
             Self::AmbiguousSource
             | Self::Idiom
             | Self::InsufficientContext
-            | Self::LowConfidence => FlagSeverity::Semantic,
+            | Self::LowConfidence
+            | Self::BrandTerm
+            | Self::ToneMismatch => FlagSeverity::Semantic,
         }
     }
 }
@@ -193,14 +213,39 @@ mod tests {
             Flag::CjkPunctuationTolerated,
             Flag::PlaceholderAgreementRisk,
             Flag::MarkupTagMismatch,
+            Flag::BackendMalformedResponse,
             Flag::AmbiguousSource,
             Flag::Idiom,
             Flag::InsufficientContext,
             Flag::LowConfidence,
+            Flag::BrandTerm,
+            Flag::ToneMismatch,
         ];
         for f in all {
             let _s = f.severity();
         }
+    }
+
+    #[test]
+    fn new_semantic_variants_are_semantic_severity() {
+        // Pin the severity of the M4.6.1 additions so a future refactor
+        // cannot silently demote them to Hard/Soft, which would change the
+        // gate's write-back blocking semantics.
+        assert_eq!(Flag::BrandTerm.severity(), FlagSeverity::Semantic);
+        assert_eq!(Flag::ToneMismatch.severity(), FlagSeverity::Semantic);
+    }
+
+    #[test]
+    fn new_semantic_variants_serialize_as_kebab_case() {
+        // The on-the-wire kind names are part of the prompt-v2 contract.
+        assert_eq!(
+            serde_json::to_string(&Flag::BrandTerm).unwrap(),
+            r#""brand-term""#
+        );
+        assert_eq!(
+            serde_json::to_string(&Flag::ToneMismatch).unwrap(),
+            r#""tone-mismatch""#
+        );
     }
 
     #[test]

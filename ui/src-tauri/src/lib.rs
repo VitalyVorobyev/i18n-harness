@@ -524,7 +524,9 @@ fn translate_unit(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
-    use i18n_harness_backend::{OllamaBackend, TranslationBackend, TranslationOutcome};
+    use i18n_harness_backend::{
+        FailureKind, OllamaBackend, TranslationBackend, TranslationOutcome,
+    };
     use i18n_harness_core::{Batch, BatchKey, FlagSet};
 
     let mut current = state.catalog.lock().map_err(lock_poisoned)?;
@@ -570,7 +572,12 @@ fn translate_unit(
 
     let mut merged = original.clone();
     match outcome {
-        TranslationOutcome::Translated { text, flags } => {
+        TranslationOutcome::Translated {
+            text,
+            flags,
+            confidence,
+            flag_notes,
+        } => {
             merged.target = match text {
                 i18n_harness_backend::TranslatedText::Singular(s) => {
                     Target::Singular { text: Some(s) }
@@ -579,15 +586,35 @@ fn translate_unit(
                     forms: forms.into_iter().map(Some).collect(),
                 },
             };
+            // M4.3a.1: translate always lands as Proposed; the human
+            // explicitly promotes to Finished via save/accept. Auto-
+            // promoting hid model output behind a "done" badge before
+            // the translator could review.
             merged.state = UnitState::Proposed;
             let mut flagset = FlagSet::new();
             for f in flags {
                 flagset.insert(f);
             }
             merged.flags = flagset;
+            merged.confidence = confidence;
+            merged.flag_notes = flag_notes;
         }
         TranslationOutcome::Skipped { reason } => {
             return Err(format!("backend skipped: {reason}"));
+        }
+        TranslationOutcome::Failed {
+            reason,
+            failure_kind: FailureKind::MalformedResponse,
+            ..
+        } => {
+            // Surface as an inline hard gate finding rather than an Err.
+            // The legacy `translate_unit` has no project handle, so we
+            // do not touch review status here.
+            let report = GateReport::backend_malformed_response(original.id.clone(), reason);
+            return Ok(TranslateResult {
+                unit: original,
+                report,
+            });
         }
         TranslationOutcome::Failed { reason, .. } => {
             return Err(format!("backend failed: {reason}"));
@@ -595,9 +622,6 @@ fn translate_unit(
     }
 
     let report = i18n_harness_gate::validate(&merged, locale, None);
-    // M4.3a.1: translate always lands as Proposed; the human explicitly
-    // promotes to Finished via save/accept. Auto-promoting to Finished
-    // hid model output behind a "done" badge before the translator could review.
 
     // Persist the merged unit back into the catalog.
     if let Some(slot) = open.catalog.find_unit_mut(&id) {
@@ -1250,8 +1274,10 @@ fn translate_unit_in_project(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
-    use i18n_harness_backend::{OllamaBackend, TranslationBackend, TranslationOutcome};
-    use i18n_harness_core::{Batch, BatchKey, FlagSet};
+    use i18n_harness_backend::{
+        FailureKind, OllamaBackend, TranslationBackend, TranslationOutcome,
+    };
+    use i18n_harness_core::{Batch, BatchKey, FlagSet, ReviewStatus};
     use i18n_harness_project::BackendKind;
 
     let abs = PathBuf::from(&catalog_path);
@@ -1323,7 +1349,12 @@ fn translate_unit_in_project(
 
     let mut merged = original.clone();
     match outcome {
-        TranslationOutcome::Translated { text, flags } => {
+        TranslationOutcome::Translated {
+            text,
+            flags,
+            confidence,
+            flag_notes,
+        } => {
             merged.target = match text {
                 i18n_harness_backend::TranslatedText::Singular(s) => {
                     Target::Singular { text: Some(s) }
@@ -1332,15 +1363,37 @@ fn translate_unit_in_project(
                     forms: forms.into_iter().map(Some).collect(),
                 },
             };
+            // M4.3a.1: translate always lands as Proposed; the human
+            // explicitly promotes to Finished via save/accept. Auto-
+            // promoting hid model output behind a "done" badge before
+            // the translator could review.
             merged.state = UnitState::Proposed;
             let mut flagset = FlagSet::new();
             for f in flags {
                 flagset.insert(f);
             }
             merged.flags = flagset;
+            merged.confidence = confidence;
+            merged.flag_notes = flag_notes;
         }
         TranslationOutcome::Skipped { reason } => {
             return Err(format!("backend skipped: {reason}"));
+        }
+        TranslationOutcome::Failed {
+            reason,
+            failure_kind: FailureKind::MalformedResponse,
+            ..
+        } => {
+            // Surface as an inline hard gate finding rather than an Err
+            // so the Inspector renders it next to the unit and the user
+            // can investigate the prompt. We leave the unit unchanged
+            // (no target write, no flag merge, no review-status update)
+            // and the catalog stays clean for this slot.
+            let report = GateReport::backend_malformed_response(original.id.clone(), reason);
+            return Ok(TranslateResult {
+                unit: original,
+                report,
+            });
         }
         TranslationOutcome::Failed { reason, .. } => {
             return Err(format!("backend failed: {reason}"));
@@ -1348,14 +1401,39 @@ fn translate_unit_in_project(
     }
 
     let report = i18n_harness_gate::validate(&merged, locale, None);
-    // M4.3a.1: translate always lands as Proposed; the human explicitly
-    // promotes to Finished via save/accept. Auto-promoting to Finished
-    // hid model output behind a "done" badge before the translator could review.
 
     if let Some(slot) = entry.catalog.find_unit_mut(&id) {
         *slot = merged.clone();
     }
     entry.dirty = true;
+
+    // M4.6.1: flagged units land in the review queue automatically. We
+    // only touch review_status when the model attached at least one
+    // semantic flag — empty-flags units stay at their previous status
+    // (None for a freshly-translated unit) so the translator's Accept
+    // action in M4.6.2 can drive the Proposed→Reviewed transition.
+    if !merged.flags.is_empty() {
+        // Drop the project_catalogs lock before acquiring the project
+        // lock to keep the existing lock-ordering convention
+        // (project_catalogs after project).
+        let source_hash = merged.source_hash.clone().unwrap_or_default();
+        drop(store);
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        if let Some(project) = project_guard.as_ref() {
+            // Best-effort: a failure here would only affect the review
+            // queue; the merged translation is already persisted in the
+            // catalog store, so we surface the error to the caller.
+            project
+                .set_review_status(
+                    &abs,
+                    &merged.id,
+                    Some(ReviewStatus::NeedsReview),
+                    source_hash,
+                    None,
+                )
+                .map_err(|e| format!("set_review_status failed: {e}"))?;
+        }
+    }
 
     Ok(TranslateResult {
         unit: merged,
