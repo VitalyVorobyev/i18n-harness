@@ -9,6 +9,7 @@ members = [
     "crates/catalog",
     "crates/adapter-qt",
     "crates/adapter-react",
+    "crates/project",
     "crates/cli",
     "ui/src-tauri",
 ]
@@ -42,6 +43,7 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
+toml_edit = "0.23"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -75,6 +77,7 @@ i18n-harness-backend = { path = "crates/backend", version = "0.1.0" }
 i18n-harness-catalog = { path = "crates/catalog", version = "0.1.0" }
 i18n-harness-adapter-qt = { path = "crates/adapter-qt", version = "0.1.0" }
 i18n-harness-adapter-react = { path = "crates/adapter-react", version = "0.1.0" }
+i18n-harness-project = { path = "crates/project", version = "0.1.0" }
 
 [profile.release]
 lto = "thin"
