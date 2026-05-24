@@ -317,7 +317,7 @@ export function App() {
         const findings = result.report.findings.length;
         flashInfo(
           findings === 0
-            ? "Translated. Gate clean — promoted to Finished."
+            ? "Translated. Gate clean — review and save to accept."
             : `Translated with ${findings} finding(s).`,
         );
       } catch (e) {
@@ -506,7 +506,6 @@ export function App() {
           activeCatalogPath={activeCatalogPath}
           dirtyCatalogPaths={dirtyCatalogPaths}
           onCatalogSelect={handleCatalogSelect}
-          onCloseProject={handleCloseProject}
         />
 
         {/* Main content area */}
@@ -570,7 +569,11 @@ export function App() {
             }
           >
             {glossaryPath ? (
-              <GlossaryPanel flashError={flashError} flashInfo={flashInfo} />
+              <GlossaryPanel
+                flashError={flashError}
+                flashInfo={flashInfo}
+                initialPath={glossaryPath}
+              />
             ) : (
               <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary p-8 text-center">
                 <p>

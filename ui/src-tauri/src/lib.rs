@@ -306,9 +306,9 @@ fn update_unit_target(
         .catalog
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
-    if !unit.state.is_writable() {
+    if !unit.state.is_ui_editable() {
         return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not writable",
+            "unit {id} is {state:?} — vanished/obsolete units are not editable",
             state = unit.state,
         ));
     }
@@ -332,10 +332,9 @@ fn update_unit_target(
         }
     }
     // State auto-transitions on edit:
-    //   Untranslated → Proposed   once any text is set
-    //   Proposed     → Untranslated  once the target is fully cleared
-    // The model-translate path and any explicit Finished promotion live
-    // on top of these; gate-clean translations override to Finished.
+    //   Untranslated          → Proposed      once any text is set
+    //   Proposed | Finished   → Untranslated  once the target is fully cleared
+    //   Finished              → Proposed      when text changes (human reconsidering)
     match unit.state {
         UnitState::Untranslated if !unit.target.is_empty() => {
             unit.state = UnitState::Proposed;
@@ -343,6 +342,12 @@ fn update_unit_target(
         UnitState::Proposed | UnitState::Finished if unit.target.is_empty() => {
             unit.state = UnitState::Untranslated;
             unit.flags = Default::default();
+        }
+        UnitState::Finished if !unit.target.is_empty() => {
+            // M4.3a.1: editing a Finished unit reverts it to Proposed — the
+            // human is actively reconsidering the finalized translation, so
+            // it should re-enter the review loop.
+            unit.state = UnitState::Proposed;
         }
         _ => {}
     }
@@ -589,9 +594,9 @@ fn translate_unit(
     }
 
     let report = i18n_harness_gate::validate(&merged, locale, None);
-    if report.is_clean() && merged.target.is_complete() {
-        merged.state = UnitState::Finished;
-    }
+    // M4.3a.1: translate always lands as Proposed; the human explicitly
+    // promotes to Finished via save/accept. Auto-promoting to Finished
+    // hid model output behind a "done" badge before the translator could review.
 
     // Persist the merged unit back into the catalog.
     if let Some(slot) = open.catalog.find_unit_mut(&id) {
@@ -1010,9 +1015,9 @@ fn update_unit_target_in_project(
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
 
-    if !unit.state.is_writable() {
+    if !unit.state.is_ui_editable() {
         return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not writable",
+            "unit {id} is {state:?} — vanished/obsolete units are not editable",
             state = unit.state,
         ));
     }
@@ -1042,6 +1047,12 @@ fn update_unit_target_in_project(
         UnitState::Proposed | UnitState::Finished if unit.target.is_empty() => {
             unit.state = UnitState::Untranslated;
             unit.flags = Default::default();
+        }
+        UnitState::Finished if !unit.target.is_empty() => {
+            // M4.3a.1: editing a Finished unit reverts it to Proposed — the
+            // human is actively reconsidering the finalized translation, so
+            // it should re-enter the review loop.
+            unit.state = UnitState::Proposed;
         }
         _ => {}
     }
@@ -1336,9 +1347,9 @@ fn translate_unit_in_project(
     }
 
     let report = i18n_harness_gate::validate(&merged, locale, None);
-    if report.is_clean() && merged.target.is_complete() {
-        merged.state = UnitState::Finished;
-    }
+    // M4.3a.1: translate always lands as Proposed; the human explicitly
+    // promotes to Finished via save/accept. Auto-promoting to Finished
+    // hid model output behind a "done" badge before the translator could review.
 
     if let Some(slot) = entry.catalog.find_unit_mut(&id) {
         *slot = merged.clone();

@@ -10,7 +10,6 @@ interface Props {
   activeCatalogPath: string | null;
   dirtyCatalogPaths: Set<string>;
   onCatalogSelect: (absolutePath: string) => void;
-  onCloseProject: () => void;
 }
 
 export function ProjectSidebar({
@@ -18,7 +17,6 @@ export function ProjectSidebar({
   activeCatalogPath,
   dirtyCatalogPaths,
   onCatalogSelect,
-  onCloseProject,
 }: Props) {
   const totalCatalogs = summary.catalogs.length;
 
@@ -66,25 +64,6 @@ export function ProjectSidebar({
           </ul>
         )}
       </nav>
-
-      {/* Footer — close project */}
-      <div className="px-3 py-2 border-t border-border-subtle">
-        <button
-          type="button"
-          onClick={onCloseProject}
-          className={cn(
-            "w-full h-7 px-2 rounded-md border border-border-default bg-transparent",
-            "text-xs font-medium text-fg-tertiary",
-            "hover:bg-bg-hover hover:text-fg-secondary hover:border-border-strong",
-            "active:bg-bg-selected",
-            "transition-colors duration-100 ease-out",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-          )}
-          aria-label="Close project and return to home screen"
-        >
-          Close project
-        </button>
-      </div>
     </aside>
   );
 }

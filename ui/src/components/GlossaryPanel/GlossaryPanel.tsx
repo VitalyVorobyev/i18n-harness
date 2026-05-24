@@ -20,9 +20,11 @@ type Register = (typeof REGISTERS)[number];
 interface Props {
   flashError: (msg: string) => void;
   flashInfo: (msg: string) => void;
+  /** When set, the panel will auto-load this glossary path on mount (one-shot). */
+  initialPath?: string;
 }
 
-export function GlossaryPanel({ flashError, flashInfo }: Props) {
+export function GlossaryPanel({ flashError, flashInfo, initialPath }: Props) {
   const [locales, setLocales] = useState<LocaleInfo[]>([]);
   const [path, setPath] = useState<string | null>(null);
   const [payload, setPayload] = useState<GlossaryPayload | null>(null);
@@ -35,6 +37,32 @@ export function GlossaryPanel({ flashError, flashInfo }: Props) {
       .then(setLocales)
       .catch((e) => flashError(`Could not list locales: ${formatError(e)}`));
   }, [flashError]);
+
+  // Auto-load: when the project declares a glossary, load it immediately
+  // so the translator does not have to click "Open glossary.toml…".
+  // The panel is remounted each time a new project is opened, so this effect
+  // fires once per project mount. The cleanup flag prevents a slow in-flight
+  // promise from overwriting a glossary the user opened manually while the
+  // auto-load was still pending.
+  useEffect(() => {
+    if (!initialPath) return;
+    let cancelled = false;
+    loadGlossary(initialPath)
+      .then((res) => {
+        if (cancelled) return;
+        setPayload(res.payload);
+        setOriginal(JSON.stringify(res.payload));
+        setPath(res.path);
+        setWarnings(res.warnings);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        flashError(`Could not auto-load glossary: ${formatError(e)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialPath, flashError]);
 
   const dirty = useMemo(() => {
     if (!payload) return false;

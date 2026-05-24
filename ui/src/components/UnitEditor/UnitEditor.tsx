@@ -42,7 +42,10 @@ export const UnitEditor = forwardRef<UnitEditorHandle, Props>(
     const safeForm = Math.min(activeForm, Math.max(0, formCount - 1));
 
     const provenance = formatProvenance(unit);
-    const writable = unit.state === "untranslated" || unit.state === "proposed";
+    const writable =
+      unit.state === "untranslated" ||
+      unit.state === "proposed" ||
+      unit.state === "finished";
 
     // Local draft state so typing feels native; commits on blur and on
     // explicit flush. The server replies with the canonical unit.
@@ -178,7 +181,9 @@ export const UnitEditor = forwardRef<UnitEditorHandle, Props>(
           </button>
           <div className="text-xs text-fg-tertiary">
             {writable
-              ? "Edit the target; blur to save in memory. ⌘S persists to disk."
+              ? unit.state === "finished"
+                ? "Editing a finished unit reverts it to Proposed. ⌘S persists to disk."
+                : "Edit the target; blur to save in memory. ⌘S persists to disk."
               : "Vanished and obsolete units are not writable."}
           </div>
         </footer>
