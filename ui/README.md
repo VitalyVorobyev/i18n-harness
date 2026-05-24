@@ -11,13 +11,14 @@ just wraps them in a desktop window.
 ui/
 ├── package.json            Bun-managed JS package
 ├── tsconfig.json           strict TS, ES2022, react-jsx
-├── vite.config.ts          Vite 6, dev port 1420
+├── vite.config.ts          Vite 8 + Tailwind plugin, dev port 1420
 ├── index.html              single mount point (#root)
 ├── src/
-│   ├── main.tsx            React 18 createRoot
+│   ├── main.tsx            React 19 createRoot
 │   ├── App.tsx             top-level layout + Tauri command wiring
-│   ├── styles/             tokens.css, reset.css, global.css
-│   ├── lib/                tauri.ts (typed invoke wrappers), types.ts, highlight.ts
+│   ├── styles/tailwind.css Tailwind v4 entry + @theme design tokens
+│   ├── lib/                tauri.ts (typed invoke wrappers), types.ts,
+│   │                       highlight.ts, cn.ts (class concatenator)
 │   └── components/         TopBar, CatalogList, UnitEditor, Inspector,
 │                           StateBadge, EmptyState
 └── src-tauri/              The Rust side (workspace member: i18n-harness-ui)
@@ -79,17 +80,23 @@ cargo check -p i18n-harness-ui
 
 ## Design system
 
+Tokens live in `src/styles/tailwind.css` under `@theme`. Tailwind v4
+generates utility classes from those tokens; components compose the
+utilities directly in JSX. No `*.module.css`, no raw hex literals.
+
 - **Palette:** neutral slate, single muted indigo accent, explicit
-  semantic colors per state and gate severity. All defined in
-  `src/styles/tokens.css`. Components reference CSS variables, never
-  raw hex.
+  semantic colors per state and gate severity. Adding a new token is a
+  new `--color-X` line in `@theme` and `bg-X` / `text-X` / `border-X`
+  become available immediately.
 - **Typography:** Inter (UI) + JetBrains Mono (source/target text and
   identifiers). Both shipped as local woff2 via `@fontsource-variable/*`
   — no Google Fonts fetch.
-- **Density:** balanced-to-compact. `--text-base` is `13px` because
-  translators scan hundreds of strings per session.
+- **Density:** balanced-to-compact. `--text-base` is `13px`; `--spacing`
+  stays at `4px` so `p-2` is 8px regardless of body font size.
 - **Theme:** dark is canonical (matches the IDE-tool culture); light is
-  the inversion, switchable via `<html data-theme="light">`.
+  the inversion, applied by setting `<html data-theme="light">`. The
+  variant is attribute-driven, not OS-preference-driven, so the product
+  decides the look.
 
 ## Invariants (carried over from the workspace)
 

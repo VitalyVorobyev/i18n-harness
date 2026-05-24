@@ -6,7 +6,6 @@ import { UnitEditor } from "./components/UnitEditor/UnitEditor";
 import { Inspector } from "./components/Inspector/Inspector";
 import { appVersion, openCatalog, pickCatalogFile } from "./lib/tauri";
 import type { CatalogResponse, UnitId } from "./lib/types";
-import styles from "./App.module.css";
 
 type Filter = "all" | "untranslated" | "proposed" | "finished";
 
@@ -54,7 +53,6 @@ export function App() {
     }
   }, []);
 
-  // Global Cmd+O / Ctrl+O shortcut.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
@@ -72,7 +70,7 @@ export function App() {
   }, [catalog, selectedId]);
 
   return (
-    <div className={styles.app}>
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
       <TopBar
         catalogPath={catalog?.path ?? null}
         unitCount={catalog?.unit_count ?? 0}
@@ -80,7 +78,7 @@ export function App() {
         onOpen={openFile}
       />
       {catalog ? (
-        <div className={styles.body}>
+        <div className="flex-1 flex overflow-hidden min-h-0">
           <CatalogList
             units={catalog.units}
             selectedId={selectedId}
@@ -93,7 +91,7 @@ export function App() {
           {selectedUnit ? (
             <UnitEditor unit={selectedUnit} />
           ) : (
-            <div className={styles.nothing}>
+            <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
               <p>Select a unit on the left to inspect it.</p>
             </div>
           )}
@@ -106,7 +104,10 @@ export function App() {
         />
       )}
       {loading && (
-        <div className={styles.loading} aria-live="polite">
+        <div
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-md border border-border-default bg-bg-elevated text-sm text-fg-secondary shadow-md"
+        >
           Loading catalog…
         </div>
       )}

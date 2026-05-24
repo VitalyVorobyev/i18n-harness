@@ -1,5 +1,4 @@
 import type { Unit } from "../../lib/types";
-import styles from "./Inspector.module.css";
 
 interface Props {
   unit: Unit;
@@ -12,53 +11,57 @@ export function Inspector({ unit }: Props) {
   const provenance = unit.provenance;
 
   return (
-    <aside className={`${styles.root} app-chrome`}>
-      <header className={styles.head}>
-        <span className={styles.heading}>Inspector</span>
+    <aside className="app-chrome shrink-0 w-80 min-w-[240px] flex flex-col overflow-hidden bg-bg-surface border-l border-border-subtle">
+      <header className="px-4 py-3 border-b border-border-subtle">
+        <span className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
+          Inspector
+        </span>
       </header>
 
-      <dl className={styles.list}>
+      <dl className="m-0 px-4 py-3 flex flex-col gap-3 border-b border-border-subtle">
         <Item label="State">
-          <code className={styles.code}>{unit.state}</code>
+          <CodeText>{unit.state}</CodeText>
         </Item>
 
         <Item label="Plural arity">
           {isPlural ? (
-            <code className={styles.code}>
+            <CodeText>
               {unit.plural_arity}&nbsp;forms
-            </code>
+            </CodeText>
           ) : (
-            <span className={styles.muted}>singular</span>
+            <Muted>singular</Muted>
           )}
         </Item>
 
         <Item label="Placeholders">
           {placeholderCount > 0 ? (
-            <code className={styles.code}>{placeholderCount}</code>
+            <CodeText>{placeholderCount}</CodeText>
           ) : (
-            <span className={styles.muted}>none</span>
+            <Muted>none</Muted>
           )}
         </Item>
 
         <Item label="Source location">
           {provenance.file ? (
-            <code className={styles.code}>
+            <CodeText>
               {provenance.file}
               {provenance.line ? `:${provenance.line}` : ""}
-            </code>
+            </CodeText>
           ) : (
-            <span className={styles.muted}>—</span>
+            <Muted>—</Muted>
           )}
         </Item>
       </dl>
 
-      <div className={styles.findings}>
-        <div className={styles.findingsHead}>Findings</div>
-        <div className={styles.findingsBody}>
-          <span className={styles.muted}>
+      <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
+        <div className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
+          Findings
+        </div>
+        <div className="text-sm text-fg-secondary leading-[1.65]">
+          <Muted>
             No findings. The gate runs when this unit is translated; later
             milestones surface its hard and soft flags here.
-          </span>
+          </Muted>
         </div>
       </div>
     </aside>
@@ -73,9 +76,23 @@ function Item({
   children: React.ReactNode;
 }) {
   return (
-    <div className={styles.item}>
-      <dt className={styles.itemLabel}>{label}</dt>
-      <dd className={styles.itemValue}>{children}</dd>
+    <div className="grid grid-cols-[110px_1fr] gap-3 items-baseline">
+      <dt className="m-0 text-xs uppercase tracking-loose text-fg-tertiary">
+        {label}
+      </dt>
+      <dd className="m-0 text-sm text-fg-secondary [overflow-wrap:anywhere]">
+        {children}
+      </dd>
     </div>
   );
+}
+
+function CodeText({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="font-mono text-sm text-fg-primary">{children}</span>
+  );
+}
+
+function Muted({ children }: { children: React.ReactNode }) {
+  return <span className="text-fg-tertiary">{children}</span>;
 }

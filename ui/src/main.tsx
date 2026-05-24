@@ -1,8 +1,6 @@
 import "@fontsource-variable/inter/wght.css";
 import "@fontsource-variable/jetbrains-mono/wght.css";
-import "./styles/tokens.css";
-import "./styles/reset.css";
-import "./styles/global.css";
+import "./styles/tailwind.css";
 
 import React from "react";
 import ReactDOM from "react-dom/client";

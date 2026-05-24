@@ -1,8 +1,8 @@
 import { useMemo, useRef, useEffect } from "react";
 import { StateBadge } from "../StateBadge/StateBadge";
+import { cn } from "../../lib/cn";
 import type { Unit, UnitId, UnitRow, UnitState } from "../../lib/types";
 import { unitRow } from "../../lib/types";
-import styles from "./CatalogList.module.css";
 
 type Filter = "all" | "untranslated" | "proposed" | "finished";
 
@@ -52,9 +52,6 @@ export function CatalogList({
     });
   }, [rows, filter, search]);
 
-  // Keyboard navigation: focus the list, then up/down moves the
-  // selected unit. The container is the focusable element; rows are
-  // not individually tabbable to keep the list scannable.
   const listRef = useRef<HTMLUListElement | null>(null);
   const onListKey = (e: React.KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -69,7 +66,6 @@ export function CatalogList({
     if (target) onSelect(target.id);
   };
 
-  // Keep the selected row in view as it changes via keyboard.
   useEffect(() => {
     if (!selectedId || !listRef.current) return;
     const el = listRef.current.querySelector<HTMLElement>(
@@ -79,20 +75,34 @@ export function CatalogList({
   }, [selectedId]);
 
   return (
-    <aside className={`${styles.root} app-chrome`}>
-      <div className={styles.searchRow}>
+    <aside
+      className={cn(
+        "app-chrome shrink-0 w-80 min-w-[240px] flex flex-col overflow-hidden",
+        "bg-bg-surface border-r border-border-subtle",
+      )}
+    >
+      <div className="px-3 pt-3 pb-2">
         <input
-          className={styles.search}
           type="search"
           placeholder="Filter…"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           aria-label="Filter units"
           spellCheck={false}
+          className={cn(
+            "w-full h-[30px] px-3 rounded-md border bg-bg-input",
+            "border-border-default text-sm text-fg-primary placeholder:text-fg-tertiary",
+            "transition-colors duration-100 ease-out",
+            "focus:border-accent focus:outline-none focus-visible:outline-none",
+          )}
         />
       </div>
 
-      <div className={styles.chips} role="tablist" aria-label="Unit filter">
+      <div
+        role="tablist"
+        aria-label="Unit filter"
+        className="flex gap-1 px-3 pb-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         {(["all", "untranslated", "proposed", "finished"] as Filter[]).map(
           (f) => (
             <button
@@ -100,11 +110,24 @@ export function CatalogList({
               type="button"
               role="tab"
               aria-selected={filter === f}
-              className={`${styles.chip} ${filter === f ? styles.chipActive : ""}`}
               onClick={() => onFilterChange(f)}
+              className={cn(
+                "inline-flex items-center gap-2 h-6 px-2 rounded-md whitespace-nowrap",
+                "text-xs font-medium border transition-colors duration-100 ease-out",
+                filter === f
+                  ? "text-fg-primary bg-accent-subtle border-accent-subtle-border"
+                  : "text-fg-secondary bg-transparent border-transparent hover:bg-bg-hover hover:text-fg-primary",
+              )}
             >
-              <span className={styles.chipLabel}>{labelOf(f)}</span>
-              <span className={styles.chipCount}>{counts[f]}</span>
+              <span>{labelOf(f)}</span>
+              <span
+                className={cn(
+                  "tabular-nums",
+                  filter === f ? "text-accent" : "text-fg-tertiary",
+                )}
+              >
+                {counts[f]}
+              </span>
             </button>
           ),
         )}
@@ -112,14 +135,14 @@ export function CatalogList({
 
       <ul
         ref={listRef}
-        className={styles.list}
         tabIndex={0}
         onKeyDown={onListKey}
         aria-label="Translatable units"
+        className="flex-1 overflow-y-auto py-1 pb-3 outline-none focus-visible:[box-shadow:inset_0_0_0_2px_var(--color-accent)] rounded-sm"
       >
         {filtered.length === 0 ? (
-          <li className={styles.empty}>
-            <span>No units match this filter.</span>
+          <li className="px-4 py-6 text-sm text-fg-tertiary text-center">
+            No units match this filter.
           </li>
         ) : (
           filtered.map((r) => (
@@ -147,28 +170,42 @@ function Row({
 }) {
   return (
     <li
-      className={`${styles.row} ${active ? styles.rowActive : ""}`}
       data-unit-id={row.id}
       onClick={onClick}
       role="option"
       aria-selected={active}
+      className={cn(
+        "pl-[10px] pr-3 py-2 border-l-2 cursor-pointer",
+        "transition-colors duration-100 ease-out",
+        active
+          ? "bg-bg-selected border-l-accent"
+          : "border-l-transparent hover:bg-bg-hover",
+      )}
     >
-      <div className={styles.rowTop}>
+      <div className="flex items-center gap-2 mb-px">
         <StateBadge state={row.state} variant="dot" />
-        <span className={styles.rowId} title={row.id}>
+        <span
+          className={cn(
+            "flex-1 min-w-0 truncate font-mono text-xs",
+            active ? "text-fg-primary" : "text-fg-secondary",
+          )}
+          title={row.id}
+        >
           {row.id}
         </span>
         {row.isPlural && (
           <span
-            className={styles.rowPlural}
+            className="font-mono text-xs text-fg-tertiary px-1 rounded-sm bg-bg-elevated"
             title={`${row.pluralFilled} of ${row.pluralTotal} plural forms filled`}
           >
             ×{row.pluralTotal}
           </span>
         )}
       </div>
-      <div className={styles.rowPreview}>
-        {row.preview || <span className={styles.rowPreviewMuted}>empty</span>}
+      <div className="font-sans text-sm leading-snug text-fg-primary truncate">
+        {row.preview || (
+          <span className="text-fg-disabled italic">empty</span>
+        )}
       </div>
     </li>
   );
@@ -193,8 +230,6 @@ function labelOf(f: Filter): string {
   }
 }
 
-// CSS.escape isn't universally typed; tiny shim that handles what we
-// throw at it (UnitIds may contain ::, &, spaces).
 function cssEscape(s: string): string {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(s);
