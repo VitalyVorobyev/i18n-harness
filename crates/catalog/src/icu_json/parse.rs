@@ -440,18 +440,72 @@ impl<'a> Parser<'a> {
     }
 
     fn skip_number(&mut self) -> Result<(), String> {
-        // Accept any contiguous run of number-shaped chars; serde_json's
-        // round-trip path is not invoked here (we only need to advance the
-        // cursor past the value).
+        // Strict RFC 8259 number grammar:
+        //   number = [ "-" ] int [ frac ] [ exp ]
+        //   int    = "0" | ( digit1-9 *DIGIT )
+        //   frac   = "." 1*DIGIT
+        //   exp    = ( "e" | "E" ) [ "+" | "-" ] 1*DIGIT
+        // A lax char-run scan would accept invalid input like `1e` or
+        // `1-2` and silently skip them as a "non-string leaf", letting
+        // malformed catalogs through extract — the opposite of what the
+        // module's "strict JSON" guarantee promises.
         let start = self.cursor;
         if self.peek() == Some(b'-') {
             self.cursor += 1;
         }
-        while let Some(b) = self.peek() {
-            if b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-') {
+        // int
+        match self.peek() {
+            Some(b'0') => self.cursor += 1,
+            Some(b) if b.is_ascii_digit() => {
+                while let Some(d) = self.peek() {
+                    if d.is_ascii_digit() {
+                        self.cursor += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            _ => {
+                return Err(format!("expected digit in number at byte {}", self.cursor));
+            }
+        }
+        // frac
+        if self.peek() == Some(b'.') {
+            self.cursor += 1;
+            let frac_start = self.cursor;
+            while let Some(d) = self.peek() {
+                if d.is_ascii_digit() {
+                    self.cursor += 1;
+                } else {
+                    break;
+                }
+            }
+            if self.cursor == frac_start {
+                return Err(format!(
+                    "expected digit after `.` in number at byte {}",
+                    self.cursor
+                ));
+            }
+        }
+        // exp
+        if matches!(self.peek(), Some(b'e') | Some(b'E')) {
+            self.cursor += 1;
+            if matches!(self.peek(), Some(b'+') | Some(b'-')) {
                 self.cursor += 1;
-            } else {
-                break;
+            }
+            let exp_start = self.cursor;
+            while let Some(d) = self.peek() {
+                if d.is_ascii_digit() {
+                    self.cursor += 1;
+                } else {
+                    break;
+                }
+            }
+            if self.cursor == exp_start {
+                return Err(format!(
+                    "expected digit in exponent at byte {}",
+                    self.cursor
+                ));
             }
         }
         if self.cursor == start {
@@ -768,5 +822,42 @@ mod tests {
         let leaves = p.run().expect("parse");
         assert_eq!(leaves[0].line, 2);
         assert_eq!(leaves[1].line, 3);
+    }
+
+    #[test]
+    fn accepts_well_formed_numbers() {
+        // Each is a non-string leaf — accepted (and skipped), not rejected.
+        for n in &[
+            "0", "-0", "1", "42", "-7", "0.5", "1.25", "3.14e10", "1E-3", "-2.5E+8",
+        ] {
+            let src = format!(r#"{{"n":{n}}}"#);
+            let mut p = Parser::new(&src);
+            p.run()
+                .unwrap_or_else(|e| panic!("expected `{n}` to parse, got: {e}"));
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_numbers() {
+        // Codex P2 on PR #39: a permissive char-run scanner accepts these as
+        // "numbers" and silently skips them as non-string leaves, defeating
+        // the module's "strict JSON" guarantee. The strict scanner refuses.
+        for n in &[
+            "1e",   // exponent with no digits
+            "1e+",  // sign but no digit
+            "1-2",  // bare minus mid-token
+            ".5",   // missing leading digit
+            "1.",   // trailing dot with no frac digit
+            "01",   // leading zero
+            "-",    // sign only
+            "1..2", // double dot
+        ] {
+            let src = format!(r#"{{"n":{n}}}"#);
+            let mut p = Parser::new(&src);
+            assert!(
+                p.run().is_err(),
+                "expected `{n}` to be rejected as malformed JSON",
+            );
+        }
     }
 }
