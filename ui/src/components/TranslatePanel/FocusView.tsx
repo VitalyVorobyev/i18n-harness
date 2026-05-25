@@ -19,7 +19,7 @@ import type {
   UnitId,
 } from "../../lib/types";
 import { severityOf } from "../../lib/types";
-import { Eyebrow, LocaleTag, ProgressBar } from "../primitives";
+import { Eyebrow, LocaleTag, ProgressBar, Spinner } from "../primitives";
 import { StateBadge } from "../StateBadge/StateBadge";
 import { Inspector } from "./Inspector/Inspector";
 
@@ -537,7 +537,11 @@ export function FocusView({
                       : `Translate ${focusStat.untranslated} untranslated unit(s)`
                 }
               >
-                <SparklesIcon size={12} />
+                {batchActive ? (
+                  <Spinner size={12} />
+                ) : (
+                  <SparklesIcon size={12} />
+                )}
                 Translate untranslated
               </button>
             </div>
@@ -1018,7 +1022,7 @@ function SelectedTarget({
             )}
             title={`Translate this unit to ${focusLocale}`}
           >
-            <SparklesIcon size={11} />
+            {busy ? <Spinner size={11} /> : <SparklesIcon size={11} />}
             {busy ? "Translating…" : `Translate to ${focusLocale}`}
             <KbdChip>⌘T</KbdChip>
           </button>
@@ -1318,7 +1322,7 @@ function ActionBar({
           "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
         )}
       >
-        <SparklesIcon size={11} />
+        {busy ? <Spinner size={11} /> : <SparklesIcon size={11} />}
         {busy ? "Translating…" : "Translate"}
         <KbdChip>⌘T</KbdChip>
       </button>

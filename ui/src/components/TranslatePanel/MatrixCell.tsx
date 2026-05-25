@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import type { TargetEdit, Unit } from "../../lib/types";
 import { severityOf } from "../../lib/types";
-import { LocaleTag } from "../primitives";
+import { LocaleTag, Spinner } from "../primitives";
 import { StateBadge } from "../StateBadge/StateBadge";
 
 interface Props {
@@ -192,7 +192,7 @@ function UntranslatedBody({
           "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
         )}
       >
-        <SparklesIcon size={12} />
+        {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
         {busy ? "Translating…" : `Translate to ${locale}`}
       </button>
     </>
@@ -295,7 +295,7 @@ function ProposedBody({
             "disabled:opacity-40 disabled:cursor-not-allowed",
           )}
         >
-          <SparklesIcon size={12} />
+          {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
         </button>
       </div>
     </>

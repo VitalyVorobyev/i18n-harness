@@ -71,7 +71,11 @@ export const test = base.extend<Fixtures>({
             }
           ).__tauriMockInvoke(cmd, args);
         },
-        metadata: {},
+        metadata: {
+          currentWebview: { label: "main" },
+          currentWindow: { label: "main" },
+        },
+        unregisterCallback: (_id: number) => undefined,
         plugins: {},
       };
 
@@ -346,6 +350,19 @@ export const test = base.extend<Fixtures>({
           error_count: 0,
           line_count: 0,
         }),
+        // Tauri plugin stubs — called by webview/window/event APIs internally.
+        "plugin:event|listen": () => Math.floor(Math.random() * 100000),
+        "plugin:event|unlisten": () => undefined,
+        "plugin:event|emit": () => undefined,
+        "plugin:event|emit_to": () => undefined,
+        "plugin:drag-drop|start": () => undefined,
+        "plugin:webview|create": () => undefined,
+        "plugin:webview|get_all_webviews": () => [],
+        "plugin:window|get_all_windows": () => [],
+        "plugin:dialog|open": () =>
+          (window as unknown as Record<string, unknown>).__mockPickResult ??
+          null,
+        "plugin:dialog|save": () => "/mock/save/location.toml",
       };
 
       (

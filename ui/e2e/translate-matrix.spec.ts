@@ -100,14 +100,16 @@ test.describe("Translate — Matrix mode", () => {
     await expect(editBtn).toBeVisible();
   });
 
-  test("locale chips match the project locales", async ({ page }) => {
-    await page.goto("/");
-    await openSampleProject(page);
+  test("locale rows match the project locales in the Matrix left rail", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
 
-    // Locale chips are rendered in the TopBar.
+    // Topbar locale chips were removed: per-locale navigation lives in the
+    // Matrix/Focus left rail (BY LOCALE section). Check the left rail buttons.
     for (const locale of PROJECT_LOCALES) {
       await expect(
-        page.getByRole("button", { name: locale }).first(),
+        page.getByRole("button", { name: `Focus on ${locale}` }).first(),
       ).toBeVisible();
     }
   });

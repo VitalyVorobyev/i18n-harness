@@ -207,9 +207,6 @@ interface ProjectTopBarProps {
 
 export function ProjectTopBar({
   projectName,
-  locales,
-  activeLocaleFilter,
-  onLocaleFilterChange,
   view,
   onViewChange,
   theme,
@@ -217,29 +214,14 @@ export function ProjectTopBar({
   onCloseProject,
   reviewQueueCount = 0,
 }: ProjectTopBarProps) {
-  const hasFilter = activeLocaleFilter.size > 0;
-
-  function toggleLocale(locale: string) {
-    const next = new Set(activeLocaleFilter);
-    if (next.has(locale)) {
-      next.delete(locale);
-    } else {
-      next.add(locale);
-    }
-    onLocaleFilterChange(next);
-  }
-
   return (
     <header
       className={cn(
-        "app-chrome shrink-0 px-4 flex items-center gap-3",
+        "app-chrome shrink-0 h-11 px-4 flex items-center gap-3",
         "bg-bg-surface border-b border-border-subtle",
-        // Height expands to two lines when there are locale chips; use min-h
-        // so the single-row case stays at h-11.
-        locales.length > 0 ? "min-h-[44px] py-1.5" : "h-11",
       )}
     >
-      {/* Left: project name + locale chips */}
+      {/* Left: project name */}
       <div className="flex items-center gap-2 min-w-0 shrink-0">
         <span
           aria-hidden="true"
@@ -256,57 +238,11 @@ export function ProjectTopBar({
         </span>
       </div>
 
-      {/* Locale chips — multi-select filter */}
-      {locales.length > 0 && (
-        <fieldset className="flex items-center gap-1 flex-wrap flex-1 min-w-0 border-0 p-0 m-0">
-          <legend className="sr-only">Filter by locale</legend>
-          {locales.map((locale) => {
-            const active = activeLocaleFilter.has(locale);
-            return (
-              <button
-                key={locale}
-                type="button"
-                aria-pressed={active}
-                onClick={() => toggleLocale(locale)}
-                className={cn(
-                  "inline-flex items-center h-5 px-1.5 rounded-pill border",
-                  "font-mono text-[10px] font-medium tracking-loose",
-                  "transition-colors duration-100 ease-out",
-                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-                  active
-                    ? // Filled / prominent state when filter is active
-                      "border-accent bg-accent text-accent-fg"
-                    : // Outlined / subtle state (matches sidebar locale chips)
-                      "border-border-subtle bg-bg-surface text-fg-tertiary hover:border-border-default hover:text-fg-secondary",
-                )}
-                title={
-                  active ? `Remove ${locale} filter` : `Filter to ${locale}`
-                }
-              >
-                {locale}
-              </button>
-            );
-          })}
-          {hasFilter && (
-            <button
-              type="button"
-              onClick={() => onLocaleFilterChange(new Set())}
-              className={cn(
-                "inline-flex items-center h-5 px-1.5 rounded-pill border",
-                "text-[10px] font-medium",
-                "border-border-subtle bg-transparent text-fg-tertiary",
-                "hover:border-border-default hover:text-fg-secondary",
-                "transition-colors duration-100 ease-out",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-              )}
-              title="Clear locale filter"
-              aria-label="Clear locale filter"
-            >
-              Clear filter
-            </button>
-          )}
-        </fieldset>
-      )}
+      {/*
+       * Topbar locale chips removed: the redesigned per-panel rails
+       * (Matrix/Focus BY LOCALE list, ProofreadView side-nav) provide
+       * per-locale navigation at a more appropriate scope.
+       */}
 
       {/* Center: view tabs */}
       <div

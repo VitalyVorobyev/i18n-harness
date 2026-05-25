@@ -2479,6 +2479,14 @@ fn accept_unit_in_project(
     unit.flags = FlagSet::new();
     unit.flag_notes = BTreeMap::new();
     unit.review_status = Some(ReviewStatus::Reviewed);
+    // Accept also transitions Proposed → Finished. The HANDOFF redesign
+    // treats Accept as the manual finish action; the gate's hard-flag guard
+    // (caller-side) already prevents accepting an unsound unit. Other states
+    // are left alone (Finished stays Finished; Untranslated stays
+    // Untranslated, though the caller should not invoke this in that case).
+    if matches!(unit.state, UnitState::Proposed) {
+        unit.state = UnitState::Finished;
+    }
     let merged = unit.clone();
     entry.dirty = true;
 
