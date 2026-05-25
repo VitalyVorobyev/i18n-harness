@@ -956,6 +956,7 @@ export function App() {
           reviewQueueTotal={reviewQueueTotal}
           reviewQueueByCatalog={reviewQueueByCatalog}
           onOpenReviewQueue={() => setProjectView("review")}
+          openCatalogs={openCatalogs}
         />
 
         {/* Main content area */}
