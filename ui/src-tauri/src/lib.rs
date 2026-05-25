@@ -7,6 +7,7 @@
 //! JavaScript layer. No business logic that does not fit on a single
 //! screen of glue belongs here.
 
+mod backing;
 mod cancellation;
 mod jobs;
 
@@ -16,6 +17,8 @@ use std::sync::Mutex;
 
 use i18n_harness_adapter_qt::Catalog;
 use i18n_harness_core::{Target, Unit, UnitId, UnitState};
+
+use backing::{BackingCatalog, extract_for_format};
 #[cfg(feature = "ollama")]
 use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
@@ -71,8 +74,13 @@ pub struct AppState {
 }
 
 /// An entry in the project-scoped multi-catalog store.
+///
+/// The `catalog` is the format-erased [`BackingCatalog`] enum so the store
+/// can hold Qt and PO (and eventually ICU-JSON) catalogs uniformly. Every
+/// command that reads units, finds a unit by id, or saves back to disk
+/// goes through the enum's delegating helpers.
 struct OpenCatalogEntry {
-    catalog: Catalog,
+    catalog: BackingCatalog,
     dirty: bool,
 }
 
@@ -1003,12 +1011,12 @@ fn open_catalog_in_project(
         .catalog(&path)
         .ok_or_else(|| format!("catalog not in project: {catalog_path}"))?;
     let abs = PathBuf::from(&catalog_ref.absolute_path);
+    let format = catalog_ref.format;
 
-    let mut catalog =
-        i18n_harness_adapter_qt::extract(&abs).map_err(|e| format!("extract failed: {e}"))?;
+    let mut catalog = extract_for_format(&abs, format)?;
     project.apply_review_state(&abs, catalog.units_mut());
 
-    let response = build_catalog_response(&abs, &catalog);
+    let response = build_catalog_response_backing(&abs, &catalog);
     drop(project_guard);
 
     state
@@ -1117,8 +1125,7 @@ fn save_catalog_in_project(
         .map_err(project_catalogs_lock_poisoned)?;
     let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
     let units = entry.catalog.units().to_vec();
-    i18n_harness_adapter_qt::apply(&entry.catalog, &units, &abs)
-        .map_err(|e| format!("apply failed: {e}"))?;
+    entry.catalog.apply(&units, &abs)?;
     entry.dirty = false;
     Ok(SaveSummary {
         path: abs.to_string_lossy().into_owned(),
@@ -1165,7 +1172,7 @@ fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<SaveAllDirtyRespo
             continue;
         }
         let units = entry.catalog.units().to_vec();
-        match i18n_harness_adapter_qt::apply(&entry.catalog, &units, abs) {
+        match entry.catalog.apply(&units, abs) {
             Ok(()) => {
                 entry.dirty = false;
                 saved.push(SaveSummary {
@@ -1177,7 +1184,7 @@ fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<SaveAllDirtyRespo
                 return Ok(SaveAllDirtyResponse {
                     saved,
                     failed_path: Some(abs.to_string_lossy().into_owned()),
-                    failed_reason: Some(format!("apply failed: {e}")),
+                    failed_reason: Some(e),
                 });
             }
         }
@@ -1204,8 +1211,9 @@ fn discard_changes_in_project(
     let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
     let project = project_guard.as_ref().ok_or_else(no_project)?;
 
-    // Confirm the catalog is in the store before doing I/O.
-    {
+    // Confirm the catalog is in the store before doing I/O, and capture its
+    // format so we dispatch to the right reader.
+    let format = {
         let store = state
             .project_catalogs
             .lock()
@@ -1213,13 +1221,16 @@ fn discard_changes_in_project(
         if !store.contains_key(&abs) {
             return Err(no_catalog_in_project());
         }
-    }
+        project
+            .catalog(&abs)
+            .ok_or_else(|| "catalog not registered in project".to_string())?
+            .format
+    };
 
-    let mut catalog =
-        i18n_harness_adapter_qt::extract(&abs).map_err(|e| format!("extract failed: {e}"))?;
+    let mut catalog = extract_for_format(&abs, format)?;
     project.apply_review_state(&abs, catalog.units_mut());
 
-    let response = build_catalog_response(&abs, &catalog);
+    let response = build_catalog_response_backing(&abs, &catalog);
     drop(project_guard);
 
     state
@@ -2150,12 +2161,17 @@ fn scan_project_review_state(
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // Only qt-ts is supported today.
-        if catalog_ref.format != i18n_harness_project::CatalogFormat::QtTs {
+        // M4.4 wires gettext-po through the catalog crate; M4.5 will add
+        // icu-json. Unsupported formats are still skipped.
+        if !matches!(
+            catalog_ref.format,
+            i18n_harness_project::CatalogFormat::QtTs
+                | i18n_harness_project::CatalogFormat::GettextPo,
+        ) {
             tracing::warn!(
                 path = %catalog_ref.manifest_path,
                 format = ?catalog_ref.format,
-                "scan_project_review_state: non-qt-ts catalog skipped (M4.4/M4.5 will wire PO/ICU-JSON)"
+                "scan_project_review_state: format not yet wired (M4.5 will add ICU-JSON)"
             );
             continue;
         }
@@ -2172,9 +2188,9 @@ fn scan_project_review_state(
         };
 
         if !already_open {
-            // Extract from disk.
-            let mut catalog = i18n_harness_adapter_qt::extract(&abs)
-                .map_err(|e| format!("extract failed for {}: {e}", catalog_ref.manifest_path))?;
+            // Extract from disk via the format-aware backing dispatcher.
+            let mut catalog = extract_for_format(&abs, catalog_ref.format)
+                .map_err(|e| format!("{} ({}): {e}", catalog_ref.manifest_path, "extract"))?;
 
             // Fold review state in.
             {
@@ -3084,6 +3100,18 @@ fn list_tuning_bundles_in_project(
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
 fn build_catalog_response(path: &std::path::Path, catalog: &Catalog) -> CatalogResponse {
+    CatalogResponse {
+        path: path.to_string_lossy().into_owned(),
+        unit_count: catalog.units().len(),
+        language: catalog.language().map(str::to_owned),
+        units: catalog.units().to_vec(),
+    }
+}
+
+fn build_catalog_response_backing(
+    path: &std::path::Path,
+    catalog: &BackingCatalog,
+) -> CatalogResponse {
     CatalogResponse {
         path: path.to_string_lossy().into_owned(),
         unit_count: catalog.units().len(),

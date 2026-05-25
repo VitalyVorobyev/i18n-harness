@@ -1493,7 +1493,9 @@ name = "i18n-harness-catalog"
 version = "0.1.0"
 dependencies = [
  "i18n-harness-core",
+ "proptest",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -1584,6 +1586,7 @@ version = "0.1.0"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-backend",
+ "i18n-harness-catalog",
  "i18n-harness-core",
  "i18n-harness-gate",
  "i18n-harness-glossary",
