@@ -1850,23 +1850,69 @@ fn scan_project_review_state(
 }
 
 /// Truncate `s` to at most `max_chars` characters, preferring a word boundary.
+///
+/// `cutoff` and `search_start` are byte indices derived from `char_indices`,
+/// so they always land on UTF-8 char boundaries — slicing the string between
+/// them never panics on multi-byte text. (Codex P1 on PR #33: a previous
+/// implementation derived `search_start` via byte subtraction, which crashed
+/// `scan_project_review_state` on long non-ASCII previews.)
 fn truncate_preview(s: &str, max_chars: usize) -> String {
     let s = s.replace('\n', " ");
     if s.chars().count() <= max_chars {
         return s;
     }
-    // Try to break at a word boundary within the last 20 chars of the limit.
     let cutoff = s
         .char_indices()
         .nth(max_chars)
         .map(|(i, _)| i)
         .unwrap_or(s.len());
-    let search_start = cutoff.saturating_sub(20);
+    // Try to break at a word boundary within the last 20 chars of the limit.
+    let search_start_char = max_chars.saturating_sub(20);
+    let search_start = s
+        .char_indices()
+        .nth(search_start_char)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
     let best = s[search_start..cutoff]
         .rfind(' ')
         .map(|off| search_start + off)
         .unwrap_or(cutoff);
     format!("{}…", s[..best].trim_end())
+}
+
+#[cfg(test)]
+mod truncate_preview_tests {
+    use super::truncate_preview;
+
+    #[test]
+    fn ascii_under_limit_returns_unchanged() {
+        assert_eq!(truncate_preview("hello world", 100), "hello world");
+    }
+
+    #[test]
+    fn ascii_over_limit_breaks_at_word() {
+        let out = truncate_preview("the quick brown fox jumps over the lazy dog", 20);
+        assert!(out.ends_with('…'));
+        assert!(out.len() <= 25);
+    }
+
+    #[test]
+    fn multibyte_text_does_not_panic_anywhere_near_cutoff() {
+        // Long Cyrillic/CJK strings where every char is 2-3 bytes —
+        // the previous byte-subtraction crashed somewhere in here.
+        let cyr: String = "Здравствуйте мир ".repeat(20);
+        let _ = truncate_preview(&cyr, 50);
+        let cjk: String = "你好世界今天天气真好".repeat(20);
+        let _ = truncate_preview(&cjk, 50);
+        let mixed = format!("hello {} world {}", cyr, cjk);
+        let _ = truncate_preview(&mixed, 50);
+    }
+
+    #[test]
+    fn newlines_collapse_to_spaces() {
+        let out = truncate_preview("line one\nline two\nline three\nline four", 20);
+        assert!(!out.contains('\n'));
+    }
 }
 
 /// Extract a plain-text preview from a `Target`, truncated to `max_chars`.
