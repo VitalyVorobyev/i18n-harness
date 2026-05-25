@@ -36,7 +36,6 @@ use i18n_harness_project::{
     BackendConfig, CatalogEntry, CatalogRef, Correction, CorrectionProvenance, DraftManifest,
     GlossaryConfig, LocaleConfig, NewCorrection, Project, ProjectSummary, PromptsConfig,
 };
-use serde::Serialize;
 
 /// Return the package version baked at compile time.
 ///
@@ -386,91 +385,7 @@ fn translate_unit(
     })
 }
 
-/// Serialise a [`GlossaryPayload`] to the on-disk TOML schema. Kept
-/// in this crate so we can drive it from a wire payload without
-/// running the validator twice (once on the payload, once on the
-/// produced TOML). Field names match `crates/glossary/src/schema.rs`'s
-/// `Raw*` shapes.
-fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
-    #[derive(Serialize)]
-    struct WireMeta {
-        schema_version: u32,
-    }
-    #[derive(Serialize)]
-    struct WireTerm<'a> {
-        source: &'a str,
-        do_not_translate: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        notes: Option<&'a String>,
-        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-        translations: BTreeMap<String, String>,
-    }
-    #[derive(Serialize)]
-    struct WireLocale<'a> {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        register: Option<&'a String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        variant: Option<&'a String>,
-    }
-    #[derive(Serialize)]
-    struct Wire<'a> {
-        meta: WireMeta,
-        #[serde(rename = "term", skip_serializing_if = "Vec::is_empty")]
-        terms: Vec<WireTerm<'a>>,
-        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-        locale: BTreeMap<String, WireLocale<'a>>,
-    }
-
-    // Locale overrides are keyed by id on disk, so duplicates would
-    // silently collapse into the last writer if we let BTreeMap::collect
-    // do its thing. Detect them up-front and refuse to write — the UI
-    // surfaces the error to the user. Term duplicates are caught by
-    // `Glossary::from_toml`'s `DuplicateSource` check downstream, but
-    // catching them here too produces a sharper message.
-    let mut seen_terms = std::collections::HashSet::new();
-    for t in &payload.terms {
-        if !seen_terms.insert(&t.source) {
-            return Err(format!(
-                "duplicate term source `{}` — every source must be unique",
-                t.source,
-            ));
-        }
-    }
-    let mut locale: BTreeMap<String, WireLocale> = BTreeMap::new();
-    for o in &payload.locale_overrides {
-        if locale.contains_key(&o.locale) {
-            return Err(format!(
-                "duplicate locale override for `{}` — each locale appears at most once",
-                o.locale,
-            ));
-        }
-        locale.insert(
-            o.locale.clone(),
-            WireLocale {
-                register: o.register.as_ref(),
-                variant: o.variant.as_ref(),
-            },
-        );
-    }
-    let terms = payload
-        .terms
-        .iter()
-        .map(|t| WireTerm {
-            source: &t.source,
-            do_not_translate: t.do_not_translate,
-            notes: t.notes.as_ref(),
-            translations: t.translations.clone(),
-        })
-        .collect();
-    let wire = Wire {
-        meta: WireMeta {
-            schema_version: payload.schema_version,
-        },
-        terms,
-        locale,
-    };
-    toml::to_string(&wire).map_err(|e| format!("toml serialize: {e}"))
-}
+use crate::services::glossary_io::payload_to_toml;
 
 // ── Project commands (M4.2a) ─────────────────────────────────────────────────
 
