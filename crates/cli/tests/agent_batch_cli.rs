@@ -878,3 +878,133 @@ fn export_batch_project_slug_collision() {
 
     fs::remove_dir_all(&dir).ok();
 }
+
+// ── import_batch_rejects_when_catalog_changed_since_export ────────────────────
+
+/// **Position-wise id verification.** If the catalog is edited between
+/// export-batch and import-batch such that writable units are reordered,
+/// added, or renamed — but the writable *count* still matches the export's
+/// response count by coincidence — import-batch must refuse to proceed
+/// rather than silently apply translations to the wrong units.
+#[test]
+fn import_batch_rejects_when_catalog_changed_since_export() {
+    let dir = tempdir();
+    let ts = dir.join("catalog.ts");
+    let batch_dir = dir.join("batch");
+    let out_ts = dir.join("out.ts");
+    fs::write(&ts, SMALL_TS).unwrap();
+
+    let export_out = harness()
+        .args(["export-batch", "--locale", "de_DE", "--out"])
+        .arg(&batch_dir)
+        .arg(&ts)
+        .output()
+        .expect("spawn export-batch");
+    assert!(export_out.status.success());
+
+    fill_targets_verbatim(&batch_dir);
+
+    // Edit the catalog: replace one unit's source so its id changes. The
+    // writable count remains 2 (matches the export's response count), so a
+    // count check alone wouldn't catch this — only position-wise id
+    // verification will.
+    let mutated_ts = SMALL_TS.replace("<source>Hello</source>", "<source>Hi there</source>");
+    assert_ne!(mutated_ts, SMALL_TS, "fixture must actually mutate");
+    fs::write(&ts, &mutated_ts).unwrap();
+
+    let import_out = harness()
+        .args(["import-batch", "--apply"])
+        .arg(&ts)
+        .args(["--out"])
+        .arg(&out_ts)
+        .arg(&batch_dir)
+        .output()
+        .expect("spawn import-batch");
+
+    assert!(
+        !import_out.status.success(),
+        "import-batch must reject a catalog that changed since export-batch"
+    );
+    let stderr = String::from_utf8_lossy(&import_out.stderr);
+    assert!(
+        stderr.contains("unit id mismatch"),
+        "stderr must mention the id mismatch: {stderr}"
+    );
+    assert!(
+        !out_ts.exists(),
+        "no catalog must be written when import is rejected"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}
+
+// ── import_batch_project_rejects_when_a_subfolder_catalog_changed ─────────────
+
+#[test]
+fn import_batch_project_rejects_when_a_subfolder_catalog_changed() {
+    let dir = tempdir();
+    let project = dir.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let b_ts = SMALL_TS.replace("Hello", "Howdy").replace("Goodbye", "Bye");
+    let manifest = make_manifest(&[
+        ("src/a.ts", "qt-ts", "de_DE"),
+        ("src/b.ts", "qt-ts", "de_DE"),
+    ]);
+    write_project(
+        &project,
+        &manifest,
+        &[("src/a.ts", SMALL_TS), ("src/b.ts", b_ts.as_str())],
+    );
+    let batch = dir.join("batch");
+
+    let export_out = harness()
+        .args(["export-batch", "--locale", "de_DE", "--project"])
+        .arg(&project)
+        .args(["--out"])
+        .arg(&batch)
+        .output()
+        .expect("spawn export-batch");
+    assert!(export_out.status.success());
+
+    // Fill both subfolders verbatim.
+    let meta: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(batch.join("meta.json")).unwrap()).unwrap();
+    let subfolders: Vec<String> = meta["subfolders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect();
+    for sf in &subfolders {
+        fill_targets_verbatim(&batch.join(sf));
+    }
+
+    // Mutate ONE catalog after export.
+    let a = project.join("src/a.ts");
+    let mutated = fs::read_to_string(&a)
+        .unwrap()
+        .replace("<source>Hello</source>", "<source>Salutations</source>");
+    fs::write(&a, mutated).unwrap();
+
+    let out_dir = dir.join("out");
+    let import_out = harness()
+        .args(["import-batch", "--project"])
+        .arg(&project)
+        .args(["--out-dir"])
+        .arg(&out_dir)
+        .arg(&batch)
+        .output()
+        .expect("spawn import-batch");
+
+    assert!(
+        !import_out.status.success(),
+        "import-batch --project must reject when any per-catalog subfolder mismatches"
+    );
+    let stderr = String::from_utf8_lossy(&import_out.stderr);
+    assert!(
+        stderr.contains("unit id mismatch"),
+        "stderr must mention the id mismatch: {stderr}"
+    );
+
+    fs::remove_dir_all(&dir).ok();
+}

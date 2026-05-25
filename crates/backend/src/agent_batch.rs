@@ -190,6 +190,19 @@ pub enum AgentBatchError {
         /// What is wrong with this line.
         msg: String,
     },
+
+    /// `targets.jsonl` contains a non-empty line beyond the expected count.
+    /// The format is exactly one entry per unit; extra entries are rejected
+    /// rather than silently truncated, so an agent that produces stale
+    /// translations followed by appended corrections cannot silently apply
+    /// the stale ones.
+    #[error("extra non-empty target line on line {line} (expected exactly {expected} entries)")]
+    ExtraTargetLine {
+        /// 1-based line number in `targets.jsonl`.
+        line: usize,
+        /// Number of unit entries in `units.jsonl`.
+        expected: usize,
+    },
 }
 
 // ── MetaJson (internal, audit only) ─────────────────────────────────────────
@@ -450,9 +463,14 @@ pub fn read_targets(dir: &Path) -> Result<Vec<ManualResponse>, AgentBatchError> 
 
         let pos = responses.len();
         if pos >= expected {
-            // Extra lines are allowed (agent may add a trailing newline);
-            // we stop consuming after we have enough responses.
-            break;
+            // We already have one response per unit. Any further non-empty
+            // line is a contract violation — the format is exactly one entry
+            // per unit, and silently truncating would let stale-then-corrected
+            // agent output apply the stale entries.
+            return Err(AgentBatchError::ExtraTargetLine {
+                line: line_num,
+                expected,
+            });
         }
 
         let got_id = target_line.id().to_owned();
@@ -486,8 +504,14 @@ pub fn read_targets(dir: &Path) -> Result<Vec<ManualResponse>, AgentBatchError> 
     Ok(responses)
 }
 
-/// Read `units.jsonl` and return the unit ids in file order.
-fn read_unit_ids(dir: &Path) -> Result<Vec<String>, AgentBatchError> {
+/// Read `units.jsonl` from `dir` and return the unit ids in file order.
+///
+/// The export's `units.jsonl` is written in `Batch::new` sort order; callers
+/// importing into a current catalog use this to verify that the catalog's
+/// writable units still match the export position-wise. A mismatch means the
+/// catalog has changed since `export-batch` ran and the export folder is
+/// stale.
+pub fn read_unit_ids(dir: &Path) -> Result<Vec<String>, AgentBatchError> {
     let path = dir.join("units.jsonl");
     let file = fs::File::open(&path)?;
     let reader = BufReader::new(file);
@@ -759,6 +783,51 @@ mod tests {
             matches!(err, AgentBatchError::MalformedTarget { line: 1, .. }),
             "got {err}"
         );
+    }
+
+    #[test]
+    fn extra_targets_line_yields_extra_target_line_error() {
+        // One unit in units.jsonl but two valid singular lines in
+        // targets.jsonl. Format is exactly one entry per unit; the extra
+        // must not be silently truncated, otherwise an agent that produced
+        // stale-then-corrected output would apply the stale entries.
+        let tmp = TempDir::new().unwrap();
+        setup_export(&tmp, vec![singular_unit("a", "A")]);
+
+        let mut f = fs::File::create(tmp.path().join("targets.jsonl")).unwrap();
+        writeln!(f, r#"{{"id":"a","kind":"singular","text":"A1"}}"#).unwrap();
+        writeln!(f, r#"{{"id":"a","kind":"singular","text":"A2"}}"#).unwrap();
+        drop(f);
+
+        let err = read_targets(tmp.path()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                AgentBatchError::ExtraTargetLine {
+                    line: 2,
+                    expected: 1
+                }
+            ),
+            "got {err}"
+        );
+    }
+
+    #[test]
+    fn trailing_blank_lines_in_targets_are_still_tolerated() {
+        // Blank/whitespace lines are skipped (the agent may append a
+        // trailing newline). Only non-empty lines beyond `expected`
+        // trigger ExtraTargetLine.
+        let tmp = TempDir::new().unwrap();
+        setup_export(&tmp, vec![singular_unit("a", "A")]);
+
+        let mut f = fs::File::create(tmp.path().join("targets.jsonl")).unwrap();
+        writeln!(f, r#"{{"id":"a","kind":"singular","text":"A1"}}"#).unwrap();
+        writeln!(f).unwrap();
+        writeln!(f, "  ").unwrap();
+        drop(f);
+
+        let responses = read_targets(tmp.path()).expect("trailing blanks OK");
+        assert_eq!(responses.len(), 1);
     }
 
     // ── curated fixture test ─────────────────────────────────────────────────

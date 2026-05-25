@@ -52,8 +52,8 @@
 //! Per `docs/implementation_plan.md` §13 decision #5, the trait stays
 //! synchronous. Backends that need HTTP bring their own minimal sync
 //! client (e.g., `ureq`); we do not pull `tokio` into the workspace. The
-//! CLI driver translates one batch at a time and writes metrics; the UI
-//! (M3+) does its own threading on top of the sync trait.
+//! CLI driver translates one batch at a time and writes metrics; the
+//! desktop UI does its own threading on top of the sync trait.
 //!
 //! # Backends in this crate
 //!
@@ -80,7 +80,7 @@ pub mod ollama;
 
 pub mod agent_batch;
 
-pub use agent_batch::{AgentBatchError, ExportedUnit, read_targets, write_export};
+pub use agent_batch::{AgentBatchError, ExportedUnit, read_targets, read_unit_ids, write_export};
 pub use context::PromptContext;
 pub use error::BackendError;
 pub use outcome::{FailureKind, TranslatedText, TranslationOutcome};

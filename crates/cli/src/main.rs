@@ -1064,6 +1064,8 @@ fn import_batch_single(
     let file_hash = file_hash(&apply_path)?;
     let batch = Batch::new(BatchKey::new(&file_hash, 0), writable);
 
+    verify_batch_matches_export(&dir, &batch)?;
+
     let response_map: HashMap<String, ManualResponse> = batch
         .units
         .iter()
@@ -1299,6 +1301,13 @@ fn import_batch_project(
         let file_hash = file_hash(catalog_abs_path)?;
         let batch = Batch::new(BatchKey::new(&file_hash, 0), writable);
 
+        verify_batch_matches_export(&subfolder, &batch).with_context(|| {
+            format!(
+                "subfolder `{subfolder_name}` (catalog `{}`)",
+                cat_ref.manifest_path
+            )
+        })?;
+
         let response_map: HashMap<String, ManualResponse> = batch
             .units
             .iter()
@@ -1473,6 +1482,41 @@ fn load_optional_glossary(path: Option<&Path>) -> Result<Option<Glossary>> {
         }
         None => Ok(None),
     }
+}
+
+/// Verify the current catalog's writable units (after `Batch::new` sorting)
+/// match the ids recorded in the export folder's `units.jsonl`, position-wise.
+///
+/// `read_targets` already validates that `targets.jsonl` lines align with
+/// `units.jsonl`, but that only proves the export folder is internally
+/// consistent. If the source catalog has been edited (units added, removed,
+/// renamed, or re-keyed) between `export-batch` and `import-batch`, the
+/// writable unit count can still match the response count by coincidence
+/// while the per-position ids drift. Position-wise application would then
+/// silently translate the wrong units. Refuse to proceed instead.
+fn verify_batch_matches_export(export_dir: &Path, batch: &Batch) -> Result<()> {
+    let expected_ids =
+        agent_batch::read_unit_ids(export_dir).map_err(|e| anyhow!("read units.jsonl: {e}"))?;
+    if expected_ids.len() != batch.units.len() {
+        // Already covered upstream by the writable/response count check,
+        // but a second guard here keeps this helper self-contained.
+        return Err(anyhow!(
+            "export folder lists {} units; current catalog has {} writable units",
+            expected_ids.len(),
+            batch.units.len(),
+        ));
+    }
+    for (idx, (current, expected)) in batch.units.iter().zip(expected_ids.iter()).enumerate() {
+        if current.id.as_str() != expected {
+            return Err(anyhow!(
+                "unit id mismatch at position {idx}: export expects `{expected}`, \
+                 current catalog has `{current_id}`. The catalog has changed since \
+                 export-batch ran; re-run export-batch and try again.",
+                current_id = current.id.as_str(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default)]
