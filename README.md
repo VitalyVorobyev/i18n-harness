@@ -24,13 +24,21 @@ agent (Claude Code / Copilot / Codex) when you want to.
 
 ## Why
 
-Most translation tools either (a) call a paid cloud API, or (b) demand
-you hand-edit catalogs in formats built for translators, not developers.
-`i18n-harness` does neither: a local model server (Ollama by default)
-runs on your laptop, a CLDR-driven validation gate guarantees the catalog
-round-trips byte-stably, and a per-`(backend, locale)` quality metric
-tells you empirically how well the local model is doing for each language
-pair.
+Most translation tools either (a) require a paid cloud API account to
+do anything at all, or (b) demand you hand-edit catalogs in formats
+built for translators, not developers. `i18n-harness` flips both.
+
+- The **default path** runs entirely on your laptop against a local
+  model server (Ollama). No API key needed, no cloud egress, free to
+  evaluate. Cloud LLMs are an opt-in per-project backend when you
+  want them, not a gate to clear before getting started.
+- A CLDR-driven validation gate guarantees the catalog round-trips
+  byte-stably regardless of which backend produced the translation,
+  so weak models can produce *worse text* but never *broken files*.
+- A per-`(backend, locale)` quality metric tells you empirically how
+  well each engine is doing for each language pair, so you can pick
+  your trade-off (local-and-free vs. cloud-and-strong vs.
+  external-agent) on evidence, not vendor pitch.
 
 ## Status
 
