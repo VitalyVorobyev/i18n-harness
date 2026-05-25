@@ -407,6 +407,10 @@ impl<'a> Parser<'a> {
             self.cursor += 1;
             return Ok(());
         }
+        // Enforce duplicate-key rejection symmetrically with parse_object;
+        // otherwise inputs like `{"x":[{"k":1,"k":2}]}` (an object nested
+        // under a skipped array) sneak through. Codex P3 on PR #39.
+        let mut seen: HashSet<String> = HashSet::new();
         loop {
             self.skip_ws();
             if self.peek() != Some(b'"') {
@@ -415,7 +419,14 @@ impl<'a> Parser<'a> {
                     self.cursor
                 ));
             }
-            let _ = self.parse_string_literal()?;
+            let key_start = self.cursor;
+            let (key, _) = self.parse_string_literal()?;
+            if !seen.insert(key.clone()) {
+                return Err(format!(
+                    "duplicate key `{key}` at byte {key_start} while skipping object; \
+                     ICU-JSON catalogs must have unique keys per object"
+                ));
+            }
             self.skip_ws();
             self.expect(b':')?;
             self.skip_ws();
@@ -851,6 +862,22 @@ mod tests {
         let leaves = p.run().expect("parse");
         assert_eq!(leaves[0].line, 2);
         assert_eq!(leaves[1].line, 3);
+    }
+
+    #[test]
+    fn rejects_duplicate_keys_in_skipped_object() {
+        // Codex P3 on PR #39: parse_object catches duplicate keys at the
+        // top level; skip_object must do the same so that
+        // `{"x":[{"k":1,"k":2}]}` (object nested under a skipped array)
+        // is not silently accepted while a sibling at the top level
+        // would be rejected.
+        let src = r#"{"x":[{"k":1,"k":2}]}"#;
+        let mut p = Parser::new(src);
+        let err = p.run().unwrap_err();
+        assert!(
+            err.contains("duplicate key"),
+            "expected duplicate-key error; got: {err}"
+        );
     }
 
     #[test]

@@ -126,11 +126,19 @@ fn validate_braces(s: &str) -> Result<(), PlaceholderError> {
     Ok(())
 }
 
-/// The ICU MessageFormat syntax characters that trigger apostrophe quoting.
-/// Matches the set documented in the ICU4J `MessagePattern` source and the
-/// format.js / react-intl tokenizer.
+/// The ICU MessageFormat syntax characters that trigger apostrophe quoting
+/// in any context.
+///
+/// `{`, `}`, `#` are the universally-quotable trio. The `|` character is
+/// only syntactic inside the deprecated `choice` argument style; treating
+/// it as universally syntactic would over-trigger quoted mode in plain
+/// text like `"a'|b"` and let unmatched braces later in the string slip
+/// through. Modern ICU (`plural`, `select`, `selectordinal`) does not use
+/// `|`, so excluding it is both safer and closer to the ICU4J / format.js
+/// behaviour for the message styles real catalogs use. Codex P2 on
+/// PR #39.
 fn is_icu_syntax(b: u8) -> bool {
-    matches!(b, b'{' | b'}' | b'#' | b'|')
+    matches!(b, b'{' | b'}' | b'#')
 }
 
 #[cfg(test)]
@@ -197,6 +205,19 @@ mod tests {
         // counting.
         assert!(to_icu("it's ''wonderful''").is_ok());
         assert!(to_icu("can't '' open '{x}'").is_ok());
+    }
+
+    #[test]
+    fn pipe_does_not_trigger_quoting() {
+        // Codex P2 on PR #39: `|` is only special in the deprecated
+        // `choice` style. Treating it as a universal syntax char would
+        // make `"a'|{name"` enter quoted mode at `'|` and ignore the
+        // unmatched `{`. The narrowed rule (only `{`, `}`, `#`) catches
+        // the malformed input correctly.
+        let err = to_icu("a'|{name").unwrap_err();
+        assert!(matches!(err, PlaceholderError::UnsupportedSyntax(_)));
+        // Plain `'|` in ordinary text remains valid.
+        assert!(to_icu("either a'|b").is_ok());
     }
 
     #[test]
