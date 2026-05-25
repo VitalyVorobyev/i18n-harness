@@ -843,7 +843,7 @@ function MatrixCard({
   return (
     <article
       className={cn(
-        "rounded-lg overflow-hidden border bg-bg-surface",
+        "shrink-0 rounded-lg overflow-hidden border bg-bg-surface",
         focused ? "border-border-default" : "border-border-subtle",
       )}
       aria-label={`Unit ${row.unitId}`}
