@@ -813,6 +813,14 @@ impl Project {
         &self.evaluation_store
     }
 
+    /// Borrow the project's filesystem abstraction.
+    ///
+    /// Crate-internal; not part of the public API. Used by `tuning_bundle`
+    /// to write bundle files without duplicating the I/O error-mapping pattern.
+    pub(crate) fn fs(&self) -> &dyn crate::fs::ProjectFs {
+        &*self.fs
+    }
+
     /// Record a review-status change.
     ///
     /// Generates `ts` from `SystemTime::now`, builds a [`ReviewEvent`] with

@@ -88,3 +88,20 @@ pub use manual::{ManualBackend, ManualResponse};
 
 #[cfg(feature = "ollama")]
 pub use ollama::{OllamaBackend, PromptResponseShape};
+
+/// Return the embedded Ollama v2 prompt template verbatim.
+///
+/// Embedded via `include_str!` at compile time from
+/// `prompts/ollama-translate-v2.txt`. Callers (e.g. the project crate's
+/// tuning-bundle export) copy this into a bundle without having to know the
+/// on-disk path.
+pub fn ollama_prompt_v2() -> &'static str {
+    include_str!("../prompts/ollama-translate-v2.txt")
+}
+
+/// Version identifier for the embedded Ollama v2 prompt template.
+///
+/// Matches the `[template=...]` line in the template body. Used by
+/// `TuningBundleSummary::prompt_template_version` so the bundle is
+/// self-documenting without callers having to parse the template text.
+pub const OLLAMA_PROMPT_V2_VERSION: &str = "ollama-translate-v2";

@@ -1561,6 +1561,7 @@ name = "i18n-harness-project"
 version = "0.1.0"
 dependencies = [
  "i18n-harness-adapter-qt",
+ "i18n-harness-backend",
  "i18n-harness-core",
  "i18n-harness-glossary",
  "i18n-harness-locales",
