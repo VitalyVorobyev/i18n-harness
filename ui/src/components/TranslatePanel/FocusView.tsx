@@ -974,11 +974,26 @@ function SingularEditor({
     unit.target.kind === "singular" ? (unit.target.text ?? "") : "";
   const [draft, setDraft] = useState(initial);
   const initialRef = useRef(initial);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setDraft(initial);
     initialRef.current = initial;
   }, [initial]);
+
+  // Auto-grow on content: keep the textarea tall enough for the current
+  // draft so multi-line translations stay visible without manual resize.
+  // The minimum (~4 rows) is enforced by `rows={4}`; we only ever grow.
+  // The `draft` dep is needed even though it's read off the DOM — biome
+  // cannot see the dependency because we read scrollHeight after React
+  // commits the value change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dom resize needs to fire after each draft change
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   const commit = () => {
     if (draft === initialRef.current) return;
@@ -990,8 +1005,9 @@ function SingularEditor({
   return (
     <>
       <textarea
+        ref={textareaRef}
         value={draft}
-        rows={2}
+        rows={4}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         disabled={busy}
@@ -1072,32 +1088,18 @@ function PluralEditor({
   return (
     <>
       {drafts.map((draft, idx) => (
-        <div key={idx} className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-loose text-fg-tertiary font-medium">
-            {FORM_LABELS[idx] ?? `Form ${idx}`}
-          </span>
-          <textarea
-            value={draft}
-            rows={2}
-            onChange={(e) => {
-              const next = [...drafts];
-              next[idx] = e.target.value;
-              setDrafts(next);
-            }}
-            onBlur={() => commitForm(idx)}
-            disabled={busy}
-            spellCheck
-            aria-label={`Plural form ${FORM_LABELS[idx] ?? idx}`}
-            placeholder="…"
-            className={cn(
-              "w-full px-2.5 py-1.5 rounded-md border resize-none",
-              "font-mono text-[13px] leading-snug text-fg-primary",
-              "bg-bg-input border-border-subtle",
-              "focus:border-accent focus:outline-none focus-visible:outline-none",
-              "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
-            )}
-          />
-        </div>
+        <PluralFormEditor
+          key={idx}
+          label={FORM_LABELS[idx] ?? `Form ${idx}`}
+          value={draft}
+          busy={busy}
+          onChange={(value) => {
+            const next = [...drafts];
+            next[idx] = value;
+            setDrafts(next);
+          }}
+          onBlur={() => commitForm(idx)}
+        />
       ))}
       <ActionBar
         busy={busy}
@@ -1107,6 +1109,58 @@ function PluralEditor({
         onSkip={onSkip}
       />
     </>
+  );
+}
+
+// Per-form plural editor — auto-growing textarea with rows=4 minimum, mirrors
+// SingularEditor's growth pattern so multi-form layouts stay scannable.
+function PluralFormEditor({
+  label,
+  value,
+  busy,
+  onChange,
+  onBlur,
+}: {
+  label: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dom resize needs to fire after each value change
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-loose text-fg-tertiary font-medium">
+        {label}
+      </span>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        rows={4}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        disabled={busy}
+        spellCheck
+        aria-label={`Plural form ${label}`}
+        placeholder="…"
+        className={cn(
+          "w-full px-2.5 py-1.5 rounded-md border resize-none",
+          "font-mono text-[13px] leading-snug text-fg-primary",
+          "bg-bg-input border-border-subtle",
+          "focus:border-accent focus:outline-none focus-visible:outline-none",
+          "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
+        )}
+      />
+    </div>
   );
 }
 

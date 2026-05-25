@@ -1073,18 +1073,25 @@ export function App() {
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Sidebar — always visible in project mode */}
-        <ProjectSidebar
-          summary={summary}
-          activeCatalogPath={activeCatalogPath}
-          dirtyCatalogPaths={dirtyCatalogPaths}
-          activeLocaleFilter={activeLocaleFilter}
-          onCatalogSelect={handleCatalogSelect}
-          reviewQueueTotal={reviewQueueTotal}
-          reviewQueueByCatalog={reviewQueueByCatalog}
-          onOpenReviewQueue={() => setProjectView("review")}
-          openCatalogs={openCatalogs}
-        />
+        {/* Workspace sidebar — rendered only for views without their own
+            left rail. Translate (Matrix/Focus), Glossary (master-detail
+            rail), and Review (sub-tab + side-nav) provide their own
+            navigation and would render two stacked rails otherwise. */}
+        {(projectView === "overview" ||
+          projectView === "settings" ||
+          projectView === "quality") && (
+          <ProjectSidebar
+            summary={summary}
+            activeCatalogPath={activeCatalogPath}
+            dirtyCatalogPaths={dirtyCatalogPaths}
+            activeLocaleFilter={activeLocaleFilter}
+            onCatalogSelect={handleCatalogSelect}
+            reviewQueueTotal={reviewQueueTotal}
+            reviewQueueByCatalog={reviewQueueByCatalog}
+            onOpenReviewQueue={() => setProjectView("review")}
+            openCatalogs={openCatalogs}
+          />
+        )}
 
         {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
@@ -1211,6 +1218,7 @@ export function App() {
                 setProjectView("translate");
               }}
               onOpenHardFlags={() => setProjectView("review")}
+              onEnsureCatalogLoaded={ensureCatalogLoaded}
             />
           </div>
         </div>

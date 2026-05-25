@@ -311,28 +311,25 @@ export function MatrixView({
   // ── Auto-load every project catalog into the cache ──────────────────────
   //
   // Matrix mode needs every per-locale catalog loaded to render its cells.
-  // The legacy single-catalog flow only opened the active one on click; we
-  // trigger the rest here. Concurrent calls for the same path are safe —
-  // App's setOpenCatalogs runs a final-write-wins update and the cache key
-  // is the absolute path.
+  // We fire one parallel fan-out per project on mount (and whenever the
+  // catalog list itself changes — e.g. after a manifest mutation). The
+  // dependency list intentionally omits `openCatalogs` and the callback
+  // identity: the callback closes over `openCatalogs` in App and would
+  // make this effect re-run on every cache update, which can stall the
+  // sequential variant and is wasted work here. ensureCatalogLoaded is
+  // already a no-op for cached paths, and Promise.allSettled means a
+  // single failure does not block the other locales.
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      for (const ref of summary.catalogs) {
-        if (cancelled) break;
-        if (openCatalogs.has(ref.absolute_path)) continue;
-        try {
-          await onEnsureCatalogLoaded(ref.absolute_path);
-        } catch {
-          // Best effort. The cell will render the loading placeholder.
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [summary.catalogs, openCatalogs, onEnsureCatalogLoaded]);
+    const toLoad = summary.catalogs.filter(
+      (ref) => !openCatalogs.has(ref.absolute_path),
+    );
+    if (toLoad.length === 0) return;
+    void Promise.allSettled(
+      toLoad.map((ref) => onEnsureCatalogLoaded(ref.absolute_path)),
+    );
+  }, [summary.catalogs]);
 
   // ── Local view state (not persisted) ────────────────────────────────────
 
@@ -550,6 +547,22 @@ export function MatrixView({
   const headerTitle = labelOf(filter);
   const headerSubtitle = `${rows.length} unit${rows.length === 1 ? "" : "s"} · ${openCount} open`;
 
+  // Project-wide loading state — while the eager-load is still resolving the
+  // first few catalogs, every cell hits the null-unit branch (loading…). A
+  // page of identical skeletons is worse signal than one clear "loading"
+  // indicator, so we hide the card list until every catalog is cached.
+  const totalCatalogs = summary.catalogs.length;
+  const loadedCatalogs = useMemo(
+    () =>
+      summary.catalogs.reduce(
+        (acc, ref) => acc + (openCatalogs.has(ref.absolute_path) ? 1 : 0),
+        0,
+      ),
+    [summary.catalogs, openCatalogs],
+  );
+  const allCatalogsLoaded =
+    totalCatalogs === 0 || loadedCatalogs === totalCatalogs;
+
   return (
     <div
       ref={containerRef}
@@ -685,7 +698,25 @@ export function MatrixView({
         {/* Card list + inspector */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-2.5 min-w-0">
-            {visibleRows.length === 0 ? (
+            {!allCatalogsLoaded ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex-1 flex flex-col items-center justify-center gap-3 py-12 text-fg-tertiary"
+              >
+                <span
+                  className="inline-block w-3 h-3 rounded-pill bg-accent animate-pulse"
+                  aria-hidden="true"
+                />
+                <p className="text-sm font-medium text-fg-secondary">
+                  Loading {totalCatalogs}{" "}
+                  {totalCatalogs === 1 ? "catalog" : "catalogs"}…
+                </p>
+                <p className="text-xs font-mono">
+                  {loadedCatalogs}/{totalCatalogs} ready
+                </p>
+              </div>
+            ) : visibleRows.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-sm text-fg-tertiary gap-2 py-12">
                 <p>No units match this view.</p>
                 {filter !== "all" && filter !== "all-open" && (

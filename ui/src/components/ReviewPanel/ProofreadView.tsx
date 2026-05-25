@@ -9,7 +9,7 @@
 // Strictly read-only. No textareas, no Accept buttons, no edit paths here.
 // Clicking a unit jumps to Translate (with focusLocale if a locale column is active).
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CatalogRef,
   CatalogResponse,
@@ -131,6 +131,11 @@ export interface ProofreadViewProps {
   ) => void;
   // Called when "Open remaining hard flags" is clicked.
   onOpenHardFlags: () => void;
+  /** Auto-load a project catalog into the App's openCatalogs cache. Optional
+   *  for backward compatibility; when present, ProofreadView fan-loads every
+   *  project catalog on mount so the manuscript renders without forcing the
+   *  user to open each catalog manually first. */
+  onEnsureCatalogLoaded?: (absPath: string) => Promise<void>;
 }
 
 // Show/filter toggle state — local to this view.
@@ -1357,6 +1362,7 @@ export function ProofreadView({
   reports,
   onNavigateToUnit,
   onOpenHardFlags,
+  onEnsureCatalogLoaded,
 }: ProofreadViewProps) {
   const [show, setShow] = useState<ShowToggles>({
     sourceIds: false,
@@ -1371,6 +1377,35 @@ export function ProofreadView({
   // drives which locale is passed to onNavigateToUnit so the user lands in Focus.
   // setFocusedLocale will be wired to locale-card clicks in a future PR.
   const [focusedLocale] = useState<string | null>(null);
+
+  // Fan-load every project catalog on mount so the manuscript renders with
+  // real content instead of empty module sections. Mirrors MatrixView's
+  // parallel-mount-once pattern (see MatrixView.tsx for the dependency
+  // rationale): closing over openCatalogs in the dep list would re-trigger
+  // on every cache update, which is wasted work.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above
+  useEffect(() => {
+    if (!onEnsureCatalogLoaded) return;
+    const toLoad = summary.catalogs.filter(
+      (ref) => !openCatalogs.has(ref.absolute_path),
+    );
+    if (toLoad.length === 0) return;
+    void Promise.allSettled(
+      toLoad.map((ref) => onEnsureCatalogLoaded(ref.absolute_path)),
+    );
+  }, [summary.catalogs, onEnsureCatalogLoaded]);
+
+  const totalCatalogs = summary.catalogs.length;
+  const loadedCatalogs = useMemo(
+    () =>
+      summary.catalogs.reduce(
+        (acc, ref) => acc + (openCatalogs.has(ref.absolute_path) ? 1 : 0),
+        0,
+      ),
+    [summary.catalogs, openCatalogs],
+  );
+  const allCatalogsLoaded =
+    totalCatalogs === 0 || loadedCatalogs === totalCatalogs;
 
   const modules = useMemo(
     () => buildCatalogModules(summary, openCatalogs),
@@ -1477,29 +1512,78 @@ export function ProofreadView({
               gap: 32,
             }}
           >
-            {modules.map((mod) => (
+            {!allCatalogsLoaded ? (
               <div
-                key={mod.catalogRef.absolute_path}
-                id={`catalog-${encodeURIComponent(mod.catalogRef.absolute_path)}`}
+                role="status"
+                aria-live="polite"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 12,
+                  padding: "64px 16px",
+                  color: "var(--color-fg-tertiary)",
+                }}
               >
-                <ModuleSection
-                  mod={mod}
-                  locales={summary.locales}
-                  reports={reports}
-                  show={show}
-                  activeFilters={activeFilters}
-                  activeLocale={focusedLocale}
-                  onUnitClick={handleUnitClick}
+                <span
+                  aria-hidden="true"
+                  className="animate-pulse"
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    borderRadius: 999,
+                    background: "var(--color-accent)",
+                  }}
                 />
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "var(--color-fg-secondary)",
+                  }}
+                >
+                  Loading project for review…
+                </p>
+                <p
+                  style={{
+                    margin: 0,
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                  }}
+                >
+                  {loadedCatalogs}/{totalCatalogs} catalogs ready
+                </p>
               </div>
-            ))}
+            ) : (
+              <>
+                {modules.map((mod) => (
+                  <div
+                    key={mod.catalogRef.absolute_path}
+                    id={`catalog-${encodeURIComponent(mod.catalogRef.absolute_path)}`}
+                  >
+                    <ModuleSection
+                      mod={mod}
+                      locales={summary.locales}
+                      reports={reports}
+                      show={show}
+                      activeFilters={activeFilters}
+                      activeLocale={focusedLocale}
+                      onUnitClick={handleUnitClick}
+                    />
+                  </div>
+                ))}
 
-            <SignOffFooter
-              summary={summary}
-              openCatalogs={openCatalogs}
-              onMarkReviewed={handleMarkReviewed}
-              onOpenHardFlags={onOpenHardFlags}
-            />
+                <SignOffFooter
+                  summary={summary}
+                  openCatalogs={openCatalogs}
+                  onMarkReviewed={handleMarkReviewed}
+                  onOpenHardFlags={onOpenHardFlags}
+                />
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -36,6 +36,10 @@ export interface ReviewPanelProps {
   ) => void;
   /** Called when "Open remaining hard flags" is clicked in Proofread. */
   onOpenHardFlags: () => void;
+  /** Forwarded to ProofreadView so it can fan-load every project catalog
+   *  on first render — without this the manuscript stays empty until the
+   *  user manually opens each catalog from Translate. */
+  onEnsureCatalogLoaded?: (absPath: string) => Promise<void>;
 }
 
 export function ReviewPanel({
@@ -46,6 +50,7 @@ export function ReviewPanel({
   onOpenItem,
   onNavigateToUnit,
   onOpenHardFlags,
+  onEnsureCatalogLoaded,
 }: ReviewPanelProps) {
   const [subTab, setSubTab] = useState<SubTab>("queue");
 
@@ -59,7 +64,9 @@ export function ReviewPanel({
         minHeight: 0,
       }}
     >
-      {/* Sub-tab strip */}
+      {/* Sub-tab strip — primary navigation between Queue and Proofread.
+          Sits on bg-base (not bg-surface) so it reads as a distinct
+          navigation row above the panel contents. */}
       <div
         className="review-panel-subtabs"
         role="tablist"
@@ -68,11 +75,11 @@ export function ReviewPanel({
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
-          gap: 2,
-          padding: "0 12px",
-          height: 38,
-          borderBottom: "1px solid var(--color-border-subtle)",
-          background: "var(--color-bg-surface)",
+          gap: 4,
+          padding: "8px 16px 0",
+          height: 48,
+          borderBottom: "1px solid var(--color-border-default)",
+          background: "var(--color-bg-base)",
         }}
       >
         <SubTabButton
@@ -80,6 +87,7 @@ export function ReviewPanel({
           onClick={() => setSubTab("queue")}
           id="subtab-queue"
           controls="subtab-panel-queue"
+          icon={<FolderTabIcon />}
         >
           Queue
         </SubTabButton>
@@ -88,6 +96,7 @@ export function ReviewPanel({
           onClick={() => setSubTab("proofread")}
           id="subtab-proofread"
           controls="subtab-panel-proofread"
+          icon={<BookTabIcon />}
         >
           Proofread
         </SubTabButton>
@@ -141,6 +150,7 @@ export function ReviewPanel({
           reports={reports}
           onNavigateToUnit={onNavigateToUnit}
           onOpenHardFlags={onOpenHardFlags}
+          onEnsureCatalogLoaded={onEnsureCatalogLoaded}
         />
       </div>
     </div>
@@ -155,12 +165,14 @@ function SubTabButton({
   children,
   id,
   controls,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   id: string;
   controls: string;
+  icon?: React.ReactNode;
 }) {
   return (
     <button
@@ -171,15 +183,64 @@ function SubTabButton({
       aria-controls={controls}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center h-6 px-2.5 rounded-sm text-xs font-medium",
+        "relative inline-flex items-center gap-2 h-10 px-3 text-sm font-medium",
         "transition-colors duration-100 ease-out",
+        "border-b-2",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
         active
-          ? "text-fg-primary bg-accent-subtle border border-accent-subtle-border"
-          : "text-fg-tertiary border border-transparent hover:text-fg-primary hover:bg-bg-hover",
+          ? "text-fg-primary border-accent"
+          : "text-fg-tertiary border-transparent hover:text-fg-secondary hover:border-border-default",
       )}
     >
+      {icon && (
+        <span
+          aria-hidden="true"
+          className={active ? "text-accent" : "text-fg-tertiary"}
+          style={{ display: "inline-flex" }}
+        >
+          {icon}
+        </span>
+      )}
       {children}
     </button>
+  );
+}
+
+// ── Inline tab icons ──────────────────────────────────────────────────────────
+
+function FolderTabIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function BookTabIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
   );
 }
