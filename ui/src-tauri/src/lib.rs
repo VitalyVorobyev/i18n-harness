@@ -9,10 +9,12 @@
 
 mod backing;
 mod cancellation;
+mod dto;
 mod error;
 mod jobs;
 mod state;
 
+pub use dto::*;
 pub use state::AppState;
 pub(crate) use state::{OpenCatalog, OpenCatalogEntry};
 
@@ -34,199 +36,7 @@ use i18n_harness_project::{
     DraftManifest, GlossaryConfig, LocaleConfig, NewCorrection, Project, ProjectSummary,
     PromptsConfig,
 };
-use serde::{Deserialize, Serialize};
-
-/// Wire-format response from the `open_catalog` Tauri command.
-#[derive(Debug, Serialize)]
-pub struct CatalogResponse {
-    /// Absolute path the catalog was read from; also the handle for
-    /// follow-up commands.
-    pub path: String,
-    /// Number of units in the catalog (including non-writable ones).
-    pub unit_count: usize,
-    /// Target language as declared in the `.ts` root element. `None`
-    /// if the catalog did not specify one — `translate_unit` will fail
-    /// in that case until the locale is set explicitly.
-    pub language: Option<String>,
-    /// The units themselves, in document order. Serializes through
-    /// [`Unit`]'s own serde derive — no flattening or projection here.
-    pub units: Vec<Unit>,
-}
-
-/// Wire-format response from `save_catalog`.
-#[derive(Debug, Serialize)]
-pub struct SaveSummary {
-    /// Absolute path the catalog was written to.
-    pub path: String,
-    /// Total units written (writable + preserved).
-    pub unit_count: usize,
-}
-
-/// One edit to a unit's target, mirroring [`Target`] for singular and
-/// plural cases. The frontend sends this when the user types into the
-/// target editor; the command merges it into the in-memory unit.
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum TargetEdit {
-    /// Replace the singular target's text. `None` empties it.
-    Singular {
-        /// New value, or `None` to clear the target.
-        text: Option<String>,
-    },
-    /// Replace one form of a plural target. `form_index` is the CLDR
-    /// position; `text` is the new value (`None` empties that form).
-    Plural {
-        /// CLDR-ordered position of the form to write (`0..arity`).
-        form_index: u32,
-        /// New value for that form, or `None` to clear it.
-        text: Option<String>,
-    },
-}
-
-/// Result of `translate_unit`: the updated unit plus the gate report
-/// the harness ran on it.
-#[cfg(feature = "ollama")]
-#[derive(Debug, Serialize)]
-pub struct TranslateResult {
-    /// The unit after merging the backend's output and running the
-    /// gate. Its `state` reflects the gate outcome.
-    pub unit: Unit,
-    /// The gate report. Findings drive the UI's inline review.
-    pub report: GateReport,
-}
-
-/// Wire-format locale entry returned by `list_locales` — the UI uses
-/// this to build column headers in the glossary editor and to label
-/// register overrides.
-#[derive(Debug, Serialize)]
-pub struct LocaleInfo {
-    /// CLDR-style id (`en`, `de_DE`, `es_ES`, `zh_Hans`).
-    pub id: String,
-    /// Default register declared in the locales table
-    /// (`"formal"` | `"informal"` | `"neutral"`). Glossary overrides may
-    /// override per project.
-    pub register: &'static str,
-    /// Script family — useful for grouping or icon picks
-    /// (`"Latin"`, `"Han"`, …).
-    pub script: String,
-    /// CLDR plural arity. Useful as a tooltip in the editor.
-    pub plural_arity: u32,
-}
-
-/// One glossary term in the wire format. Mirrors
-/// `i18n_harness_glossary::Term` plus the source key, since the JS
-/// layer prefers a flat list to a map.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TermEntry {
-    /// Source string (case-sensitive natural key).
-    pub source: String,
-    /// `true` if the term must never be translated.
-    #[serde(default)]
-    pub do_not_translate: bool,
-    /// Free-form notes (sense disambiguation).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes: Option<String>,
-    /// Translations keyed by locale id.
-    #[serde(default)]
-    pub translations: BTreeMap<String, String>,
-}
-
-/// One `[locale.<id>]` override in wire form.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LocaleOverrideEntry {
-    /// Locale id (`de_DE`, `es_ES`, …).
-    pub locale: String,
-    /// `"formal"` | `"informal"` | `"neutral"`, or `None` to leave
-    /// the workspace default in place.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub register: Option<String>,
-    /// Variant tag override; rarely set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant: Option<String>,
-}
-
-/// Editable glossary payload exchanged between the UI and the Rust
-/// layer. The shape mirrors the on-disk TOML schema; `save_glossary`
-/// validates by round-tripping through `Glossary::from_toml` before
-/// writing.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GlossaryPayload {
-    /// Schema version (`1` today). The save command refuses higher
-    /// values to keep forward compatibility deliberate.
-    pub schema_version: u32,
-    /// Terms in alphabetical order by source.
-    pub terms: Vec<TermEntry>,
-    /// Per-locale register / variant overrides.
-    pub locale_overrides: Vec<LocaleOverrideEntry>,
-}
-
-/// Response from `load_glossary` — the parsed payload plus any
-/// non-fatal warnings the loader surfaced (unknown locale ids, terms
-/// with empty translation tables).
-#[derive(Debug, Serialize)]
-pub struct GlossaryLoadResponse {
-    /// Absolute path the glossary was read from.
-    pub path: String,
-    /// Editable payload — what the UI binds against.
-    pub payload: GlossaryPayload,
-    /// Human-readable warning strings. Empty when the glossary
-    /// validates cleanly.
-    pub warnings: Vec<String>,
-}
-
-/// Response from `save_glossary` — the path written plus the
-/// validator's warnings (so the UI can surface them without re-loading).
-#[derive(Debug, Serialize)]
-pub struct GlossarySaveResponse {
-    /// Path the glossary was written to.
-    pub path: String,
-    /// Warnings the validator surfaced before write.
-    pub warnings: Vec<String>,
-}
-
-/// One row from `.i18n-harness/metrics.jsonl`, re-shaped for the wire.
-///
-/// We don't depend on `i18n_harness_gate::Event` directly — its serde
-/// flattened tag would force the UI to deal with two shapes. Here we
-/// surface a flat record the TypeScript layer can render without a
-/// custom serde dance.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MetricEvent {
-    /// On-disk schema version (canonical metrics schema, not the
-    /// in-memory `Unit` schema).
-    pub schema: u32,
-    /// RFC3339 timestamp (`…Z`, UTC, microsecond precision).
-    pub ts: String,
-    /// Backend that produced the unit (`"manual"`, `"ollama"`, …).
-    pub backend: String,
-    /// Target locale (`"de_DE"`, …).
-    pub locale: String,
-    /// Event kind discriminator (`"gate-reject"`, `"soft-warning"`,
-    /// `"human-edit"`, `"retry"`).
-    pub event: String,
-    /// Unit id the event pertains to.
-    pub unit_id: String,
-    /// Lower-case kebab flag name (`"length-warn"`, …) or empty for
-    /// non-flag events.
-    pub rule: String,
-    /// Per-rule detail payload. We pass it through opaquely; the UI
-    /// renders rule-specific summaries.
-    pub detail: serde_json::Value,
-}
-
-/// Wire response from `load_metrics`.
-#[derive(Debug, Serialize)]
-pub struct MetricsResponse {
-    /// Absolute path read.
-    pub path: String,
-    /// Successfully-parsed events, in file order.
-    pub events: Vec<MetricEvent>,
-    /// Lines that could not be parsed as JSON or were missing fields.
-    /// Surfaced to the UI so a corrupted run is visible, not silent.
-    pub error_count: usize,
-    /// Total non-blank lines read (`events.len() + error_count`).
-    pub line_count: usize,
-}
+use serde::Serialize;
 
 /// Return the package version baked at compile time.
 ///
@@ -706,110 +516,7 @@ fn payload_to_toml(payload: &GlossaryPayload) -> Result<String, String> {
     toml::to_string(&wire).map_err(|e| format!("toml serialize: {e}"))
 }
 
-// ── M4.2c wire shapes ────────────────────────────────────────────────────────
-
-/// Provenance of the MT proposal in a correction record, mirroring
-/// [`CorrectionProvenance`] with serde derives so it crosses the IPC bridge.
-/// All fields default to empty string; the caller fills only what the backend
-/// made available.
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct CorrectionProvenanceWire {
-    /// Backend name as registered by the `TranslationBackend` trait.
-    #[serde(default)]
-    pub backend: String,
-    /// Model identifier as the backend reports it.
-    #[serde(default)]
-    pub model: String,
-    /// Free-form model version / revision string.
-    #[serde(default)]
-    pub model_version: String,
-    /// Prompt template version identifier.
-    #[serde(default)]
-    pub prompt_template_version: String,
-    /// Hash of the glossary content at correction time.
-    #[serde(default)]
-    pub glossary_version: String,
-}
-
-/// IPC payload for `record_correction_in_project`.
-#[derive(Debug, Deserialize)]
-pub struct RecordCorrectionRequest {
-    /// Absolute or manifest-relative catalog path.
-    pub catalog_path: String,
-    /// Target locale id.
-    pub locale: String,
-    /// Unit that was corrected.
-    pub unit_id: String,
-    /// Source text.
-    pub source: String,
-    /// MT proposal that was edited (empty for manual-from-scratch).
-    pub mt_proposal: String,
-    /// The accepted human translation.
-    pub human_target: String,
-    /// Provenance of `mt_proposal`.
-    #[serde(default)]
-    pub provenance: CorrectionProvenanceWire,
-    /// Flags the unit carried at correction time.
-    #[serde(default)]
-    pub flags_at_correction: Vec<i18n_harness_core::Flag>,
-}
-
-/// IPC response from `record_correction_in_project`.
-#[derive(Debug, Serialize)]
-pub struct CorrectionIdResponse {
-    /// The assigned correction id in `"corr_<12-hex>"` form.
-    pub id: String,
-}
-
-/// Filter passed to `list_corrections_in_project`. All fields are optional;
-/// an all-default filter returns every record (AND semantics for non-None fields).
-#[derive(Debug, Default, Deserialize)]
-pub struct ListCorrectionsFilter {
-    /// Restrict to this catalog (absolute or manifest-relative path).
-    #[serde(default)]
-    pub catalog_path: Option<String>,
-    /// Restrict to this target locale id.
-    #[serde(default)]
-    pub locale: Option<String>,
-    /// Restrict to this unit id.
-    #[serde(default)]
-    pub unit_id: Option<String>,
-    /// If true, restrict to corrections that are in the curated set.
-    ///
-    /// Note: `CorrectionFilter` has no `curated_only` field; this flag is
-    /// honoured by filtering the result list against the project's curated set
-    /// after the JSONL scan.
-    #[serde(default)]
-    pub curated_only: bool,
-}
-
-/// IPC payload for `set_review_status_in_project`. Wraps the three fields
-/// `Project::set_review_status` accepts beyond catalog + unit.
-#[derive(Debug, Deserialize)]
-pub struct ReviewStatusInput {
-    /// The new review status. `None` clears the unit's record.
-    pub status: Option<i18n_harness_core::ReviewStatus>,
-    /// Source-hash value from the unit at review time (empty if not available).
-    #[serde(default)]
-    pub source_hash_at_review: String,
-    /// Free-form reviewer note.
-    #[serde(default)]
-    pub reviewer_note: Option<String>,
-}
-
 // ── Project commands (M4.2a) ─────────────────────────────────────────────────
-
-/// Wire response for `open_project` / `create_project`. Carries the summary
-/// the UI binds against plus any non-fatal warnings (unknown locale ids,
-/// glossary parse warnings). Hard failures come back as `Err(String)`.
-#[derive(Debug, Serialize)]
-pub struct ProjectOpenResponse {
-    /// Compact project summary safe to send across the IPC bridge.
-    pub summary: ProjectSummary,
-    /// Human-readable warning strings (`UnknownLocale`, `Glossary(...)`).
-    /// Empty when the project loads cleanly.
-    pub warnings: Vec<String>,
-}
 
 /// Open an existing project rooted at `root`.
 ///
@@ -1169,26 +876,6 @@ fn save_catalog_in_project(
         path: abs.to_string_lossy().into_owned(),
         unit_count: units.len(),
     })
-}
-
-/// Wire response from `save_all_dirty`. Carries both the catalogs that were
-/// successfully written and (when the run stopped early) the path + reason of
-/// the first failure. Using a single response shape — rather than
-/// `Result<Vec<SaveSummary>, String>` — means the UI never loses the list of
-/// already-saved catalogs when one apply mid-batch fails, so it can refresh
-/// the right dirty pills without an extra IPC round trip.
-#[derive(Debug, Serialize)]
-pub struct SaveAllDirtyResponse {
-    /// Catalogs written, in BTreeMap iteration order (absolute path order).
-    /// Their `dirty` flag has been cleared in the in-memory store.
-    pub saved: Vec<SaveSummary>,
-    /// Absolute path of the catalog whose `apply` failed, if any. Catalogs
-    /// after this entry in the iteration order were not attempted.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_path: Option<String>,
-    /// Human-readable failure reason, matched 1:1 with `failed_path`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub failed_reason: Option<String>,
 }
 
 /// Write every dirty catalog in the project store back to disk.
@@ -1748,88 +1435,6 @@ fn translate_one(
 
 // ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
 
-/// Selection of units to operate on in a bulk-translate run.
-///
-/// Vanished/Obsolete units are always excluded regardless of scope — the
-/// harness must never overwrite catalog entries the source no longer
-/// references. `Finished` units are also always excluded; a "re-translate
-/// everything including human-accepted" variant is a meaningful policy
-/// decision that belongs to the M4.8 UI design, not this primitive, and
-/// would require pre-demoting Finished → Proposed to honour
-/// [`UnitState::is_writable`]. Adding a new scope variant later is
-/// backward-compatible.
-#[derive(Debug, Deserialize, Clone, Copy)]
-#[serde(rename_all = "kebab-case")]
-pub enum BatchScope {
-    /// Only units whose state is `Untranslated` — fill in the gaps.
-    Untranslated,
-    /// `Untranslated` plus `Proposed` — re-translate everything not yet
-    /// human-confirmed.
-    UntranslatedAndProposed,
-}
-
-/// Started-bulk-translate response, returned immediately after the worker
-/// thread is spawned. The frontend uses `job_id` for the follow-up
-/// `cancel_translation` call and to subscribe to `batch-progress-<id>` /
-/// `batch-completed-<id>` / `batch-failed-<id>` Tauri events.
-#[derive(Debug, Serialize, Clone)]
-pub struct TranslateBatchStarted {
-    /// Opaque process-unique job id (UUID v4 hex, no hyphens).
-    pub job_id: String,
-    /// Number of units the worker will attempt at start time. The catalog
-    /// state could change while the worker runs (a human edit promoting a
-    /// unit out of scope, say), but the total in the progress events is
-    /// pinned to this number — partial completion is reported as
-    /// `completed / total`.
-    pub total: usize,
-}
-
-/// Pre-unit event payload, emitted as `batch-unit-started-<job_id>` just before
-/// the backend call begins for each unit. Lets the frontend light up a per-cell
-/// spinner without waiting for the full round-trip to complete.
-#[derive(Debug, Serialize, Clone)]
-pub struct BatchUnitStartedPayload {
-    /// Id of the unit about to be translated.
-    pub unit_id: String,
-    /// Target locale for this translation call.
-    pub locale: String,
-}
-
-/// Per-unit progress event payload, emitted as `batch-progress-<job_id>` after
-/// each completed network round-trip.
-#[derive(Debug, Serialize, Clone)]
-pub struct BatchProgressPayload {
-    /// Units processed so far (1-indexed: the first emit has `completed = 1`).
-    pub completed: usize,
-    /// Total units the worker started with.
-    pub total: usize,
-    /// The just-translated unit (post-merge). The UI patches this into its
-    /// in-memory cache without an extra round trip.
-    pub unit: Unit,
-    /// Shortcut for the UI: `true` if the gate or LLM attached one or more
-    /// flags. Equivalent to `!unit.flags.is_empty()`; pre-computed so the UI
-    /// doesn't need to inspect the FlagSet.
-    pub flagged: bool,
-}
-
-/// Terminal event payload, emitted exactly once on `batch-completed-<job_id>`
-/// (clean exit or cancelled) or `batch-failed-<job_id>` (hard failure).
-#[derive(Debug, Serialize, Clone)]
-pub struct BatchTerminalPayload {
-    /// Units processed when the worker stopped. For success: equals `total`.
-    /// For cancellation: count of fully-merged units before the cancel was
-    /// observed. For failure: count before the failing unit.
-    pub completed: usize,
-    /// Total units the worker started with.
-    pub total: usize,
-    /// `true` if the worker stopped because cancellation was observed.
-    /// Mutually exclusive with `failed_reason.is_some()`.
-    pub cancelled: bool,
-    /// Hard-failure reason. `None` on clean completion or cancellation;
-    /// `Some` only when a mid-batch backend error stopped the run.
-    pub failed_reason: Option<String>,
-}
-
 /// Start a bulk translation of every in-scope unit in a project-stored catalog.
 ///
 /// Resolves locale, glossary, and backend kind exactly like
@@ -2324,44 +1929,6 @@ fn set_review_status_in_project(
 }
 
 // ── M4.7 — Project-wide review queue scan ────────────────────────────────────
-
-/// One unit that requires human attention in the project-wide review queue.
-///
-/// A unit qualifies if `review_status == NeedsReview` OR `flags` is non-empty.
-/// Both conditions are surfaced because flags are themselves a "human attention"
-/// signal even before an explicit `NeedsReview` event has been recorded.
-#[derive(Debug, Serialize)]
-pub struct ReviewQueueItem {
-    /// Absolute path to the catalog file on disk.
-    pub catalog_path: String,
-    /// Manifest-relative path for display in the table.
-    pub catalog_manifest_path: String,
-    /// Target locale id (e.g. `"de_DE"`).
-    pub locale: String,
-    /// The unit's id string.
-    pub unit_id: String,
-    /// Source text, truncated to 120 chars at a word boundary where possible.
-    pub source_preview: String,
-    /// Target text, truncated to 120 chars; empty string when untranslated.
-    pub target_preview: String,
-    /// Kebab-case flag names; empty when only `NeedsReview` triggered inclusion.
-    pub flags: Vec<String>,
-    /// Kebab-case `ReviewStatus` variant, or `None` when not set.
-    pub review_status: Option<String>,
-    /// Kebab-case unit state (`"untranslated"`, `"proposed"`, `"finished"`, …).
-    pub state: String,
-}
-
-/// Aggregated result of a project-wide review-queue scan.
-#[derive(Debug, Serialize)]
-pub struct ReviewQueueResponse {
-    /// Total units that need review across all catalogs.
-    pub total_count: usize,
-    /// Per-catalog unit count, keyed by absolute catalog path.
-    pub by_catalog: BTreeMap<String, usize>,
-    /// All items, sorted by catalog path then unit id.
-    pub items: Vec<ReviewQueueItem>,
-}
 
 /// Scan every catalog in the open project for units that need human review.
 ///
@@ -2927,49 +2494,6 @@ fn set_prompts_in_project(
 
 // ── M4.9 — In-app prompt evaluation ──────────────────────────────────────────
 
-/// Synchronous response from `run_evaluation_in_project`. The worker thread
-/// runs in the background; the frontend subscribes to events keyed by `job_id`.
-#[cfg(feature = "ollama")]
-#[derive(Debug, Serialize)]
-pub struct EvaluationStarted {
-    /// Opaque process-unique job id (UUID v4 hex, no hyphens).
-    pub job_id: String,
-    /// Number of curated examples the worker will evaluate.
-    pub total: usize,
-}
-
-/// Per-example progress event, emitted on `eval-progress-<job_id>` after each
-/// completed backend call in the evaluation worker.
-#[cfg(feature = "ollama")]
-#[derive(Debug, Serialize, Clone)]
-pub struct EvaluationProgressPayload {
-    /// Job id for correlation.
-    pub job_id: String,
-    /// Examples evaluated so far (1-indexed).
-    pub completed: usize,
-    /// Total examples the worker started with.
-    pub total: usize,
-    /// Target locale of the just-evaluated example.
-    pub last_example_locale: String,
-}
-
-/// Terminal event payload, emitted exactly once on `eval-completed-<job_id>`
-/// (success or cancellation) or `eval-failed-<job_id>` (hard failure). The
-/// worker does **not** persist partial runs; `run` is `None` unless the
-/// evaluation completed successfully.
-#[cfg(feature = "ollama")]
-#[derive(Debug, Serialize, Clone)]
-pub struct EvaluationTerminalPayload {
-    /// Job id for correlation.
-    pub job_id: String,
-    /// `true` if the worker observed cancellation before completing all examples.
-    pub cancelled: bool,
-    /// Hard-failure reason; `None` on success or cancellation.
-    pub failed_reason: Option<String>,
-    /// The completed evaluation run, present only on successful completion.
-    pub run: Option<i18n_harness_project::EvaluationRun>,
-}
-
 /// Evaluate the current prompt over every curated example.
 ///
 /// Resolves the curated set, refuses if it is empty, builds an `OllamaBackend`,
@@ -3308,24 +2832,6 @@ fn list_evaluation_runs_in_project(
 }
 
 // ── M4.10 — Tuning bundle export ──────────────────────────────────────────────
-
-/// Wire-format response from `export_tuning_bundle_in_project`.
-///
-/// Mirrors [`i18n_harness_project::TuningBundleSummary`] with all path fields
-/// as `String` for TypeScript interop.
-#[derive(Debug, Serialize)]
-pub struct ExportTuningBundleResponse {
-    /// Absolute path to the exported bundle directory.
-    pub path: String,
-    /// Number of resolved examples written to `examples.jsonl`.
-    pub examples_count: usize,
-    /// Locale ids that appear in at least one example.
-    pub locales: Vec<String>,
-    /// `true` if `score.json` was written (prior evaluation existed).
-    pub has_score: bool,
-    /// Prompt template version identifier baked into `prompt.txt`.
-    pub prompt_template_version: String,
-}
 
 /// Export a tuning bundle to `.i18n-harness/tuning/<timestamp>/`.
 ///
