@@ -1,4 +1,4 @@
-//! `CatalogFormat` trait and non-Qt serializers (PO; ICU-JSON in M4.5).
+//! `CatalogFormat` trait and non-Qt serializers (PO; ICU-JSON).
 //!
 //! See `docs/initial_design.md` §6 and `CLAUDE.md` invariant #1 — catalog
 //! formats are plugins behind a stable extension point. This crate hosts the
@@ -11,6 +11,7 @@
 //! - [`Catalog`] — the format-neutral output of `extract`.
 //! - [`CatalogError`] / [`PlaceholderError`] — the unified error types.
 //! - [`PoFormat`] — the gettext PO implementation.
+//! - [`IcuJsonFormat`] — the ICU MessageFormat JSON implementation.
 //! - [`open_catalog_by_format`] — small dispatcher that the Tauri layer (and
 //!   the CLI) call to read a catalog whose format the manifest already named.
 //!
@@ -31,11 +32,13 @@ use std::path::Path;
 mod catalog;
 mod error;
 mod format;
+pub mod icu_json;
 pub mod po;
 
 pub use catalog::Catalog;
 pub use error::{CatalogError, PlaceholderError};
 pub use format::CatalogFormat;
+pub use icu_json::IcuJsonFormat;
 pub use po::{PoFormat, reconcile_plural_arity};
 
 /// Dispatch table: format-id → boxed implementation.
@@ -53,6 +56,7 @@ pub use po::{PoFormat, reconcile_plural_arity};
 pub fn format_by_id(format: &str) -> Result<Box<dyn CatalogFormat>, CatalogError> {
     match format {
         "gettext-po" => Ok(Box::new(PoFormat)),
+        "icu-json" => Ok(Box::new(IcuJsonFormat)),
         "qt-ts" => Err(CatalogError::UnsupportedFormat(
             "qt-ts is handled by the adapter-qt crate, not by i18n-harness-catalog".to_owned(),
         )),
@@ -84,6 +88,13 @@ mod tests {
         let fmt = format_by_id("gettext-po").expect("po");
         assert_eq!(fmt.id(), "gettext-po");
         assert_eq!(fmt.extensions(), &["po", "pot"]);
+    }
+
+    #[test]
+    fn format_by_id_routes_icu_json() {
+        let fmt = format_by_id("icu-json").expect("icu-json");
+        assert_eq!(fmt.id(), "icu-json");
+        assert_eq!(fmt.extensions(), &["json"]);
     }
 
     #[test]

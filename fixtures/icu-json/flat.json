@@ -1,0 +1,6 @@
+{
+  "greeting": "Hello, {name}!",
+  "farewell": "Goodbye",
+  "menu.file.open": "Open…",
+  "unicode_ok": "café 漢字 ✓"
+}

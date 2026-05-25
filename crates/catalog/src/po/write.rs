@@ -27,7 +27,15 @@ use crate::catalog::{Catalog, ExtractState};
 use crate::error::CatalogError;
 
 pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, CatalogError> {
-    let ExtractState::Po(edit) = &catalog.extract_state;
+    let edit = match &catalog.extract_state {
+        ExtractState::Po(s) => s,
+        _ => {
+            return Err(CatalogError::Apply {
+                path: catalog.source_path.clone(),
+                reason: "extract state is not PO (catalog/format mismatch)".to_owned(),
+            });
+        }
+    };
 
     if units.is_empty() {
         return Ok(catalog.source_bytes.clone());

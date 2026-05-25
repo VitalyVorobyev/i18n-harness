@@ -374,13 +374,33 @@ Shipped:
   `scan_project_review_state` all dispatch by format; opening a PO
   catalog through the manifest now works end-to-end.
 
-### M4.5 — ICU-JSON serializer; wire `crates/adapter-react`
+### M4.5 — ICU-JSON serializer; wire `crates/adapter-react` ✓ shipped
 
-New `crates/catalog/src/icu_json.rs` with the same shape as PO:
-reader + writer + round-trip fixtures at `fixtures/icu-json/` + an
-identity-with-validation converter (react-intl ICU is already ICU).
-`crates/adapter-react` becomes a thin glue crate that dispatches by
-file shape.
+`crates/catalog/src/icu_json/` with the same shape as PO: a hand-written
+single-pass JSON tokenizer that captures the byte range of every leaf
+string value (`parse.rs`), a splice-based writer that uses
+`serde_json::to_string` for escape correctness (`write.rs`), and an
+identity-with-validation placeholder converter that verifies ICU brace
+balance to catch hand-edit corruption early (`placeholder.rs`).
+Round-trip fixtures at `fixtures/icu-json/`: `flat.json`, `nested.json`,
+`with_plural.json`, `mixed_quoting.json`, `empty_object.json`.
+`ExtractState` gains an `IcuJson` variant; the `format_by_id` /
+`open_catalog_by_format` dispatcher in the catalog crate routes
+`"icu-json"`.
+
+`crates/adapter-react` becomes a thin extension-based dispatcher
+(`format_for_path` → `IcuJsonFormat` for `.json`) with `extract` and
+`apply` helpers. The Tauri layer's `BackingCatalog::Generic` now carries
+the manifest-declared format alongside the catalog so `apply` dispatches
+back to the same serializer that produced the extract state;
+`extract_for_format` and `scan_project_review_state` route ICU-JSON
+through the catalog crate without the previous "not implemented" stub.
+
+**M4 closes here.** The translator can now open a project that mixes
+Qt, PO, and ICU-JSON catalogs, translate units in any of them, and rely
+on byte-stable round-trip across the full format matrix. Remaining
+roadmap items (M5: cloud / API-key backends) are deferred to a future
+slice and intentionally out of scope for the product turn.
 
 ### M4.6 — Human-attention flagging
 

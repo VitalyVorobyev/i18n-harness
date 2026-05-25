@@ -1,0 +1,7 @@
+{
+  "single_quoted": "It's a 'test' string",
+  "double_quoted": "He said \"hello\" to me",
+  "both": "She said \"don't worry\" and walked away",
+  "backslash": "C:\\Users\\name\\file.txt",
+  "newline_tab": "first line\nsecond\twith tab"
+}
