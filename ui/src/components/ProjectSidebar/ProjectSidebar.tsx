@@ -2,8 +2,10 @@ import { cn } from "../../lib/cn";
 import type {
   CatalogFormat,
   CatalogRef,
+  CatalogResponse,
   ProjectSummary,
 } from "../../lib/types";
+import { LocaleTag, SegmentBar } from "../primitives";
 
 interface Props {
   summary: ProjectSummary;
@@ -18,6 +20,30 @@ interface Props {
   reviewQueueByCatalog?: Record<string, number>;
   /** Called when the user clicks the project-wide review badge. */
   onOpenReviewQueue?: () => void;
+  /**
+   * All catalogs that have been opened this session, keyed by absolute path.
+   * Used to derive per-catalog progress stats (finished / proposed / total).
+   * Only opened catalogs have stats — unloaded catalogs render a skeleton bar.
+   */
+  openCatalogs?: Map<string, CatalogResponse>;
+}
+
+type CatalogProgressStats = {
+  finished: number;
+  proposed: number;
+  total: number;
+};
+
+/** Derive finished/proposed/total counts from a loaded CatalogResponse. */
+function catalogStatsOf(resp: CatalogResponse): CatalogProgressStats {
+  let finished = 0;
+  let proposed = 0;
+  const total = resp.units.length;
+  for (const u of resp.units) {
+    if (u.state === "finished") finished++;
+    else if (u.state === "proposed") proposed++;
+  }
+  return { finished, proposed, total };
 }
 
 export function ProjectSidebar({
@@ -29,6 +55,7 @@ export function ProjectSidebar({
   reviewQueueTotal = 0,
   reviewQueueByCatalog = {},
   onOpenReviewQueue,
+  openCatalogs = new Map(),
 }: Props) {
   const totalCatalogs = summary.catalogs.length;
 
@@ -94,16 +121,22 @@ export function ProjectSidebar({
           </p>
         ) : (
           <ul>
-            {visibleCatalogs.map((ref) => (
-              <CatalogItem
-                key={ref.absolute_path}
-                catalogRef={ref}
-                isActive={activeCatalogPath === ref.absolute_path}
-                isDirty={dirtyCatalogPaths.has(ref.absolute_path)}
-                reviewCount={reviewQueueByCatalog[ref.absolute_path] ?? 0}
-                onClick={() => onCatalogSelect(ref.absolute_path)}
-              />
-            ))}
+            {visibleCatalogs.map((ref) => {
+              const loaded = openCatalogs.get(ref.absolute_path);
+              return (
+                <CatalogItem
+                  key={ref.absolute_path}
+                  catalogRef={ref}
+                  isActive={activeCatalogPath === ref.absolute_path}
+                  isDirty={dirtyCatalogPaths.has(ref.absolute_path)}
+                  reviewCount={reviewQueueByCatalog[ref.absolute_path] ?? 0}
+                  catalogStats={
+                    loaded !== undefined ? catalogStatsOf(loaded) : null
+                  }
+                  onClick={() => onCatalogSelect(ref.absolute_path)}
+                />
+              );
+            })}
           </ul>
         )}
       </nav>
@@ -118,12 +151,18 @@ function CatalogItem({
   isActive,
   isDirty,
   reviewCount,
+  catalogStats: stats,
   onClick,
 }: {
   catalogRef: CatalogRef;
   isActive: boolean;
   isDirty: boolean;
   reviewCount: number;
+  /**
+   * null when the catalog has not been opened yet (skeleton bar rendered).
+   * Populated as soon as the catalog is extracted and cached.
+   */
+  catalogStats: CatalogProgressStats | null;
   onClick: () => void;
 }) {
   // Display the manifest-relative path; fall back to the absolute path's
@@ -141,7 +180,7 @@ function CatalogItem({
         onClick={onClick}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "group w-full flex items-start gap-2 px-3 py-2 text-left",
+          "group w-full flex flex-col gap-1.5 px-3 py-2 text-left",
           "transition-colors duration-75 ease-out",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent",
           isActive
@@ -150,59 +189,86 @@ function CatalogItem({
         )}
         title={catalogRef.absolute_path}
       >
-        {/* Locale chip */}
-        <span
-          className={cn(
-            "inline-flex items-center h-5 px-1.5 rounded-pill border shrink-0 mt-0.5",
-            "font-mono text-[10px] font-medium tracking-loose",
-            isActive
-              ? "border-accent-subtle-border bg-accent-subtle text-accent-hover"
-              : "border-border-subtle bg-bg-surface text-fg-tertiary group-hover:border-border-default",
-          )}
-          title={`Locale: ${catalogRef.locale}`}
-        >
-          {catalogRef.locale}
-        </span>
+        {/* Row 1: locale tag + filename + dirty mark + review badge */}
+        <div className="flex items-center gap-2 w-full min-w-0">
+          {/* Locale chip — upgraded to LocaleTag primitive */}
+          <LocaleTag
+            locale={catalogRef.locale}
+            tone={isActive ? "accent" : "muted"}
+          />
 
-        <div className="min-w-0 flex-1">
-          {/* Directory prefix */}
-          {dir && (
-            <p className="text-[10px] font-mono text-fg-disabled truncate leading-none mb-0.5">
-              {dir}
-            </p>
-          )}
-          {/* Filename + dirty indicator + review count */}
-          <div className="flex items-center gap-1">
-            <p className="font-mono text-xs truncate flex-1 min-w-0">
-              {filename}
-            </p>
-            {isDirty && (
-              <span
-                className="text-state-proposed text-xs leading-none shrink-0"
-                title="Unsaved changes"
-              >
-                •<span className="sr-only"> (unsaved)</span>
-              </span>
+          <div className="min-w-0 flex-1">
+            {/* Directory prefix */}
+            {dir && (
+              <p className="text-[10px] font-mono text-fg-disabled truncate leading-none mb-0.5">
+                {dir}
+              </p>
             )}
-            {reviewCount > 0 && (
-              <span
-                className={cn(
-                  "shrink-0 inline-flex items-center h-4 px-1 rounded-sm border",
-                  "text-[10px] font-semibold tabular-nums leading-none",
-                  "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
-                )}
-                title={`${reviewCount} ${reviewCount === 1 ? "unit needs" : "units need"} review`}
-              >
-                <span className="sr-only">{reviewCount} units need review</span>
-                <span aria-hidden="true">{reviewCount}</span>
-              </span>
-            )}
+
+            {/* Filename + dirty mark + review badge */}
+            <div className="flex items-center gap-1">
+              <p className="font-mono text-xs truncate flex-1 min-w-0">
+                {filename}
+              </p>
+
+              {/* Dirty mark — small mono bullet; title provides the accessible label */}
+              {isDirty && (
+                <span
+                  role="img"
+                  aria-label="Unsaved changes"
+                  className="text-[10px] leading-none shrink-0 select-none"
+                  style={{ color: "var(--color-fg-tertiary)" }}
+                  title="Unsaved changes"
+                >
+                  •
+                </span>
+              )}
+
+              {/* Needs-review badge */}
+              {reviewCount > 0 && (
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center h-4 px-1 rounded-sm border",
+                    "text-[10px] font-semibold tabular-nums leading-none",
+                    "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
+                  )}
+                  title={`${reviewCount} ${reviewCount === 1 ? "unit needs" : "units need"} review`}
+                >
+                  <span className="sr-only">
+                    {reviewCount} units need review
+                  </span>
+                  <span aria-hidden="true">{reviewCount}</span>
+                </span>
+              )}
+            </div>
+
+            {/* Format label */}
+            <span className="text-[10px] text-fg-disabled mt-0.5 block">
+              {formatLabel(catalogRef.format)}
+            </span>
           </div>
-          {/* Format chip */}
-          <span className="text-[10px] text-fg-disabled mt-0.5 block">
-            {formatLabel(catalogRef.format)}
-          </span>
         </div>
+
+        {/* Row 2: stacked progress bar — only when catalog is loaded */}
+        {stats !== null ? (
+          <SegmentBar
+            finished={stats.finished}
+            proposed={stats.proposed}
+            total={stats.total}
+            height={4}
+          />
+        ) : (
+          /* Skeleton bar for unloaded catalogs */
+          <div
+            style={{
+              height: 4,
+              borderRadius: 999,
+              background: "var(--color-bg-input)",
+              width: "100%",
+            }}
+            aria-hidden="true"
+          />
+        )}
       </button>
     </li>
   );

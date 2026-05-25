@@ -1,11 +1,12 @@
 // BatchProgressWidget — shows live batch translation progress in the footer.
 //
 // Rendered when `activeBatch !== null`. Replaces the normal save-all pill
-// while a batch is in flight. Provides a linear progress bar, unit count,
-// recent-activity micro-feed, and a Cancel button.
+// while a batch is in flight. Provides a linear progress bar, ETA, unit
+// count, recent-activity micro-feed, and a Cancel button.
 
 import { cn } from "../../lib/cn";
 import type { UnitId } from "../../lib/types";
+import { ProgressBar } from "../primitives/ProgressBar";
 
 export interface ActiveBatch {
   jobId: string;
@@ -16,6 +17,11 @@ export interface ActiveBatch {
   total: number;
   /** Last up-to-3 translated unit ids for the live activity feed. */
   recent: UnitId[];
+  /**
+   * `Date.now()` captured when the batch listeners were registered and the
+   * UI state was armed. Used to compute a live ETA.
+   */
+  startedAt: number;
 }
 
 interface Props {
@@ -23,9 +29,29 @@ interface Props {
   onCancel: () => void;
 }
 
+/** Format remaining milliseconds as a human-readable string.
+ *
+ * Rounds to the nearest second. Returns "<1s" for sub-second remainders so
+ * the label never shows "0s remaining" just before the bar fills.
+ */
+function formatEta(ms: number): string {
+  const secs = Math.round(ms / 1000);
+  if (secs < 1) return "<1s";
+  return `${secs}s`;
+}
+
 export function BatchProgressWidget({ batch, onCancel }: Props) {
-  const { completed, total, catalogName, recent } = batch;
-  const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+  const { completed, total, catalogName, recent, startedAt } = batch;
+
+  // Estimate time remaining. Only meaningful after at least one unit has
+  // completed — with zero completions there is no rate signal yet.
+  let etaLabel: string | null = null;
+  if (completed > 0 && completed < total) {
+    const elapsed = Date.now() - startedAt;
+    const msPerUnit = elapsed / completed;
+    const remaining = msPerUnit * (total - completed);
+    etaLabel = `~${formatEta(remaining)} remaining`;
+  }
 
   return (
     <div
@@ -45,30 +71,28 @@ export function BatchProgressWidget({ batch, onCancel }: Props) {
               {completed}/{total}
             </span>
           </span>
-          <span
-            className="text-xs tabular-nums text-fg-tertiary shrink-0"
-            aria-hidden="true"
-          >
-            {Math.round(pct)}%
-          </span>
+          {/* ETA — hidden when there is no signal yet.
+              Plain text; screen readers read it as part of the row. */}
+          {etaLabel !== null && (
+            <span
+              className="text-xs tabular-nums text-fg-tertiary shrink-0"
+              aria-live="off"
+            >
+              {etaLabel}
+            </span>
+          )}
         </div>
 
-        {/* Linear progress track */}
-        <div
-          role="progressbar"
-          aria-valuenow={completed}
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-label={`${completed} of ${total} units translated`}
-          className="h-[3px] rounded-pill bg-border-default overflow-hidden"
-        >
-          <div
-            className="h-full rounded-pill bg-accent transition-[width] duration-300 ease-out"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        {/* ProgressBar primitive — carries all ARIA progressbar semantics */}
+        <ProgressBar
+          value={completed}
+          max={total}
+          label={`${completed} of ${total} units translated`}
+          showPercent
+        />
 
-        {/* Recent activity micro-feed */}
+        {/* Recent activity micro-feed — kept below the bar so it never
+            pushes the bar off-screen on narrow widgets. */}
         {recent.length > 0 && (
           <p className="text-xs text-fg-disabled truncate mt-0.5">
             <span>Last: </span>

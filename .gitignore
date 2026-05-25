@@ -8,6 +8,11 @@ target/
 node_modules/
 dist/
 
+# Test output
+ui/playwright-report/
+ui/test-results/
+ui/coverage/
+
 # OS / editor noise
 .DS_Store
 *.swp

@@ -1,0 +1,186 @@
+// translate-matrix.spec.ts — Matrix mode translation tests.
+//
+// These tests verify the Matrix view's data rendering and per-cell behaviour.
+// Some assertions WILL fail if the current product implementation has bugs
+// (e.g. skeleton bars showing instead of real cards). That's intentional —
+// failures here are the punch list for the fix PR.
+
+import { expect, openSampleProject, test } from "./fixture";
+import fixtureData from "./fixtures/sample-project.json" with { type: "json" };
+
+// The sample project has 9 unique source unit IDs.
+const EXPECTED_UNIT_COUNT = 9;
+const PROJECT_LOCALES = ["de_DE", "es_ES", "zh_Hans"];
+
+async function navigateToTranslate(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await openSampleProject(page);
+  await page
+    .getByRole("tablist", { name: /project view/i })
+    .getByRole("tab", { name: /^translate$/i })
+    .click();
+  // Wait for the translate panel to be in the DOM.
+  await page.waitForTimeout(300);
+}
+
+test.describe("Translate — Matrix mode", () => {
+  test("Matrix mode is the default (focusLocale is null)", async ({ page }) => {
+    await navigateToTranslate(page);
+
+    // In Matrix mode the Focus-mode-only clear-focus dismiss button is
+    // absent. If FocusView was accidentally mounted it would render that
+    // button next to the locale chip.
+    await expect(
+      page.getByRole("button", { name: /clear focus locale/i }),
+    ).not.toBeVisible();
+  });
+
+  test("after catalogs load, card list shows exactly 9 cards", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+
+    // Trigger catalog loading — the matrix loads all catalogs eagerly.
+    // Wait a generous timeout for the IPC calls to resolve.
+    await page.waitForTimeout(1000);
+
+    // Each source unit maps to one card article in the matrix list. Other
+    // tabs (QualityPanel) also render <article> elements in the DOM even
+    // when hidden, so filter to visible articles only.
+    const cards = page.locator("article:visible");
+    await expect(cards).toHaveCount(EXPECTED_UNIT_COUNT, { timeout: 5000 });
+  });
+
+  test("each card has cells for all three project locales", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    // Each locale should appear as a column header or cell label.
+    for (const locale of PROJECT_LOCALES) {
+      await expect(page.getByText(locale).first()).toBeVisible();
+    }
+  });
+
+  test("an untranslated cell shows a Translate button", async ({ page }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    // The "Hello" unit is untranslated in all locales.
+    // A "Translate to de_DE" or "Translate" button should be present.
+    const translateBtn = page
+      .getByRole("button", { name: /translate/i })
+      .first();
+    await expect(translateBtn).toBeVisible();
+  });
+
+  test("a finished cell (Save → Speichern) shows read-only text, not Translate", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    // "Speichern" is the de_DE translation for "Save" in the fixture. Scope
+    // to the MainWindow/Save matrix card to avoid the sidebar/breadcrumb
+    // copies that also contain the project name and term previews.
+    const saveCard = page.getByLabel("Unit MainWindow/Save", { exact: true });
+    await expect(saveCard.getByText("Speichern")).toBeVisible();
+
+    // The finished cell should NOT have a Translate button adjacent to it.
+    const speicherenInsideButton = saveCard.locator(
+      'button:has-text("Speichern")',
+    );
+    await expect(speicherenInsideButton).toHaveCount(0);
+  });
+
+  test("finished cell has an Edit control", async ({ page }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    // Finished cells should expose an Edit (pencil) button so the user can
+    // revise the translation. If this count is 0 the feature is missing.
+    // We look for a button near the "Speichern" text — either with aria-label
+    // "Edit" or title "Edit" or text "Edit".
+    const editBtn = page.getByRole("button", { name: /edit/i }).first();
+    await expect(editBtn).toBeVisible();
+  });
+
+  test("locale rows match the project locales in the Matrix left rail", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+
+    // Topbar locale chips were removed: per-locale navigation lives in the
+    // Matrix/Focus left rail (BY LOCALE section). Check the left rail buttons.
+    for (const locale of PROJECT_LOCALES) {
+      await expect(
+        page.getByRole("button", { name: `Focus on ${locale}` }).first(),
+      ).toBeVisible();
+    }
+  });
+
+  test("fixture source units match expected IDs", async () => {
+    // Pure data check — verifies the fixture is correct before any UI assertion.
+    const deUnits =
+      fixtureData.catalogs[
+        "/sample-project/translations/app_de.ts" as keyof typeof fixtureData.catalogs
+      ]?.units ?? [];
+    expect(deUnits).toHaveLength(EXPECTED_UNIT_COUNT);
+
+    const ids = deUnits.map((u) => u.id);
+    expect(ids).toContain("MainWindow/Save");
+    expect(ids).toContain("SettingsDialog/Dark");
+  });
+
+  test("per-cell sparkle button shows spinner while mock translate runs", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+
+    // Wait for catalogs to load: the sparkle button only appears once the
+    // catalog data has been fetched (untranslated cells show the button).
+    const sparkleBtn = page
+      .getByRole("button", { name: /translate with model/i })
+      .first();
+    await expect(sparkleBtn).toBeVisible({ timeout: 5000 });
+
+    // Click and immediately assert the spinner appears. Tight 100 ms
+    // timeout — the flushSync wrap on the click handler must commit the
+    // busy state synchronously, so the spinner is in the DOM by the next
+    // paint. A regression where React batches busy=true with the IPC's
+    // downstream state updates would push the spinner to the *end* of
+    // the round-trip (~400 ms on the mock); this assertion fails fast
+    // in that case.
+    await sparkleBtn.click();
+    const spinner = page.getByTestId("translate-spinner").first();
+    await expect(spinner).toBeVisible({ timeout: 100 });
+
+    // Wait for the mock delay to complete (400 ms) plus a small margin.
+    await page.waitForTimeout(600);
+
+    // After the mock delay the spinner is gone and the cell shows [MT] prefix.
+    await expect(spinner).not.toBeVisible({ timeout: 1000 });
+    await expect(page.getByText(/^\[MT\]/).first()).toBeVisible({
+      timeout: 2000,
+    });
+  });
+
+  test("header 'Translate untranslated' button opens scope modal with Start", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    const batchBtn = page.getByRole("button", {
+      name: /translate untranslated/i,
+    });
+    await expect(batchBtn).toBeVisible();
+
+    // Clicking opens the RunOnScopeModal — the modal has a Start button.
+    await batchBtn.click();
+    await expect(page.getByRole("button", { name: /^start$/i })).toBeVisible({
+      timeout: 2000,
+    });
+  });
+});

@@ -1,0 +1,572 @@
+{
+  "projectRoot": "/sample-project",
+  "summary": {
+    "root": "/sample-project",
+    "name": "sample-project",
+    "schema": 1,
+    "locales": ["de_DE", "es_ES", "zh_Hans"],
+    "catalogs": [
+      {
+        "absolute_path": "/sample-project/translations/app_de.ts",
+        "manifest_path": "translations/app_de.ts",
+        "format": "qt-ts",
+        "locale": "de_DE",
+        "status": "ok"
+      },
+      {
+        "absolute_path": "/sample-project/translations/app_es.ts",
+        "manifest_path": "translations/app_es.ts",
+        "format": "qt-ts",
+        "locale": "es_ES",
+        "status": "ok"
+      },
+      {
+        "absolute_path": "/sample-project/translations/app_zh.ts",
+        "manifest_path": "translations/app_zh.ts",
+        "format": "qt-ts",
+        "locale": "zh_Hans",
+        "status": "ok"
+      }
+    ],
+    "glossary_path": "/sample-project/glossary.toml",
+    "backend": { "kind": "manual" },
+    "state_dir": "/sample-project/.i18n-harness"
+  },
+  "catalogs": {
+    "/sample-project/translations/app_de.ts": {
+      "path": "/sample-project/translations/app_de.ts",
+      "unit_count": 9,
+      "language": "de_DE",
+      "units": [
+        {
+          "id": "MainWindow/Hello",
+          "source": "Hello",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 42,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Open %1 from %2",
+          "source": "Open %1 from %2",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 58,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/%n unread message(s)",
+          "source": "%n unread message(s)",
+          "target": { "kind": "plural", "forms": [null, null] },
+          "placeholders": [],
+          "plural_arity": 2,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 75,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/&File",
+          "source": "&File",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 92,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Save",
+          "source": "Save",
+          "target": { "kind": "singular", "text": "Speichern" },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 108,
+            "byte_offset": null
+          },
+          "state": "finished",
+          "review_status": "reviewed",
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Cancel",
+          "source": "Cancel",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 115,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Theme",
+          "source": "Theme",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 20,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Light",
+          "source": "Light",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 28,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Dark",
+          "source": "Dark",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 29,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        }
+      ]
+    },
+    "/sample-project/translations/app_es.ts": {
+      "path": "/sample-project/translations/app_es.ts",
+      "unit_count": 9,
+      "language": "es_ES",
+      "units": [
+        {
+          "id": "MainWindow/Hello",
+          "source": "Hello",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 42,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Open %1 from %2",
+          "source": "Open %1 from %2",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 58,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/%n unread message(s)",
+          "source": "%n unread message(s)",
+          "target": { "kind": "plural", "forms": [null, null] },
+          "placeholders": [],
+          "plural_arity": 2,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 75,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/&File",
+          "source": "&File",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 92,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Save",
+          "source": "Save",
+          "target": { "kind": "singular", "text": "Guardar" },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 108,
+            "byte_offset": null
+          },
+          "state": "finished",
+          "review_status": "reviewed",
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Cancel",
+          "source": "Cancel",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 115,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Theme",
+          "source": "Theme",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 20,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Light",
+          "source": "Light",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 28,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Dark",
+          "source": "Dark",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 29,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        }
+      ]
+    },
+    "/sample-project/translations/app_zh.ts": {
+      "path": "/sample-project/translations/app_zh.ts",
+      "unit_count": 9,
+      "language": "zh_Hans",
+      "units": [
+        {
+          "id": "MainWindow/Hello",
+          "source": "Hello",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 42,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Open %1 from %2",
+          "source": "Open %1 from %2",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 58,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/%n unread message(s)",
+          "source": "%n unread message(s)",
+          "target": { "kind": "plural", "forms": [null] },
+          "placeholders": [],
+          "plural_arity": 1,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 75,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/&File",
+          "source": "&File",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 92,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Save",
+          "source": "Save",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 108,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "MainWindow/Cancel",
+          "source": "Cancel",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/mainwindow.cpp",
+            "line": 115,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Theme",
+          "source": "Theme",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 20,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Light",
+          "source": "Light",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 28,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        },
+        {
+          "id": "SettingsDialog/Dark",
+          "source": "Dark",
+          "target": { "kind": "singular", "text": null },
+          "placeholders": [],
+          "plural_arity": null,
+          "flags": [],
+          "provenance": {
+            "file": "src/settings.cpp",
+            "line": 29,
+            "byte_offset": null
+          },
+          "state": "untranslated",
+          "review_status": null,
+          "source_hash": null,
+          "confidence": null,
+          "flag_notes": null
+        }
+      ]
+    }
+  },
+  "glossary": {
+    "path": "/sample-project/glossary.toml",
+    "payload": {
+      "schema_version": 1,
+      "terms": [
+        {
+          "source": "Save",
+          "do_not_translate": false,
+          "notes": "Standard UI verb for persisting state. Keep simple — not 'preserve'.",
+          "translations": { "de_DE": "Speichern", "es_ES": "Guardar" }
+        },
+        {
+          "source": "Cancel",
+          "do_not_translate": false,
+          "notes": "Standard UI verb for aborting an action.",
+          "translations": { "de_DE": "Abbrechen", "es_ES": "Cancelar" }
+        },
+        {
+          "source": "Theme",
+          "do_not_translate": false,
+          "notes": "UI appearance setting. Not 'subject' or 'topic'.",
+          "translations": { "de_DE": "Erscheinungsbild", "es_ES": "Tema" }
+        }
+      ],
+      "locale_overrides": []
+    },
+    "warnings": []
+  }
+}

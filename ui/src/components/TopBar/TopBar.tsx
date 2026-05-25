@@ -2,6 +2,35 @@ import { cn } from "../../lib/cn";
 import type { Theme } from "../../lib/theme";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
+// Inline spinner used for the Save button's in-flight state.
+function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      className="animate-spin"
+    >
+      <circle
+        cx="7"
+        cy="7"
+        r="5.5"
+        stroke="currentColor"
+        strokeOpacity="0.25"
+        strokeWidth="2"
+      />
+      <path
+        d="M7 1.5A5.5 5.5 0 0 1 12.5 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // Views available in project mode.
 // "translate" is the default; "glossary" reuses the existing GlossaryPanel.
 // "settings" and "quality" are placeholders for M4.3c/d.
@@ -184,6 +213,7 @@ export function TopBar({
 // ── Project-mode TopBar (M4.3a) ───────────────────────────────────────────────
 
 export type ProjectView =
+  | "overview"
   | "translate"
   | "glossary"
   | "settings"
@@ -202,43 +232,34 @@ interface ProjectTopBarProps {
   onCloseProject: () => void;
   /** Total units needing review across the project; drives the badge on the Review tab. */
   reviewQueueCount?: number;
+  /** Number of catalogs with unsaved edits (0..N). */
+  unsavedCount?: number;
+  /** True while saveAllDirty is in-flight. */
+  saving?: boolean;
+  /** Called when the Save button is clicked. */
+  onSave?: () => void;
 }
 
 export function ProjectTopBar({
   projectName,
-  locales,
-  activeLocaleFilter,
-  onLocaleFilterChange,
   view,
   onViewChange,
   theme,
   onToggleTheme,
   onCloseProject,
   reviewQueueCount = 0,
+  unsavedCount = 0,
+  saving = false,
+  onSave,
 }: ProjectTopBarProps) {
-  const hasFilter = activeLocaleFilter.size > 0;
-
-  function toggleLocale(locale: string) {
-    const next = new Set(activeLocaleFilter);
-    if (next.has(locale)) {
-      next.delete(locale);
-    } else {
-      next.add(locale);
-    }
-    onLocaleFilterChange(next);
-  }
-
   return (
     <header
       className={cn(
-        "app-chrome shrink-0 px-4 flex items-center gap-3",
+        "app-chrome shrink-0 h-11 px-4 flex items-center gap-3",
         "bg-bg-surface border-b border-border-subtle",
-        // Height expands to two lines when there are locale chips; use min-h
-        // so the single-row case stays at h-11.
-        locales.length > 0 ? "min-h-[44px] py-1.5" : "h-11",
       )}
     >
-      {/* Left: project name + locale chips */}
+      {/* Left: project name */}
       <div className="flex items-center gap-2 min-w-0 shrink-0">
         <span
           aria-hidden="true"
@@ -255,57 +276,11 @@ export function ProjectTopBar({
         </span>
       </div>
 
-      {/* Locale chips — multi-select filter */}
-      {locales.length > 0 && (
-        <fieldset className="flex items-center gap-1 flex-wrap flex-1 min-w-0 border-0 p-0 m-0">
-          <legend className="sr-only">Filter by locale</legend>
-          {locales.map((locale) => {
-            const active = activeLocaleFilter.has(locale);
-            return (
-              <button
-                key={locale}
-                type="button"
-                aria-pressed={active}
-                onClick={() => toggleLocale(locale)}
-                className={cn(
-                  "inline-flex items-center h-5 px-1.5 rounded-pill border",
-                  "font-mono text-[10px] font-medium tracking-loose",
-                  "transition-colors duration-100 ease-out",
-                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-                  active
-                    ? // Filled / prominent state when filter is active
-                      "border-accent bg-accent text-accent-fg"
-                    : // Outlined / subtle state (matches sidebar locale chips)
-                      "border-border-subtle bg-bg-surface text-fg-tertiary hover:border-border-default hover:text-fg-secondary",
-                )}
-                title={
-                  active ? `Remove ${locale} filter` : `Filter to ${locale}`
-                }
-              >
-                {locale}
-              </button>
-            );
-          })}
-          {hasFilter && (
-            <button
-              type="button"
-              onClick={() => onLocaleFilterChange(new Set())}
-              className={cn(
-                "inline-flex items-center h-5 px-1.5 rounded-pill border",
-                "text-[10px] font-medium",
-                "border-border-subtle bg-transparent text-fg-tertiary",
-                "hover:border-border-default hover:text-fg-secondary",
-                "transition-colors duration-100 ease-out",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-              )}
-              title="Clear locale filter"
-              aria-label="Clear locale filter"
-            >
-              Clear filter
-            </button>
-          )}
-        </fieldset>
-      )}
+      {/*
+       * Topbar locale chips removed: the redesigned per-panel rails
+       * (Matrix/Focus BY LOCALE list, ProofreadView side-nav) provide
+       * per-locale navigation at a more appropriate scope.
+       */}
 
       {/* Center: view tabs */}
       <div
@@ -313,6 +288,12 @@ export function ProjectTopBar({
         aria-label="Project view"
         className="flex items-center gap-1 shrink-0"
       >
+        <TabButton
+          active={view === "overview"}
+          onClick={() => onViewChange("overview")}
+        >
+          Overview
+        </TabButton>
         <TabButton
           active={view === "translate"}
           onClick={() => onViewChange("translate")}
@@ -344,8 +325,8 @@ export function ProjectTopBar({
           onClick={() => onViewChange("review")}
           aria-label={
             reviewQueueCount > 0
-              ? `Review queue — ${reviewQueueCount} units need review`
-              : "Review queue"
+              ? `Review — ${reviewQueueCount} units need review`
+              : "Review"
           }
           badge={reviewQueueCount > 0 ? reviewQueueCount : undefined}
         >
@@ -353,8 +334,31 @@ export function ProjectTopBar({
         </TabButtonWithBadge>
       </div>
 
-      {/* Right: theme toggle + close project */}
+      {/* Right: save button + theme toggle + close project */}
       <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
+        <ActionButton
+          onClick={onSave}
+          disabled={unsavedCount === 0 && !saving}
+          tone={unsavedCount > 0 ? "primary" : "default"}
+          title={
+            unsavedCount > 0
+              ? `Save ${unsavedCount} catalog(s) — ⌘S`
+              : "No unsaved changes"
+          }
+          aria-label={
+            unsavedCount > 0
+              ? `Save ${unsavedCount} unsaved catalog(s)`
+              : "Save — no unsaved changes"
+          }
+        >
+          {saving && <Spinner size={12} />}
+          Save
+          {unsavedCount > 0 && (
+            <span className="rounded-pill bg-bg-base/40 px-1 text-[10px] font-semibold tabular-nums">
+              {unsavedCount}
+            </span>
+          )}
+        </ActionButton>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <ActionButton onClick={onCloseProject} title="Close project">
           Close project
@@ -372,12 +376,14 @@ function ActionButton({
   disabled,
   title,
   tone = "default",
+  "aria-label": ariaLabel,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   title?: string;
   tone?: "default" | "primary";
+  "aria-label"?: string;
 }) {
   const primary = tone === "primary";
   return (
@@ -386,6 +392,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-2 h-7 px-3 rounded-md border",
         "text-sm font-medium transition-colors duration-100 ease-out",

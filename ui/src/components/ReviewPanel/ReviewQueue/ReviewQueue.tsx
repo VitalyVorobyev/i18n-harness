@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../../../lib/cn";
 import type {
   ReviewQueueItem,
   ReviewQueueResponse,
   UnitId,
-} from "../../lib/types";
+} from "../../../lib/types";
 
 interface Props {
   reviewQueue: ReviewQueueResponse;

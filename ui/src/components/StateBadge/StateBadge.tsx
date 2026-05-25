@@ -27,12 +27,12 @@ const PILL: Record<UnitState, string> = {
     "bg-state-vanished-bg text-state-vanished border-state-vanished-border",
 };
 
-const DOT: Record<UnitState, string> = {
-  untranslated: "bg-state-untranslated",
-  proposed: "bg-state-proposed",
-  finished: "bg-state-finished",
-  vanished: "bg-state-vanished",
-  obsolete: "bg-state-vanished",
+const DOT_COLOR: Record<UnitState, string> = {
+  untranslated: "var(--color-state-untranslated)",
+  proposed: "var(--color-state-proposed)",
+  finished: "var(--color-state-finished)",
+  vanished: "var(--color-state-vanished)",
+  obsolete: "var(--color-state-vanished)",
 };
 
 export function StateBadge({ state, variant = "pill" }: Props) {
@@ -42,22 +42,48 @@ export function StateBadge({ state, variant = "pill" }: Props) {
         role="img"
         aria-label={LABELS[state]}
         title={LABELS[state]}
-        className={cn(
-          "inline-block w-1.5 h-1.5 rounded-pill shrink-0",
-          DOT[state],
-        )}
+        style={{
+          display: "inline-block",
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: DOT_COLOR[state],
+          flexShrink: 0,
+          verticalAlign: "middle",
+        }}
       />
     );
   }
   return (
     <span
       className={cn(
-        "inline-flex items-center h-[18px] px-2 rounded-pill border",
-        "text-xs font-medium uppercase tracking-loose whitespace-nowrap",
+        "inline-flex items-center gap-1 rounded-pill border whitespace-nowrap",
         PILL[state],
       )}
+      style={{ lineHeight: 1, padding: "2px 6px" }}
     >
-      {LABELS[state]}
+      {/* state-coloured dot */}
+      <span
+        aria-hidden="true"
+        style={{
+          display: "inline-block",
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: DOT_COLOR[state],
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: "var(--text-xs)",
+          fontWeight: 500,
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+        }}
+      >
+        {LABELS[state]}
+      </span>
     </span>
   );
 }

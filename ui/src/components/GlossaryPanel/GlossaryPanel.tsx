@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { cn } from "../../lib/cn";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listLocales,
   loadGlossary,
   pickGlossaryFile,
   pickGlossarySaveLocation,
   saveGlossary,
+  translateGlossaryTerm,
 } from "../../lib/tauri";
 import type {
   GlossaryPayload,
@@ -13,24 +13,47 @@ import type {
   LocaleOverrideEntry,
   TermEntry,
 } from "../../lib/types";
+import { Eyebrow } from "../primitives/Eyebrow";
+import { LocaleTag } from "../primitives/LocaleTag";
+import { SegmentBar } from "../primitives/SegmentBar";
+import { SparklesIcon } from "../primitives/SparklesIcon";
+import { Spinner } from "../primitives/Spinner";
 
 const REGISTERS = ["formal", "informal", "neutral"] as const;
 type Register = (typeof REGISTERS)[number];
+
+type ViewFilter = "all" | "dnt" | "missing" | "overrides";
 
 interface Props {
   flashError: (msg: string) => void;
   flashInfo: (msg: string) => void;
   /** When set, the panel will auto-load this glossary path on mount (one-shot). */
   initialPath?: string;
+  /** Navigate to Translate panel, select a unit. */
+  onOpenInTranslate?: (unitId: string) => void;
+  /**
+   * Absolute path of the project root (directory containing i18n-harness.toml).
+   * When provided, per-locale AI-assist sparkle buttons are shown in the term
+   * detail editor, allowing the user to request a backend-generated translation
+   * draft for a single (term, locale) pair.
+   */
+  projectPath?: string;
 }
 
-export function GlossaryPanel({ flashError, flashInfo, initialPath }: Props) {
+// ── Top-level loader — always renders hooks unconditionally ───────────────────
+
+export function GlossaryPanel({
+  flashError,
+  flashInfo,
+  initialPath,
+  onOpenInTranslate,
+  projectPath,
+}: Props) {
   const [locales, setLocales] = useState<LocaleInfo[]>([]);
   const [path, setPath] = useState<string | null>(null);
   const [payload, setPayload] = useState<GlossaryPayload | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
 
   useEffect(() => {
     listLocales()
@@ -38,12 +61,7 @@ export function GlossaryPanel({ flashError, flashInfo, initialPath }: Props) {
       .catch((e) => flashError(`Could not list locales: ${formatError(e)}`));
   }, [flashError]);
 
-  // Auto-load: when the project declares a glossary, load it immediately
-  // so the translator does not have to click "Open glossary.toml…".
-  // The panel is remounted each time a new project is opened, so this effect
-  // fires once per project mount. The cleanup flag prevents a slow in-flight
-  // promise from overwriting a glossary the user opened manually while the
-  // auto-load was still pending.
+  // Auto-load: when the project declares a glossary, load it immediately.
   useEffect(() => {
     if (!initialPath) return;
     let cancelled = false;
@@ -81,234 +99,1748 @@ export function GlossaryPanel({ flashError, flashInfo, initialPath }: Props) {
     setWarnings([]);
   }, []);
 
-  const open = useCallback(async () => {
-    if (dirty) {
-      const ok = window.confirm(
-        "Discard unsaved glossary edits and open another file?",
-      );
-      if (!ok) return;
-    }
-    try {
-      const picked = await pickGlossaryFile();
-      if (!picked) return;
-      const res = await loadGlossary(picked);
-      setPayload(res.payload);
-      setOriginal(JSON.stringify(res.payload));
-      setPath(res.path);
-      setWarnings(res.warnings);
-      flashInfo(
-        `Loaded ${res.payload.terms.length} term(s) from ${shortPath(res.path)}`,
-      );
-    } catch (e) {
-      flashError(`Open glossary failed: ${formatError(e)}`);
-    }
-  }, [dirty, flashInfo, flashError]);
-
-  const save = useCallback(async () => {
-    if (!payload) return;
-    try {
-      const target = path ?? (await pickGlossarySaveLocation());
-      if (!target) return;
-      const res = await saveGlossary(target, payload);
-      setPath(res.path);
-      setOriginal(JSON.stringify(payload));
-      setWarnings(res.warnings);
-      flashInfo(
-        res.warnings.length === 0
-          ? `Saved to ${shortPath(res.path)}`
-          : `Saved with ${res.warnings.length} warning(s).`,
-      );
-    } catch (e) {
-      flashError(`Save glossary failed: ${formatError(e)}`);
-    }
-  }, [payload, path, flashInfo, flashError]);
-
-  const discard = useCallback(() => {
-    if (!original) return;
-    if (!dirty) return;
-    const ok = window.confirm("Discard glossary edits?");
-    if (!ok) return;
-    setPayload(JSON.parse(original) as GlossaryPayload);
-    flashInfo("Reverted glossary edits.");
-  }, [original, dirty, flashInfo]);
-
-  const updatePayload = useCallback(
-    (updater: (p: GlossaryPayload) => GlossaryPayload) => {
-      setPayload((prev) => (prev ? updater(prev) : prev));
+  const open = useCallback(
+    async (_currentPayload: GlossaryPayload | null, isDirty: boolean) => {
+      if (isDirty) {
+        const ok = window.confirm(
+          "Discard unsaved glossary edits and open another file?",
+        );
+        if (!ok) return;
+      }
+      try {
+        const picked = await pickGlossaryFile();
+        if (!picked) return;
+        const res = await loadGlossary(picked);
+        setPayload(res.payload);
+        setOriginal(JSON.stringify(res.payload));
+        setPath(res.path);
+        setWarnings(res.warnings);
+        flashInfo(
+          `Loaded ${res.payload.terms.length} term(s) from ${shortPath(res.path)}`,
+        );
+      } catch (e) {
+        flashError(`Open glossary failed: ${formatError(e)}`);
+      }
     },
-    [],
+    [flashInfo, flashError],
+  );
+
+  const save = useCallback(
+    async (currentPayload: GlossaryPayload, currentPath: string | null) => {
+      try {
+        const target = currentPath ?? (await pickGlossarySaveLocation());
+        if (!target) return;
+        const res = await saveGlossary(target, currentPayload);
+        setPath(res.path);
+        setOriginal(JSON.stringify(currentPayload));
+        setWarnings(res.warnings);
+        flashInfo(
+          res.warnings.length === 0
+            ? `Saved to ${shortPath(res.path)}`
+            : `Saved with ${res.warnings.length} warning(s).`,
+        );
+      } catch (e) {
+        flashError(`Save glossary failed: ${formatError(e)}`);
+      }
+    },
+    [flashInfo, flashError],
   );
 
   if (!payload) {
     return (
       <EmptyGlossary
-        onOpen={open}
+        onOpen={() => void open(null, dirty)}
         onCreate={initEmpty}
         flashError={flashError}
       />
     );
   }
 
-  const filteredTerms = filterTerms(payload.terms, search);
-  const knownLocaleIds = locales.map((l) => l.id);
-  const allLocaleIds = collectLocaleIds(payload, knownLocaleIds);
+  return (
+    <GlossaryEditor
+      locales={locales}
+      path={path}
+      payload={payload}
+      warnings={warnings}
+      dirty={dirty}
+      onPayloadChange={setPayload}
+      onOpen={() => void open(payload, dirty)}
+      onSave={() => void save(payload, path)}
+      onOpenInTranslate={onOpenInTranslate}
+      projectPath={projectPath}
+      flashError={flashError}
+    />
+  );
+}
+
+// ── Editor — rendered only when payload is non-null ───────────────────────────
+
+interface EditorProps {
+  locales: LocaleInfo[];
+  path: string | null;
+  payload: GlossaryPayload;
+  warnings: string[];
+  dirty: boolean;
+  onPayloadChange: (p: GlossaryPayload) => void;
+  onOpen: () => void;
+  onSave: () => void;
+  onOpenInTranslate?: (unitId: string) => void;
+  projectPath?: string;
+  flashError: (msg: string) => void;
+}
+
+function GlossaryEditor({
+  locales,
+  path,
+  payload,
+  warnings,
+  dirty,
+  onPayloadChange,
+  onOpen,
+  onSave,
+  onOpenInTranslate,
+  projectPath,
+  flashError,
+}: EditorProps) {
+  const [search, setSearch] = useState("");
+  const [viewFilter, setViewFilter] = useState<ViewFilter>("all");
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(
+    payload.terms.length > 0 ? 0 : null,
+  );
+  const sourceInputRef = useRef<HTMLInputElement | null>(null);
+  // busyKeys tracks in-flight AI-assist requests as "${termSource}::${locale}".
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+
+  const knownLocaleIds = useMemo(() => locales.map((l) => l.id), [locales]);
+  const allLocaleIds = useMemo(
+    () => collectLocaleIds(payload, knownLocaleIds),
+    [payload, knownLocaleIds],
+  );
+
+  const filteredTerms = useMemo(
+    () => buildFilteredTerms(payload.terms, search, viewFilter, allLocaleIds),
+    [payload.terms, search, viewFilter, allLocaleIds],
+  );
+
+  // Clamp selectedIndex when filter shrinks the list
+  const safeSelectedIndex: number | null = useMemo(() => {
+    if (selectedIndex !== null && selectedIndex < filteredTerms.length)
+      return selectedIndex;
+    return filteredTerms.length > 0 ? 0 : null;
+  }, [selectedIndex, filteredTerms.length]);
+
+  const selectedEntry: FilteredTerm | null = useMemo(
+    () =>
+      safeSelectedIndex !== null
+        ? (filteredTerms[safeSelectedIndex] ?? null)
+        : null,
+    [safeSelectedIndex, filteredTerms],
+  );
+
+  const updatePayload = useCallback(
+    (updater: (p: GlossaryPayload) => GlossaryPayload) => {
+      onPayloadChange(updater(payload));
+    },
+    [payload, onPayloadChange],
+  );
+
+  const updateSelectedTerm = useCallback(
+    (updater: (t: TermEntry) => TermEntry) => {
+      if (selectedEntry === null) return;
+      const realIndex = selectedEntry.index;
+      updatePayload((p) => ({
+        ...p,
+        terms: p.terms.map((t, i) => (i === realIndex ? updater(t) : t)),
+      }));
+    },
+    [selectedEntry, updatePayload],
+  );
+
+  const deleteTerm = useCallback(
+    (realIndex: number) => {
+      const ok = window.confirm("Delete this term from the glossary?");
+      if (!ok) return;
+      updatePayload((p) => ({
+        ...p,
+        terms: p.terms.filter((_, i) => i !== realIndex),
+      }));
+      setSelectedIndex((prev) => {
+        if (prev === null) return null;
+        if (prev >= filteredTerms.length - 1) return Math.max(0, prev - 1);
+        return prev;
+      });
+    },
+    [updatePayload, filteredTerms.length],
+  );
+
+  const addTerm = useCallback(() => {
+    updatePayload((p) => ({
+      ...p,
+      terms: [
+        { source: "", do_not_translate: false, translations: {} },
+        ...p.terms,
+      ],
+    }));
+    setSearch("");
+    setViewFilter("all");
+    setSelectedIndex(0);
+    setTimeout(() => {
+      sourceInputRef.current?.focus();
+      sourceInputRef.current?.select();
+    }, 30);
+  }, [updatePayload]);
+
+  const updateLocaleOverride = useCallback(
+    (updater: (prev: LocaleOverrideEntry[]) => LocaleOverrideEntry[]) => {
+      updatePayload((p) => ({
+        ...p,
+        locale_overrides: updater(p.locale_overrides),
+      }));
+    },
+    [updatePayload],
+  );
+
+  // AI-assist: request a backend-generated translation draft for one locale.
+  const handleTranslateLocale = useCallback(
+    (termSource: string, locale: string) => {
+      if (!projectPath) return;
+      const key = `${termSource}::${locale}`;
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      translateGlossaryTerm(projectPath, termSource, locale)
+        .then((proposed) => {
+          // Patch the translation using the same updater path as manual edits,
+          // so the term is marked dirty and savable.
+          updatePayload((p) => ({
+            ...p,
+            terms: p.terms.map((t) =>
+              t.source === termSource
+                ? {
+                    ...t,
+                    translations: { ...t.translations, [locale]: proposed },
+                  }
+                : t,
+            ),
+          }));
+        })
+        .catch((e) => {
+          flashError(
+            `AI translation failed for "${termSource}" (${locale}): ${formatError(e)}`,
+          );
+        })
+        .finally(() => {
+          setBusyKeys((prev) => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+        });
+    },
+    [projectPath, updatePayload, flashError],
+  );
+
+  // ⌘S / Ctrl+S
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        onSave();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onSave]);
+
+  // Locale coverage stats (over all terms, not filtered)
+  const localeCoverage = useMemo(
+    () =>
+      allLocaleIds.map((id) => {
+        const translatable = payload.terms.filter(
+          (t) => !t.do_not_translate,
+        ).length;
+        const covered = payload.terms.filter(
+          (t) => !t.do_not_translate && !!t.translations[id],
+        ).length;
+        return { id, covered, total: translatable };
+      }),
+    [payload.terms, allLocaleIds],
+  );
+
+  const dntCount = useMemo(
+    () => payload.terms.filter((t) => t.do_not_translate).length,
+    [payload.terms],
+  );
+  const missingCount = useMemo(
+    () =>
+      payload.terms.filter(
+        (t) =>
+          !t.do_not_translate && allLocaleIds.some((id) => !t.translations[id]),
+      ).length,
+    [payload.terms, allLocaleIds],
+  );
+  const overridesCount = payload.locale_overrides.length;
 
   return (
-    <section className="flex-1 flex flex-col overflow-hidden min-w-0 bg-bg-base">
-      <header className="shrink-0 px-5 py-3 border-b border-border-subtle bg-bg-surface flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
-            Glossary
-          </span>
-          {path ? (
-            <span
-              className="font-mono text-xs text-fg-secondary truncate max-w-[420px]"
-              title={path}
-            >
-              {shortPath(path)}
-              {dirty && (
-                <span
-                  role="img"
-                  className="ml-1 text-state-proposed"
-                  aria-label="Unsaved changes"
-                  title="Unsaved changes"
-                >
-                  •
-                </span>
-              )}
-            </span>
-          ) : (
-            <span className="text-xs text-fg-tertiary italic">
-              New glossary{dirty ? " · unsaved" : ""}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Btn onClick={open} title="Open a glossary .toml">
-            Open…
-          </Btn>
-          <Btn
-            onClick={save}
-            disabled={!dirty}
-            primary={dirty}
-            title={dirty ? "Save glossary to disk" : "No unsaved changes"}
-          >
-            Save
-          </Btn>
-          <Btn
-            onClick={discard}
-            disabled={!dirty}
-            title={dirty ? "Discard unsaved edits" : "No unsaved changes"}
-          >
-            Discard
-          </Btn>
-        </div>
-      </header>
+    <section
+      style={{ display: "flex", flex: 1, overflow: "hidden", minWidth: 0 }}
+    >
+      {/* ── Glossary nav rail (240px) ──────────────────────────────────────── */}
+      <GlossaryNavRail
+        path={path}
+        viewFilter={viewFilter}
+        onViewFilter={setViewFilter}
+        termCount={payload.terms.length}
+        dntCount={dntCount}
+        missingCount={missingCount}
+        overridesCount={overridesCount}
+        localeCoverage={localeCoverage}
+        dirty={dirty}
+        onOpen={onOpen}
+        warnings={warnings}
+      />
 
-      <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-5">
-        <SectionHead title="Terms" count={payload.terms.length}>
-          <input
-            type="search"
-            placeholder="Filter terms…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Filter terms"
-            spellCheck={false}
-            className={cn(
-              "h-[28px] w-[260px] px-3 rounded-md border bg-bg-input",
-              "border-border-default text-sm text-fg-primary",
-              "placeholder:text-fg-tertiary transition-colors duration-100 ease-out",
-              "focus:border-accent focus:outline-none focus-visible:outline-none",
-            )}
-          />
-          <Btn
-            onClick={() =>
-              updatePayload((p) => ({
-                ...p,
-                terms: [
-                  { source: "", do_not_translate: false, translations: {} },
-                  ...p.terms,
-                ],
-              }))
-            }
-            title="Add a new term"
-            primary
-          >
-            + Add term
-          </Btn>
-        </SectionHead>
+      {/* ── Term list (280px) ──────────────────────────────────────────────── */}
+      <GlossaryTermList
+        terms={filteredTerms}
+        totalCount={payload.terms.length}
+        allLocaleIds={allLocaleIds}
+        search={search}
+        onSearchChange={setSearch}
+        selectedIndex={safeSelectedIndex}
+        onSelect={setSelectedIndex}
+        onAddTerm={addTerm}
+      />
 
-        <TermsTable
-          terms={filteredTerms}
-          localeIds={allLocaleIds}
-          knownLocaleIds={knownLocaleIds}
-          totalCount={payload.terms.length}
-          onChange={(updater) =>
-            updatePayload((p) => ({ ...p, terms: updater(p.terms) }))
-          }
+      {/* ── Term detail (flex-1) ───────────────────────────────────────────── */}
+      {selectedEntry !== null ? (
+        <SelectedTermDetail
+          entry={selectedEntry}
+          allLocaleIds={allLocaleIds}
+          localeOverrides={payload.locale_overrides}
+          sourceInputRef={sourceInputRef}
+          onUpdateTerm={updateSelectedTerm}
+          onDeleteTerm={deleteTerm}
+          onUpdateLocaleOverride={updateLocaleOverride}
+          onOpenInTranslate={onOpenInTranslate}
+          dirty={dirty}
+          onSave={onSave}
+          busyKeys={busyKeys}
+          onTranslateLocale={projectPath ? handleTranslateLocale : undefined}
         />
-
-        <SectionHead
-          title="Locale overrides"
-          count={payload.locale_overrides.length}
-        >
-          <Btn
-            onClick={() => {
-              const existing = new Set(
-                payload.locale_overrides.map((o) => o.locale),
-              );
-              const nextLocale =
-                knownLocaleIds.find((id) => !existing.has(id)) ??
-                knownLocaleIds[0] ??
-                "";
-              if (!nextLocale) {
-                flashError("No locales available — workspace table is empty.");
-                return;
-              }
-              updatePayload((p) => ({
-                ...p,
-                locale_overrides: [
-                  ...p.locale_overrides,
-                  { locale: nextLocale, register: null, variant: null },
-                ],
-              }));
-            }}
-            primary
-            title="Add a per-locale register / variant override"
-          >
-            + Add override
-          </Btn>
-        </SectionHead>
-
-        <OverridesTable
-          overrides={payload.locale_overrides}
-          knownLocaleIds={knownLocaleIds}
-          onChange={(updater) =>
-            updatePayload((p) => ({
-              ...p,
-              locale_overrides: updater(p.locale_overrides),
-            }))
-          }
+      ) : (
+        <GlossaryDetailEmpty
+          hasTerms={payload.terms.length > 0}
+          onAddTerm={addTerm}
         />
-
-        {warnings.length > 0 && (
-          <div className="rounded-md border border-state-proposed-border bg-state-proposed-bg p-3">
-            <div className="text-xs font-semibold uppercase tracking-loose text-state-proposed mb-1">
-              Warnings ({warnings.length})
-            </div>
-            <ul className="flex flex-col gap-1 text-xs text-fg-secondary">
-              {warnings.map((w, i) => (
-                <li key={i} className="font-mono">
-                  {w}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+      )}
     </section>
   );
 }
+
+// ── Thin wrapper to keep JSX in GlossaryEditor clean ─────────────────────────
+
+function SelectedTermDetail({
+  entry,
+  allLocaleIds,
+  localeOverrides,
+  sourceInputRef,
+  onUpdateTerm,
+  onDeleteTerm,
+  onUpdateLocaleOverride,
+  onOpenInTranslate,
+  dirty,
+  onSave,
+  busyKeys,
+  onTranslateLocale,
+}: {
+  entry: FilteredTerm;
+  allLocaleIds: string[];
+  localeOverrides: LocaleOverrideEntry[];
+  sourceInputRef: React.RefObject<HTMLInputElement | null>;
+  onUpdateTerm: (updater: (t: TermEntry) => TermEntry) => void;
+  onDeleteTerm: (realIndex: number) => void;
+  onUpdateLocaleOverride: (
+    updater: (prev: LocaleOverrideEntry[]) => LocaleOverrideEntry[],
+  ) => void;
+  onOpenInTranslate?: (unitId: string) => void;
+  dirty: boolean;
+  onSave: () => void;
+  busyKeys: Set<string>;
+  onTranslateLocale?: (termSource: string, locale: string) => void;
+}) {
+  return (
+    <GlossaryTermDetail
+      term={entry.entry}
+      allLocaleIds={allLocaleIds}
+      localeOverrides={localeOverrides}
+      sourceInputRef={sourceInputRef}
+      onUpdateTerm={onUpdateTerm}
+      onDeleteTerm={() => onDeleteTerm(entry.index)}
+      onUpdateLocaleOverride={onUpdateLocaleOverride}
+      onOpenInTranslate={onOpenInTranslate}
+      dirty={dirty}
+      onSave={onSave}
+      busyKeys={busyKeys}
+      onTranslateLocale={onTranslateLocale}
+    />
+  );
+}
+
+// ── Glossary nav rail ──────────────────────────────────────────────────────────
+
+function GlossaryNavRail({
+  path,
+  viewFilter,
+  onViewFilter,
+  termCount,
+  dntCount,
+  missingCount,
+  overridesCount,
+  localeCoverage,
+  dirty,
+  onOpen,
+  warnings,
+}: {
+  path: string | null;
+  viewFilter: ViewFilter;
+  onViewFilter: (v: ViewFilter) => void;
+  termCount: number;
+  dntCount: number;
+  missingCount: number;
+  overridesCount: number;
+  localeCoverage: { id: string; covered: number; total: number }[];
+  dirty: boolean;
+  onOpen: () => void;
+  warnings: string[];
+}) {
+  return (
+    <aside
+      style={{
+        width: 240,
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+        background: "var(--color-bg-surface)",
+        borderRight: "1px solid var(--color-border-subtle)",
+        overflow: "hidden",
+      }}
+    >
+      {/* Identity block */}
+      <div style={{ padding: "14px 14px 10px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 4,
+          }}
+        >
+          <BookOpenIcon />
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--color-fg-primary)",
+            }}
+          >
+            Glossary
+          </span>
+        </div>
+        {path ? (
+          <span
+            title={path}
+            style={{
+              display: "block",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10.5,
+              color: "var(--color-fg-tertiary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              paddingLeft: 2,
+              marginBottom: 8,
+            }}
+          >
+            {shortPath(path)}
+          </span>
+        ) : (
+          <span
+            style={{
+              display: "block",
+              fontSize: 10.5,
+              fontStyle: "italic",
+              color: "var(--color-fg-tertiary)",
+              paddingLeft: 2,
+              marginBottom: 8,
+            }}
+          >
+            New glossary
+          </span>
+        )}
+
+        {/* View links */}
+        <ViewLink
+          icon={<ListIcon />}
+          label="All terms"
+          count={termCount}
+          active={viewFilter === "all"}
+          onClick={() => onViewFilter("all")}
+        />
+        <ViewLink
+          icon={<FlagIcon />}
+          label="Do-not-translate"
+          count={dntCount}
+          active={viewFilter === "dnt"}
+          onClick={() => onViewFilter("dnt")}
+        />
+        <ViewLink
+          icon={<AlertIcon />}
+          label="Missing translation"
+          count={missingCount}
+          active={viewFilter === "missing"}
+          onClick={() => onViewFilter("missing")}
+          tint={missingCount > 0 ? "warn" : "default"}
+        />
+        <ViewLink
+          icon={<GlobeIcon />}
+          label="Per-locale overrides"
+          count={overridesCount}
+          active={viewFilter === "overrides"}
+          onClick={() => onViewFilter("overrides")}
+        />
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--color-border-subtle)" }} />
+
+      {/* Locale coverage */}
+      <div
+        style={{
+          padding: "12px 14px",
+          flex: 1,
+          overflow: "auto",
+        }}
+      >
+        <div style={{ marginBottom: 8 }}>
+          <Eyebrow>Locale coverage</Eyebrow>
+        </div>
+        {localeCoverage.map(({ id, covered, total }) => (
+          <div
+            key={id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 0",
+            }}
+          >
+            <LocaleTag locale={id} tone="muted" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SegmentBar
+                total={total}
+                finished={covered}
+                proposed={0}
+                height={3}
+              />
+            </div>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10.5,
+                color: "var(--color-fg-tertiary)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {covered}/{total}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Footer: open / dirty signal */}
+      <div
+        style={{
+          marginTop: "auto",
+          padding: "10px 14px",
+          borderTop: "1px solid var(--color-border-subtle)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        {dirty && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              fontSize: 11.5,
+              color: "var(--color-state-proposed)",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: 999,
+                background: "var(--color-state-proposed)",
+                flexShrink: 0,
+                display: "inline-block",
+              }}
+            />
+            Unsaved changes
+          </div>
+        )}
+        {warnings.length > 0 && (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--color-severity-soft)",
+            }}
+          >
+            {warnings.length} warning{warnings.length !== 1 ? "s" : ""}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onOpen}
+          style={{
+            alignSelf: "flex-start",
+            height: 26,
+            paddingInline: 10,
+            border: "1px solid var(--color-border-default)",
+            borderRadius: 5,
+            background: "transparent",
+            fontSize: 12,
+            color: "var(--color-fg-secondary)",
+            cursor: "pointer",
+          }}
+        >
+          Open other…
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function ViewLink({
+  icon,
+  label,
+  count,
+  active,
+  onClick,
+  tint = "default",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  tint?: "default" | "warn";
+}) {
+  const fg = active ? "var(--color-fg-primary)" : "var(--color-fg-secondary)";
+  const iconColor = active
+    ? "var(--color-accent)"
+    : tint === "warn"
+      ? "var(--color-severity-soft)"
+      : "var(--color-fg-tertiary)";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        width: "100%",
+        height: 26,
+        padding: "0 8px",
+        borderRadius: 4,
+        border: "none",
+        background: active ? "var(--color-bg-selected)" : "transparent",
+        cursor: "pointer",
+        textAlign: "left",
+      }}
+      aria-current={active ? "page" : undefined}
+    >
+      <span
+        style={{ color: iconColor, flexShrink: 0, display: "flex" }}
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          fontSize: 12.5,
+          color: fg,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10.5,
+          color: "var(--color-fg-tertiary)",
+        }}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+// ── Term list (280px) ──────────────────────────────────────────────────────────
+
+function GlossaryTermList({
+  terms,
+  totalCount,
+  allLocaleIds,
+  search,
+  onSearchChange,
+  selectedIndex,
+  onSelect,
+  onAddTerm,
+}: {
+  terms: FilteredTerm[];
+  totalCount: number;
+  allLocaleIds: string[];
+  search: string;
+  onSearchChange: (v: string) => void;
+  selectedIndex: number | null;
+  onSelect: (i: number) => void;
+  onAddTerm: () => void;
+}) {
+  return (
+    <div
+      style={{
+        width: 280,
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--color-bg-surface)",
+        borderRight: "1px solid var(--color-border-subtle)",
+        overflow: "hidden",
+      }}
+    >
+      {/* Search + add strip */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "10px 12px",
+          borderBottom: "1px solid var(--color-border-subtle)",
+        }}
+      >
+        <div style={{ position: "relative", flex: 1 }}>
+          <span
+            style={{
+              position: "absolute",
+              left: 8,
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--color-fg-tertiary)",
+              display: "flex",
+              pointerEvents: "none",
+            }}
+            aria-hidden="true"
+          >
+            <SearchIcon />
+          </span>
+          <input
+            type="search"
+            placeholder="Filter…"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            aria-label="Filter terms"
+            spellCheck={false}
+            style={{
+              width: "100%",
+              height: 28,
+              paddingLeft: 28,
+              paddingRight: 8,
+              borderRadius: 5,
+              border: "1px solid var(--color-border-default)",
+              background: "var(--color-bg-input)",
+              color: "var(--color-fg-primary)",
+              fontSize: 12.5,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onAddTerm}
+          title="Add term"
+          aria-label="Add term"
+          style={{
+            flexShrink: 0,
+            width: 28,
+            height: 28,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid var(--color-border-default)",
+            borderRadius: 5,
+            background: "transparent",
+            color: "var(--color-fg-secondary)",
+            cursor: "pointer",
+          }}
+        >
+          <PlusIcon />
+        </button>
+      </div>
+
+      {/* Eyebrow + count */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 14px",
+        }}
+      >
+        <Eyebrow>Terms</Eyebrow>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            color: "var(--color-fg-tertiary)",
+            marginLeft: "auto",
+          }}
+        >
+          {terms.length}
+          {terms.length !== totalCount && `/${totalCount}`}
+        </span>
+      </div>
+
+      {/* Scrollable rows */}
+      <div
+        style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}
+        role="listbox"
+        aria-label="Terms"
+      >
+        {terms.length === 0 && (
+          <div
+            style={{
+              padding: "12px 14px",
+              fontSize: 12,
+              fontStyle: "italic",
+              color: "var(--color-fg-tertiary)",
+            }}
+          >
+            No terms match this filter.
+          </div>
+        )}
+        {terms.map((item, i) => (
+          <TermListRow
+            key={item.index}
+            term={item.entry}
+            allLocaleIds={allLocaleIds}
+            selected={selectedIndex === i}
+            onClick={() => onSelect(i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TermListRow({
+  term,
+  allLocaleIds,
+  selected,
+  onClick,
+}: {
+  term: TermEntry;
+  allLocaleIds: string[];
+  selected: boolean;
+  onClick: () => void;
+}) {
+  const covered = allLocaleIds.filter(
+    (id) => !!term.translations[id] || term.do_not_translate,
+  ).length;
+  const total = allLocaleIds.length;
+  const missingLocales = term.do_not_translate
+    ? []
+    : allLocaleIds.filter((id) => !term.translations[id]);
+
+  return (
+    <div
+      role="option"
+      aria-selected={selected}
+      onClick={onClick}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{
+        padding: "9px 14px",
+        borderLeft: selected
+          ? "2px solid var(--color-accent)"
+          : "2px solid transparent",
+        background: selected ? "var(--color-bg-selected)" : "transparent",
+        borderBottom: "1px solid var(--color-border-subtle)",
+        cursor: "pointer",
+        outline: "none",
+      }}
+    >
+      {/* Source + DNT + coverage */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          gap: 6,
+          marginBottom: 4,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--color-fg-primary)",
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {term.source || (
+            <span
+              style={{
+                color: "var(--color-fg-tertiary)",
+                fontStyle: "italic",
+              }}
+            >
+              (empty)
+            </span>
+          )}
+        </span>
+        {term.do_not_translate && (
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              letterSpacing: "0.05em",
+              padding: "1px 4px",
+              borderRadius: 3,
+              background: "var(--color-severity-hard-bg)",
+              border: "1px solid var(--color-severity-hard-border)",
+              color: "var(--color-severity-hard)",
+              textTransform: "uppercase",
+              flexShrink: 0,
+            }}
+          >
+            DNT
+          </span>
+        )}
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            color: "var(--color-fg-tertiary)",
+            flexShrink: 0,
+          }}
+        >
+          {covered}/{total}
+        </span>
+      </div>
+
+      {/* Per-locale dots */}
+      {allLocaleIds.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            marginBottom: 3,
+            flexWrap: "wrap",
+          }}
+        >
+          {allLocaleIds.map((id) => {
+            const filled = term.do_not_translate || !!term.translations[id];
+            return (
+              <span
+                key={id}
+                title={id}
+                aria-hidden="true"
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: filled
+                    ? "var(--color-state-finished)"
+                    : "var(--color-state-untranslated)",
+                  flexShrink: 0,
+                }}
+              />
+            );
+          })}
+          {missingLocales.length > 0 && (
+            <span
+              style={{
+                fontSize: 10.5,
+                color: "var(--color-fg-tertiary)",
+                marginLeft: 2,
+                fontFamily: "var(--font-mono)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 160,
+              }}
+              title={`missing: ${missingLocales.join(", ")}`}
+            >
+              missing: {missingLocales.join(", ")}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Note (italic, truncated) */}
+      {term.notes && (
+        <div
+          style={{
+            fontSize: 11,
+            fontStyle: "italic",
+            color: "var(--color-fg-tertiary)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {term.notes}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Term detail ────────────────────────────────────────────────────────────────
+
+function GlossaryTermDetail({
+  term,
+  allLocaleIds,
+  localeOverrides,
+  sourceInputRef,
+  onUpdateTerm,
+  onDeleteTerm,
+  onUpdateLocaleOverride,
+  onOpenInTranslate,
+  dirty,
+  onSave,
+  busyKeys,
+  onTranslateLocale,
+}: {
+  term: TermEntry;
+  allLocaleIds: string[];
+  localeOverrides: LocaleOverrideEntry[];
+  sourceInputRef: React.RefObject<HTMLInputElement | null>;
+  onUpdateTerm: (updater: (t: TermEntry) => TermEntry) => void;
+  onDeleteTerm: () => void;
+  onUpdateLocaleOverride: (
+    updater: (prev: LocaleOverrideEntry[]) => LocaleOverrideEntry[],
+  ) => void;
+  onOpenInTranslate?: (unitId: string) => void;
+  dirty: boolean;
+  onSave: () => void;
+  busyKeys: Set<string>;
+  onTranslateLocale?: (termSource: string, locale: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        overflow: "auto",
+        background: "var(--color-bg-base)",
+        minWidth: 0,
+      }}
+    >
+      {/* Term header */}
+      <div
+        style={{
+          padding: "18px 28px",
+          borderBottom: "1px solid var(--color-border-subtle)",
+          background: "var(--color-bg-surface)",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 16,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Eyebrow>Term</Eyebrow>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 12,
+              marginTop: 4,
+              flexWrap: "wrap",
+            }}
+          >
+            <input
+              ref={sourceInputRef}
+              type="text"
+              value={term.source}
+              onChange={(e) =>
+                onUpdateTerm((t) => ({ ...t, source: e.target.value }))
+              }
+              spellCheck={false}
+              aria-label="Term source"
+              placeholder="Enter term…"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 22,
+                fontWeight: 500,
+                color: "var(--color-fg-primary)",
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                padding: 0,
+                minWidth: 0,
+                width: "auto",
+                maxWidth: 340,
+              }}
+            />
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--color-fg-tertiary)",
+              }}
+            >
+              {/* refs placeholder — no IPC for references yet */}— refs not
+              loaded
+            </span>
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexShrink: 0,
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12.5,
+              color: "var(--color-fg-secondary)",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={term.do_not_translate}
+              onChange={(e) =>
+                onUpdateTerm((t) => ({
+                  ...t,
+                  do_not_translate: e.target.checked,
+                }))
+              }
+              style={{
+                accentColor: "var(--color-accent)",
+                width: 14,
+                height: 14,
+              }}
+            />
+            Do not translate
+          </label>
+
+          <button
+            type="button"
+            onClick={onDeleteTerm}
+            aria-label="Delete term"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              height: 28,
+              paddingInline: 10,
+              border: "1px solid var(--color-border-default)",
+              borderRadius: 5,
+              background: "transparent",
+              fontSize: 12,
+              color: "var(--color-severity-hard)",
+              cursor: "pointer",
+            }}
+          >
+            <TrashIcon />
+            Delete
+          </button>
+
+          {dirty && (
+            <button
+              type="button"
+              onClick={onSave}
+              aria-label="Save glossary (⌘S)"
+              title="Save (⌘S)"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                height: 28,
+                paddingInline: 10,
+                border: "none",
+                borderRadius: 5,
+                background: "var(--color-accent)",
+                color: "var(--color-accent-fg)",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: "pointer",
+              }}
+            >
+              Save
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Detail body */}
+      <div
+        style={{
+          padding: "20px 28px 40px",
+          maxWidth: 720,
+          display: "flex",
+          flexDirection: "column",
+          gap: 24,
+        }}
+      >
+        {/* Note field */}
+        <DetailField label="Note">
+          <input
+            type="text"
+            value={term.notes ?? ""}
+            onChange={(e) =>
+              onUpdateTerm((t) => ({
+                ...t,
+                notes: e.target.value.length === 0 ? null : e.target.value,
+              }))
+            }
+            placeholder="Contextual note for the translator…"
+            spellCheck={false}
+            style={{
+              width: "100%",
+              height: 32,
+              paddingInline: 10,
+              borderRadius: 5,
+              border: "1px solid var(--color-border-default)",
+              background: "var(--color-bg-input)",
+              color: "var(--color-fg-primary)",
+              fontSize: 13,
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+        </DetailField>
+
+        {/* Translations block */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 10,
+            }}
+          >
+            <Eyebrow>Translations</Eyebrow>
+            <span
+              style={{
+                fontSize: 12,
+                color: "var(--color-fg-tertiary)",
+              }}
+            >
+              One row per project locale.
+            </span>
+          </div>
+          {allLocaleIds.length === 0 ? (
+            <div
+              style={{
+                fontSize: 12.5,
+                fontStyle: "italic",
+                color: "var(--color-fg-tertiary)",
+              }}
+            >
+              No locales configured in this project.
+            </div>
+          ) : (
+            <div
+              style={{
+                border: "1px solid var(--color-border-subtle)",
+                borderRadius: 7,
+                background: "var(--color-bg-surface)",
+                overflow: "hidden",
+              }}
+            >
+              {allLocaleIds.map((id, i) => (
+                <TranslationRow
+                  key={id}
+                  locale={id}
+                  value={term.translations[id] ?? ""}
+                  disabled={term.do_not_translate}
+                  sourceTerm={term.source}
+                  last={i === allLocaleIds.length - 1}
+                  busy={busyKeys.has(`${term.source}::${id}`)}
+                  canAiAssist={
+                    !!onTranslateLocale &&
+                    !term.do_not_translate &&
+                    term.source.length > 0
+                  }
+                  onChange={(v) =>
+                    onUpdateTerm((t) => {
+                      const next = { ...t.translations };
+                      if (v.length === 0) delete next[id];
+                      else next[id] = v;
+                      return { ...t, translations: next };
+                    })
+                  }
+                  onAiAssist={
+                    onTranslateLocale
+                      ? () => onTranslateLocale(term.source, id)
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Per-locale overrides block */}
+        <div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 10,
+            }}
+          >
+            <Eyebrow>Per-locale overrides</Eyebrow>
+            <button
+              type="button"
+              onClick={() => {
+                const existing = new Set(localeOverrides.map((o) => o.locale));
+                const nextLocale =
+                  allLocaleIds.find((id) => !existing.has(id)) ??
+                  allLocaleIds[0] ??
+                  "";
+                onUpdateLocaleOverride((prev) => [
+                  ...prev,
+                  { locale: nextLocale, register: null, variant: null },
+                ]);
+              }}
+              style={{
+                marginLeft: "auto",
+                height: 24,
+                paddingInline: 8,
+                border: "1px solid var(--color-border-default)",
+                borderRadius: 4,
+                background: "transparent",
+                fontSize: 11.5,
+                color: "var(--color-fg-secondary)",
+                cursor: "pointer",
+              }}
+            >
+              + Add override
+            </button>
+          </div>
+          {localeOverrides.length === 0 ? (
+            <div
+              style={{
+                padding: "12px 14px",
+                border: "1px dashed var(--color-border-default)",
+                borderRadius: 7,
+                fontSize: 12.5,
+                fontStyle: "italic",
+                color: "var(--color-fg-tertiary)",
+              }}
+            >
+              No per-locale overrides. Defaults from the workspace locales table
+              apply.
+            </div>
+          ) : (
+            <div
+              style={{
+                border: "1px solid var(--color-border-subtle)",
+                borderRadius: 7,
+                background: "var(--color-bg-surface)",
+                overflow: "hidden",
+              }}
+            >
+              {localeOverrides.map((o, i) => (
+                <OverrideRow
+                  key={`override-${i}`}
+                  override={o}
+                  last={i === localeOverrides.length - 1}
+                  allLocaleIds={allLocaleIds}
+                  onChange={(updated) =>
+                    onUpdateLocaleOverride((prev) =>
+                      prev.map((x, j) => (j === i ? updated : x)),
+                    )
+                  }
+                  onDelete={() =>
+                    onUpdateLocaleOverride((prev) =>
+                      prev.filter((_, j) => j !== i),
+                    )
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* References block */}
+        <div>
+          <div style={{ marginBottom: 10 }}>
+            <Eyebrow>References</Eyebrow>
+          </div>
+          <div
+            style={{
+              padding: "12px 14px",
+              border: "1px dashed var(--color-border-default)",
+              borderRadius: 7,
+              fontSize: 12.5,
+              fontStyle: "italic",
+              color: "var(--color-fg-tertiary)",
+            }}
+          >
+            {onOpenInTranslate
+              ? "No reference data available. References will appear here once the catalog index is built."
+              : "Open this glossary from within a project to see which units reference this term."}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TranslationRow({
+  locale,
+  value,
+  disabled,
+  sourceTerm,
+  last,
+  busy,
+  canAiAssist,
+  onChange,
+  onAiAssist,
+}: {
+  locale: string;
+  value: string;
+  disabled: boolean;
+  sourceTerm: string;
+  last: boolean;
+  /** True while an AI-assist request is in flight for this (term, locale). */
+  busy: boolean;
+  /** Whether the AI-assist button should be shown at all. */
+  canAiAssist: boolean;
+  onChange: (v: string) => void;
+  onAiAssist?: () => void;
+}) {
+  const missing = !disabled && value.length === 0;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 14px",
+        borderBottom: last ? "none" : "1px solid var(--color-border-subtle)",
+      }}
+    >
+      <LocaleTag locale={locale} />
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          padding: "1px 5px",
+          borderRadius: 3,
+          background: missing
+            ? "var(--color-state-untranslated-bg)"
+            : "var(--color-state-finished-bg)",
+          border: `1px solid ${missing ? "var(--color-state-untranslated-border)" : "var(--color-state-finished-border)"}`,
+          color: missing
+            ? "var(--color-state-untranslated)"
+            : "var(--color-state-finished)",
+          flexShrink: 0,
+        }}
+      >
+        {missing ? "empty" : "set"}
+      </span>
+      <input
+        type="text"
+        value={disabled ? "" : value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={
+          disabled
+            ? "(do not translate)"
+            : missing
+              ? `translate "${sourceTerm}" to ${locale}…`
+              : ""
+        }
+        spellCheck={false}
+        style={{
+          flex: 1,
+          height: 30,
+          paddingInline: 10,
+          borderRadius: 4,
+          border: "1px solid var(--color-border-default)",
+          background: "var(--color-bg-input)",
+          color: "var(--color-fg-primary)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 13,
+          outline: "none",
+          opacity: disabled ? 0.45 : 1,
+          cursor: disabled ? "not-allowed" : "text",
+          boxSizing: "border-box",
+          minWidth: 0,
+        }}
+      />
+      {canAiAssist && (
+        <button
+          type="button"
+          onClick={busy ? undefined : onAiAssist}
+          disabled={busy}
+          aria-label={
+            busy
+              ? `Requesting AI translation for ${locale}…`
+              : `Propose AI translation for ${locale}`
+          }
+          title={
+            busy
+              ? `Requesting AI translation for ${locale}…`
+              : `Propose AI translation for ${locale}`
+          }
+          style={{
+            flexShrink: 0,
+            width: 24,
+            height: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid var(--color-border-default)",
+            borderRadius: 4,
+            background: "transparent",
+            color: busy
+              ? "var(--color-fg-tertiary)"
+              : "var(--color-fg-secondary)",
+            cursor: busy ? "default" : "pointer",
+            opacity: busy ? 0.7 : 1,
+            transition: "color 100ms, border-color 100ms, background 100ms",
+          }}
+          onMouseEnter={(e) => {
+            if (!busy) {
+              (e.currentTarget as HTMLButtonElement).style.color =
+                "var(--color-accent)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "var(--color-accent)";
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "var(--color-bg-hover)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color =
+              "var(--color-fg-secondary)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "var(--color-border-default)";
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "transparent";
+          }}
+        >
+          {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OverrideRow({
+  override,
+  last,
+  allLocaleIds,
+  onChange,
+  onDelete,
+}: {
+  override: LocaleOverrideEntry;
+  last: boolean;
+  allLocaleIds: string[];
+  onChange: (o: LocaleOverrideEntry) => void;
+  onDelete: () => void;
+}) {
+  const inputStyle: React.CSSProperties = {
+    height: 28,
+    paddingInline: 8,
+    borderRadius: 4,
+    border: "1px solid var(--color-border-default)",
+    background: "var(--color-bg-input)",
+    color: "var(--color-fg-primary)",
+    fontSize: 12.5,
+    outline: "none",
+    fontFamily: "var(--font-mono)",
+    boxSizing: "border-box",
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 14px",
+        borderBottom: last ? "none" : "1px solid var(--color-border-subtle)",
+      }}
+    >
+      <input
+        type="text"
+        value={override.locale}
+        list="known-locales-override"
+        onChange={(e) => onChange({ ...override, locale: e.target.value })}
+        placeholder="locale…"
+        spellCheck={false}
+        style={{ ...inputStyle, width: 110 }}
+        aria-label="Locale"
+      />
+      <datalist id="known-locales-override">
+        {allLocaleIds.map((id) => (
+          <option key={id} value={id} />
+        ))}
+      </datalist>
+      <select
+        value={override.register ?? ""}
+        onChange={(e) =>
+          onChange({
+            ...override,
+            register:
+              e.target.value === "" ? null : (e.target.value as Register),
+          })
+        }
+        style={{
+          ...inputStyle,
+          width: 120,
+          fontFamily: "inherit",
+        }}
+        aria-label="Register"
+      >
+        <option value="">— default</option>
+        {REGISTERS.map((r) => (
+          <option key={r} value={r}>
+            {r}
+          </option>
+        ))}
+      </select>
+      <input
+        type="text"
+        value={override.variant ?? ""}
+        onChange={(e) =>
+          onChange({
+            ...override,
+            variant: e.target.value.length === 0 ? null : e.target.value,
+          })
+        }
+        placeholder="variant…"
+        spellCheck={false}
+        style={{ ...inputStyle, flex: 1, minWidth: 0 }}
+        aria-label="Variant"
+      />
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label="Remove override"
+        title="Remove override"
+        style={{
+          flexShrink: 0,
+          border: "none",
+          background: "transparent",
+          color: "var(--color-fg-tertiary)",
+          cursor: "pointer",
+          padding: 4,
+          borderRadius: 4,
+          fontSize: 16,
+          lineHeight: 1,
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function GlossaryDetailEmpty({
+  hasTerms,
+  onAddTerm,
+}: {
+  hasTerms: boolean;
+  onAddTerm: () => void;
+}) {
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--color-fg-tertiary)",
+        fontSize: 13,
+        flexDirection: "column",
+        gap: 14,
+        padding: 40,
+      }}
+    >
+      {hasTerms ? (
+        <p style={{ margin: 0 }}>Select a term from the list to edit it.</p>
+      ) : (
+        <>
+          <p style={{ margin: 0 }}>No terms yet.</p>
+          <button
+            type="button"
+            onClick={onAddTerm}
+            style={{
+              height: 32,
+              paddingInline: 16,
+              border: "1px solid var(--color-border-default)",
+              borderRadius: 6,
+              background: "transparent",
+              fontSize: 13,
+              color: "var(--color-fg-secondary)",
+              cursor: "pointer",
+            }}
+          >
+            + Add first term
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Empty state (no file loaded) ───────────────────────────────────────────────
 
 function EmptyGlossary({
   onOpen,
@@ -320,27 +1852,68 @@ function EmptyGlossary({
   flashError: (msg: string) => void;
 }) {
   return (
-    <section className="flex-1 flex items-center justify-center bg-bg-base p-12">
-      <div className="w-full max-w-[520px] rounded-lg border border-border-subtle bg-bg-surface p-8">
-        <div className="text-xs font-semibold uppercase tracking-loose text-accent mb-2">
-          Glossary
+    <section
+      style={{
+        flex: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--color-bg-base)",
+        padding: 48,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          borderRadius: 8,
+          border: "1px solid var(--color-border-subtle)",
+          background: "var(--color-bg-surface)",
+          padding: 32,
+        }}
+      >
+        <div style={{ marginBottom: 8 }}>
+          <Eyebrow>Glossary</Eyebrow>
         </div>
-        <h1 className="m-0 mb-2 text-2xl font-semibold tracking-tight text-fg-primary">
+        <h1
+          style={{
+            margin: "0 0 8px",
+            fontSize: 22,
+            fontWeight: 600,
+            letterSpacing: "-0.01em",
+            color: "var(--color-fg-primary)",
+          }}
+        >
           Open or create a glossary
         </h1>
-        <p className="m-0 mb-6 text-sm text-fg-secondary leading-[1.65]">
+        <p
+          style={{
+            margin: "0 0 24px",
+            fontSize: 13.5,
+            color: "var(--color-fg-secondary)",
+            lineHeight: 1.65,
+          }}
+        >
           A glossary is a TOML file with per-term translations and
           do-not-translate markers. The harness uses it to constrain the model's
           vocabulary and to surface gate warnings when target text drifts from
           the project's standard wording.
         </p>
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           <button
             type="button"
-            onClick={() => {
-              onOpen();
+            onClick={onOpen}
+            style={{
+              height: 36,
+              paddingInline: 16,
+              borderRadius: 6,
+              border: "none",
+              background: "var(--color-accent)",
+              color: "var(--color-accent-fg)",
+              fontSize: 13.5,
+              fontWeight: 500,
+              cursor: "pointer",
             }}
-            className="inline-flex items-center h-9 px-4 rounded-md text-md font-medium text-accent-fg bg-accent transition-colors duration-100 ease-out hover:bg-accent-hover"
           >
             Open glossary.toml…
           </button>
@@ -353,7 +1926,16 @@ function EmptyGlossary({
                 flashError(`Could not create glossary: ${formatError(e)}`);
               }
             }}
-            className="inline-flex items-center h-9 px-4 rounded-md text-md font-medium text-fg-secondary border border-border-default bg-transparent transition-colors duration-100 ease-out hover:bg-bg-hover hover:text-fg-primary"
+            style={{
+              height: 36,
+              paddingInline: 16,
+              borderRadius: 6,
+              border: "1px solid var(--color-border-default)",
+              background: "transparent",
+              color: "var(--color-fg-secondary)",
+              fontSize: 13.5,
+              cursor: "pointer",
+            }}
           >
             New glossary
           </button>
@@ -363,409 +1945,232 @@ function EmptyGlossary({
   );
 }
 
-function TermsTable({
-  terms,
-  localeIds,
-  knownLocaleIds,
-  totalCount,
-  onChange,
-}: {
-  terms: { entry: TermEntry; index: number }[];
-  localeIds: string[];
-  knownLocaleIds: string[];
-  totalCount: number;
-  onChange: (updater: (prev: TermEntry[]) => TermEntry[]) => void;
-}) {
-  if (totalCount === 0) {
-    return (
-      <div className="text-sm text-fg-tertiary italic">
-        No terms yet. Use “+ Add term” above.
-      </div>
-    );
-  }
-  if (terms.length === 0) {
-    return (
-      <div className="text-sm text-fg-tertiary italic">
-        No terms match this filter.
-      </div>
-    );
-  }
-  return (
-    <div className="overflow-x-auto rounded-md border border-border-subtle">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-bg-elevated text-fg-tertiary text-xs uppercase tracking-loose">
-            <Th>Source</Th>
-            <Th className="w-[60px] text-center">DNT</Th>
-            <Th className="w-[200px]">Notes</Th>
-            {localeIds.map((id) => (
-              <Th key={id} className="min-w-[160px]">
-                <span className="font-mono normal-case tracking-normal text-fg-secondary">
-                  {id}
-                </span>
-                {!knownLocaleIds.includes(id) && (
-                  <span
-                    className="ml-1 text-state-proposed"
-                    title="Locale not declared in the workspace locales table"
-                  >
-                    ?
-                  </span>
-                )}
-              </Th>
-            ))}
-            <Th className="w-[40px]" />
-          </tr>
-        </thead>
-        <tbody>
-          {terms.map(({ entry, index }) => (
-            <TermRow
-              key={index}
-              term={entry}
-              localeIds={localeIds}
-              onChange={(updater) =>
-                onChange((prev) =>
-                  prev.map((t, i) => (i === index ? updater(t) : t)),
-                )
-              }
-              onDelete={() =>
-                onChange((prev) => prev.filter((_, i) => i !== index))
-              }
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+// ── Detail field wrapper ───────────────────────────────────────────────────────
 
-function TermRow({
-  term,
-  localeIds,
-  onChange,
-  onDelete,
-}: {
-  term: TermEntry;
-  localeIds: string[];
-  onChange: (updater: (prev: TermEntry) => TermEntry) => void;
-  onDelete: () => void;
-}) {
-  return (
-    <tr className="border-t border-border-subtle align-top">
-      <Td>
-        <TextInput
-          value={term.source}
-          onChange={(source) => onChange((t) => ({ ...t, source }))}
-          mono
-        />
-      </Td>
-      <Td className="text-center">
-        <input
-          type="checkbox"
-          checked={term.do_not_translate}
-          onChange={(e) =>
-            onChange((t) => ({ ...t, do_not_translate: e.target.checked }))
-          }
-          className="w-4 h-4 accent-accent cursor-pointer"
-          aria-label="Do not translate"
-        />
-      </Td>
-      <Td>
-        <TextInput
-          value={term.notes ?? ""}
-          onChange={(notes) =>
-            onChange((t) => ({
-              ...t,
-              notes: notes.length === 0 ? null : notes,
-            }))
-          }
-        />
-      </Td>
-      {localeIds.map((id) => (
-        <Td key={id}>
-          <TextInput
-            value={term.translations[id] ?? ""}
-            disabled={term.do_not_translate}
-            onChange={(v) =>
-              onChange((t) => {
-                const next = { ...t.translations };
-                if (v.length === 0) delete next[id];
-                else next[id] = v;
-                return { ...t, translations: next };
-              })
-            }
-          />
-        </Td>
-      ))}
-      <Td className="text-center">
-        <button
-          type="button"
-          onClick={onDelete}
-          aria-label="Delete term"
-          title="Delete term"
-          className="text-fg-tertiary hover:text-severity-hard transition-colors duration-100 ease-out p-1 rounded-sm"
-        >
-          ×
-        </button>
-      </Td>
-    </tr>
-  );
-}
-
-function OverridesTable({
-  overrides,
-  knownLocaleIds,
-  onChange,
-}: {
-  overrides: LocaleOverrideEntry[];
-  knownLocaleIds: string[];
-  onChange: (
-    updater: (prev: LocaleOverrideEntry[]) => LocaleOverrideEntry[],
-  ) => void;
-}) {
-  if (overrides.length === 0) {
-    return (
-      <div className="text-sm text-fg-tertiary italic">
-        No per-locale overrides. Defaults from the workspace locales table
-        apply.
-      </div>
-    );
-  }
-  return (
-    <div className="overflow-x-auto rounded-md border border-border-subtle">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="bg-bg-elevated text-fg-tertiary text-xs uppercase tracking-loose">
-            <Th className="w-[140px]">Locale</Th>
-            <Th className="w-[160px]">Register</Th>
-            <Th className="min-w-[160px]">Variant</Th>
-            <Th className="w-[40px]" />
-          </tr>
-        </thead>
-        <tbody>
-          {overrides.map((o, i) => (
-            <tr key={i} className="border-t border-border-subtle align-top">
-              <Td>
-                <TextInput
-                  value={o.locale}
-                  onChange={(locale) =>
-                    onChange((prev) =>
-                      prev.map((x, j) => (j === i ? { ...x, locale } : x)),
-                    )
-                  }
-                  list="known-locales"
-                  mono
-                />
-                <datalist id="known-locales">
-                  {knownLocaleIds.map((id) => (
-                    <option key={id} value={id} />
-                  ))}
-                </datalist>
-              </Td>
-              <Td>
-                <select
-                  value={o.register ?? ""}
-                  onChange={(e) =>
-                    onChange((prev) =>
-                      prev.map((x, j) =>
-                        j === i
-                          ? {
-                              ...x,
-                              register:
-                                e.target.value === ""
-                                  ? null
-                                  : (e.target.value as Register),
-                            }
-                          : x,
-                      ),
-                    )
-                  }
-                  className={cn(
-                    "w-full h-[28px] px-2 rounded-sm border bg-bg-input text-sm",
-                    "border-border-default text-fg-primary focus:border-accent focus:outline-none",
-                  )}
-                  aria-label="Register"
-                >
-                  <option value="">— (default)</option>
-                  {REGISTERS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </Td>
-              <Td>
-                <TextInput
-                  value={o.variant ?? ""}
-                  onChange={(variant) =>
-                    onChange((prev) =>
-                      prev.map((x, j) =>
-                        j === i
-                          ? {
-                              ...x,
-                              variant: variant.length === 0 ? null : variant,
-                            }
-                          : x,
-                      ),
-                    )
-                  }
-                />
-              </Td>
-              <Td className="text-center">
-                <button
-                  type="button"
-                  onClick={() =>
-                    onChange((prev) => prev.filter((_, j) => j !== i))
-                  }
-                  aria-label="Delete override"
-                  title="Delete override"
-                  className="text-fg-tertiary hover:text-severity-hard transition-colors duration-100 ease-out p-1 rounded-sm"
-                >
-                  ×
-                </button>
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function SectionHead({
-  title,
-  count,
+function DetailField({
+  label,
   children,
 }: {
-  title: string;
-  count?: number;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-loose text-fg-tertiary">
-          {title}
-        </span>
-        {typeof count === "number" && (
-          <span className="font-mono text-xs text-fg-tertiary tabular-nums">
-            {count}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2">{children}</div>
-    </div>
-  );
-}
-
-function Th({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <th
-      className={cn(
-        "text-left font-semibold px-3 py-2 border-b border-border-subtle",
-        className,
-      )}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  return <td className={cn("px-2 py-1.5 align-top", className)}>{children}</td>;
-}
-
-function TextInput({
-  value,
-  onChange,
-  disabled,
-  mono,
-  list,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  disabled?: boolean;
-  mono?: boolean;
-  list?: string;
-}) {
-  return (
-    <input
-      type="text"
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value)}
-      list={list}
-      spellCheck={false}
-      className={cn(
-        "w-full h-[28px] px-2 rounded-sm border bg-bg-input text-sm",
-        "border-border-default text-fg-primary",
-        "transition-colors duration-100 ease-out",
-        "focus:border-accent focus:outline-none focus-visible:outline-none",
-        "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
-        mono && "font-mono",
-      )}
-    />
-  );
-}
-
-function Btn({
-  children,
-  onClick,
-  disabled,
-  primary,
-  title,
-}: {
+  label: string;
   children: React.ReactNode;
-  onClick?: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-  title?: string;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={cn(
-        "inline-flex items-center gap-2 h-7 px-3 rounded-md text-sm font-medium border",
-        "transition-colors duration-100 ease-out",
-        primary
-          ? "text-accent-fg bg-accent border-transparent enabled:hover:bg-accent-hover enabled:active:bg-accent-active"
-          : "text-fg-secondary border-border-default bg-transparent enabled:hover:bg-bg-hover enabled:hover:text-fg-primary",
-        "disabled:text-fg-disabled disabled:border-border-subtle disabled:cursor-not-allowed disabled:bg-transparent",
-      )}
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <Eyebrow>{label}</Eyebrow>
       {children}
-    </button>
+    </div>
   );
 }
 
-function filterTerms(
+// ── Inline SVG icons ───────────────────────────────────────────────────────────
+
+function BookOpenIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+      style={{ color: "var(--color-accent)" }}
+    >
+      <path
+        d="M1 3.5A1.5 1.5 0 0 1 2.5 2h4.25A1.25 1.25 0 0 1 8 3.25v9.5A1.25 1.25 0 0 1 6.75 14H2.5A1.5 1.5 0 0 1 1 12.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        fill="none"
+      />
+      <path
+        d="M15 3.5A1.5 1.5 0 0 0 13.5 2H9.25A1.25 1.25 0 0 0 8 3.25v9.5A1.25 1.25 0 0 0 9.25 14H13.5A1.5 1.5 0 0 0 15 12.5v-9Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 3h10M2 7h10M2 11h10"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function FlagIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 1.5v11M2 1.5h8l-2 3.5 2 3.5H2"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function AlertIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M7 2 L12.5 12 H1.5 Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+        fill="none"
+      />
+      <path
+        d="M7 6v2.5M7 10.5v.5"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GlobeIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M7 1.5c-2 1.5-2 9 0 11M7 1.5c2 1.5 2 9 0 11M1.5 7h11"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M8.5 8.5l3 3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M7 2v10M2 7h10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M1.5 3.5h11M5 3.5V2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1M11.5 3.5l-.75 8.5H3.25L2.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+interface FilteredTerm {
+  entry: TermEntry;
+  index: number;
+}
+
+function buildFilteredTerms(
   terms: TermEntry[],
   search: string,
-): { entry: TermEntry; index: number }[] {
+  view: ViewFilter,
+  allLocaleIds: string[],
+): FilteredTerm[] {
   const lower = search.trim().toLowerCase();
+
   return terms
     .map((entry, index) => ({ entry, index }))
     .filter(({ entry }) => {
-      if (!lower) return true;
-      if (entry.source.toLowerCase().includes(lower)) return true;
-      if (entry.notes?.toLowerCase().includes(lower)) return true;
-      return Object.values(entry.translations).some((v) =>
-        v.toLowerCase().includes(lower),
-      );
+      // View filter
+      if (view === "dnt" && !entry.do_not_translate) return false;
+      if (view === "missing") {
+        if (entry.do_not_translate) return false;
+        // Match the count predicate exactly: a term is "missing" when any
+        // project locale lacks a translation. Iterating over project
+        // locales (rather than the term's own translation keys) catches
+        // the "key never set" case the count includes.
+        const missingAny = allLocaleIds.some((id) => !entry.translations[id]);
+        if (!missingAny) return false;
+      }
+      // Text search
+      if (lower) {
+        if (entry.source.toLowerCase().includes(lower)) return true;
+        if (entry.notes?.toLowerCase().includes(lower)) return true;
+        return Object.values(entry.translations).some((v) =>
+          v.toLowerCase().includes(lower),
+        );
+      }
+      return true;
     });
 }
 
