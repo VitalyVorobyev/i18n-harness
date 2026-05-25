@@ -85,6 +85,13 @@ fn extract_recognises_message_states() {
         states.contains(&UnitState::Untranslated),
         "showcase should include untranslated units; got {states:?}",
     );
+    // The "Verbatim block" unit has `type="unfinished"` plus a non-empty
+    // CDATA body, which the parse contract maps to `Proposed` (mirror of
+    // the writer's `Proposed → keep type="unfinished"` behaviour).
+    assert!(
+        states.contains(&UnitState::Proposed),
+        "showcase should include a proposed unit (unfinished + non-empty body); got {states:?}",
+    );
     assert!(
         states.contains(&UnitState::Vanished),
         "showcase should include a vanished unit; got {states:?}",
@@ -444,6 +451,318 @@ fn extracomment_fixture_vanished_obsolete_no_hash() {
             );
         }
     }
+}
+
+// ── Proposed-state mapping tests ──────────────────────────────────────────────
+//
+// The parse contract must mirror the write contract: the writer keeps
+// `type="unfinished"` on `Proposed` units (gate-flagged, awaiting human
+// review). The parser must therefore read `type="unfinished"` plus a
+// non-empty body as `Proposed`, not `Untranslated`. Without this symmetry,
+// the UI's UntranslatedDraftEditor renders such units as a blank textarea
+// and the user perceives total data loss across a close/reopen cycle.
+//
+// Empty bodies stay `Untranslated`; vanished/obsolete are unaffected.
+
+/// Singular `<translation type="unfinished">non-empty</translation>` must
+/// parse as `Proposed` with the body preserved in `Target::Singular`.
+#[test]
+fn unfinished_with_nonempty_singular_body_parses_as_proposed() {
+    use i18n_harness_core::{Target, UnitState};
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-proposed-singular-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("proposed.ts");
+    // Two singular cases: one with an empty body (must stay Untranslated)
+    // and one with a non-empty body (must promote to Proposed).
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>Dlg</name>
+    <message>
+        <source>Hello</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">Speichern</translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&path, src).unwrap();
+    let catalog = extract(&path).expect("extract");
+    let hello = catalog
+        .units()
+        .iter()
+        .find(|u| u.source == "Hello")
+        .expect("Hello unit");
+    assert_eq!(
+        hello.state,
+        UnitState::Untranslated,
+        "empty body must stay Untranslated; got {:?}",
+        hello.state,
+    );
+    assert!(
+        matches!(hello.target, Target::Singular { text: None }),
+        "empty body must surface as Target::Singular {{ text: None }}; got {:?}",
+        hello.target,
+    );
+
+    let save = catalog
+        .units()
+        .iter()
+        .find(|u| u.source == "Save")
+        .expect("Save unit");
+    assert_eq!(
+        save.state,
+        UnitState::Proposed,
+        "type=\"unfinished\" + non-empty body must parse as Proposed; got {:?}",
+        save.state,
+    );
+    match &save.target {
+        Target::Singular { text: Some(t) } => {
+            assert_eq!(t, "Speichern");
+        }
+        other => panic!("expected Target::Singular {{ Some(\"Speichern\") }}, got {other:?}"),
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Plural `<translation type="unfinished">` whose forms have any non-empty
+/// body must parse as `Proposed` with each form preserved.
+#[test]
+fn unfinished_with_nonempty_plural_form_parses_as_proposed() {
+    use i18n_harness_core::{Target, UnitState};
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-proposed-plural-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("proposed_plural.ts");
+    // One plural with empty forms (stays Untranslated), one with one
+    // non-empty form (promotes to Proposed).
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>P</name>
+    <message numerus="yes">
+        <source>%n empty(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%n item(s)</source>
+        <translation type="unfinished">
+            <numerusform>%n Eintrag</numerusform>
+            <numerusform>%n Einträge</numerusform>
+        </translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&path, src).unwrap();
+    let catalog = extract(&path).expect("extract");
+
+    let empty = catalog
+        .units()
+        .iter()
+        .find(|u| u.source.contains("empty"))
+        .expect("empty plural unit");
+    assert_eq!(
+        empty.state,
+        UnitState::Untranslated,
+        "all-empty plural forms must stay Untranslated; got {:?}",
+        empty.state,
+    );
+    match &empty.target {
+        Target::Plural { forms } => {
+            assert!(
+                forms.iter().all(|f| f.is_none()),
+                "empty plural forms must each be None; got {forms:?}",
+            );
+        }
+        other => panic!("expected Plural, got {other:?}"),
+    }
+
+    let filled = catalog
+        .units()
+        .iter()
+        .find(|u| u.source.contains("item"))
+        .expect("filled plural unit");
+    assert_eq!(
+        filled.state,
+        UnitState::Proposed,
+        "type=\"unfinished\" + non-empty plural form must parse as Proposed; got {:?}",
+        filled.state,
+    );
+    match &filled.target {
+        Target::Plural { forms } => {
+            assert_eq!(forms.len(), 2);
+            // Forms carry over verbatim (with %n normalised to {count} by
+            // the placeholder converter).
+            assert_eq!(forms[0].as_deref(), Some("{count} Eintrag"));
+            assert_eq!(forms[1].as_deref(), Some("{count} Einträge"));
+        }
+        other => panic!("expected Plural, got {other:?}"),
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The CDATA-bearing "Verbatim block" unit in `showcase.ts` is the existing
+/// real-world case: `type="unfinished"` with non-empty CDATA body. It must
+/// parse as `Proposed`, not `Untranslated`.
+#[test]
+fn showcase_verbatim_block_with_cdata_parses_as_proposed() {
+    use i18n_harness_core::{Target, UnitState};
+    let fixture = fixtures_dir().join("showcase.ts");
+    let catalog = extract(&fixture).expect("extract showcase");
+    let verbatim = catalog
+        .units()
+        .iter()
+        .find(|u| u.source == "Verbatim block")
+        .expect("Verbatim block unit");
+    assert_eq!(
+        verbatim.state,
+        UnitState::Proposed,
+        "CDATA body with type=\"unfinished\" must be Proposed; got {:?}",
+        verbatim.state,
+    );
+    match &verbatim.target {
+        Target::Singular { text: Some(t) } => {
+            // CDATA content is preserved verbatim — the `&` and `<` here are
+            // *literal* characters (CDATA suppresses XML interpretation).
+            assert_eq!(t, "A & B < C");
+        }
+        other => panic!("expected Target::Singular with text, got {other:?}"),
+    }
+}
+
+/// Symmetry contract: parsing a file that contains `Proposed` units (i.e.
+/// `type="unfinished"` + non-empty body), then re-rendering with those
+/// units unchanged, must produce byte-identical output. This is the path
+/// "user closes the app and reopens it" exercises, and it must not corrupt
+/// the file.
+#[test]
+fn proposed_roundtrip_is_byte_identical() {
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-proposed-rt-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("proposed_rt.ts");
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>RT</name>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">Speichern</translation>
+    </message>
+    <message numerus="yes">
+        <source>%n item(s)</source>
+        <translation type="unfinished">
+            <numerusform>%n Eintrag</numerusform>
+            <numerusform>%n Einträge</numerusform>
+        </translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&path, src).unwrap();
+    let catalog = extract(&path).expect("extract");
+    // Re-render with zero changes to the units; bytes must match.
+    let rendered = render(&catalog, &[]).expect("render");
+    let original = std::fs::read(&path).expect("re-read");
+    assert_eq!(
+        rendered, original,
+        "Proposed unit round-trip must be byte-identical",
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Regression test for the "Save All silently no-ops" failure mode.
+///
+/// The buggy pattern (the one the Tauri shell uses):
+///   1. `extract(path)` → `Catalog` with mutable `units` and pristine bytes.
+///   2. Caller mutates `catalog.units_mut()[i].target` in place.
+///   3. Caller passes `catalog.units().to_vec()` back as the `units` arg
+///      to `apply`/`render`.
+///
+/// Before the fix, `plan_edits_for_unit` short-circuited on
+/// `candidate.target == original.target` where `original` was the same
+/// in-place-mutated unit — so the comparison was trivially true and the
+/// edit never landed. The render output equaled the source bytes.
+/// `apply` wrote the source bytes back. Disk contents were unchanged.
+///
+/// This test pins the contract: in-place mutation MUST round-trip
+/// through `render` as a real edit, byte-visible in the output.
+#[test]
+fn in_place_mutation_then_render_emits_the_edit() {
+    use i18n_harness_core::Target;
+
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-inplace-rt-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("inplace.ts");
+    let src = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE TS>\n<TS version=\"2.1\" language=\"de_DE\" sourcelanguage=\"en\">\n<context>\n    <name>MainWindow</name>\n    <message>\n        <source>Hello</source>\n        <translation type=\"unfinished\"></translation>\n    </message>\n</context>\n</TS>\n";
+    std::fs::write(&path, src).unwrap();
+    let mut catalog = extract(&path).expect("extract");
+
+    // The Tauri shell's update_unit_target_in_project takes a mutable handle
+    // and writes the target in place. Mirror that pattern exactly.
+    {
+        let unit = catalog
+            .units_mut()
+            .iter_mut()
+            .find(|u| u.source == "Hello")
+            .expect("Hello unit");
+        unit.target = Target::Singular {
+            text: Some("Hallo Welt".into()),
+        };
+        unit.state = i18n_harness_core::UnitState::Proposed;
+    }
+
+    // Snapshot then hand the slice to render — same pattern as
+    // `entry.catalog.units().to_vec()` in the Tauri save path.
+    let units = catalog.units().to_vec();
+    let rendered = render(&catalog, &units).expect("render");
+    let rendered_str = std::str::from_utf8(&rendered).expect("utf8");
+
+    assert!(
+        rendered_str.contains("Hallo Welt"),
+        "render output must contain the in-place edit; got:\n{rendered_str}"
+    );
+    assert!(
+        rendered_str.contains("type=\"unfinished\""),
+        "Proposed write contract: type=\"unfinished\" must be retained; got:\n{rendered_str}"
+    );
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 fn byte_diff_summary(a: &[u8], b: &[u8]) -> String {

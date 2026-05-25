@@ -45,6 +45,7 @@ pub fn extract(path: &Path) -> Result<Catalog, ExtractError> {
         source_bytes: bytes,
         language: state.language,
         edit_points: state.edit_points,
+        original_units: state.units.clone(),
         units: state.units,
     })
 }
@@ -310,6 +311,17 @@ impl ParseState {
             let any_nonempty = forms
                 .iter()
                 .any(|f| f.as_deref().is_some_and(|s| !s.is_empty()));
+            // Symmetric to the writer: writer keeps `type="unfinished"` for
+            // `Proposed` units that still have non-empty bodies (the gate
+            // flagged them, the human still needs to confirm). On parse,
+            // `type="unfinished"` plus any non-empty form means "proposed,
+            // unconfirmed", not "untranslated". Without this promotion the
+            // unit comes back as `Untranslated` with a populated target,
+            // which the UI's UntranslatedDraftEditor renders as a blank
+            // textarea — losing the proposed text from the user's view.
+            if state_from_attr == UnitState::Untranslated && any_nonempty {
+                state_from_attr = UnitState::Proposed;
+            }
             if !any_nonempty && state_from_attr != UnitState::Finished {
                 Target::Plural {
                     forms: vec![None; numerus_originals.len()],
@@ -319,6 +331,12 @@ impl ParseState {
             }
         } else {
             let text = translation_body_text_singular.as_deref().unwrap_or("");
+            // See the plural branch above for the rationale. The empty-body
+            // case stays `Untranslated`; only a non-empty body with
+            // `type="unfinished"` promotes to `Proposed`.
+            if state_from_attr == UnitState::Untranslated && !text.is_empty() {
+                state_from_attr = UnitState::Proposed;
+            }
             if text.is_empty() && state_from_attr != UnitState::Finished {
                 Target::Singular { text: None }
             } else {

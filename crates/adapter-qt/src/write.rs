@@ -85,9 +85,20 @@ pub fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, ApplyError> 
 
     let mut edits: Vec<Edit> = Vec::new();
     for (idx, ep) in catalog.edit_points.iter().enumerate() {
-        let original = &catalog.units[idx];
-        let candidate = overrides.get(&idx).copied().unwrap_or(original);
-        plan_edits_for_unit(candidate, original, ep, &catalog.source_bytes, &mut edits);
+        // `original` MUST be the pristine parse-time snapshot, not the live
+        // (potentially in-place-mutated) `catalog.units[idx]`. The Tauri
+        // frontend mutates `catalog.units` through `find_unit_mut` and then
+        // passes the same slice as `units` to `apply`, which would make
+        // `candidate.target == original.target` trivially true and silently
+        // skip the bytes-on-disk update. The CLI path is unaffected because
+        // it builds a fresh override slice without touching the catalog's
+        // own `units`.
+        let pristine = &catalog.original_units[idx];
+        // The candidate's default when the caller didn't supply an override
+        // for this unit is also the pristine snapshot: that preserves the
+        // byte-identical round-trip for `render(&catalog, &[])`.
+        let candidate = overrides.get(&idx).copied().unwrap_or(pristine);
+        plan_edits_for_unit(candidate, pristine, ep, &catalog.source_bytes, &mut edits);
     }
 
     edits.sort_by_key(|e| e.start);

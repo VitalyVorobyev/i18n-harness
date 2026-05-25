@@ -32,6 +32,19 @@ pub struct Catalog {
 
     /// The structured units, in document order.
     pub(crate) units: Vec<Unit>,
+
+    /// Pristine snapshot of `units` as produced by [`crate::extract`], before
+    /// any mutation through [`Self::units_mut`] / [`Self::find_unit_mut`].
+    /// Length and order match [`Self::units`] one-to-one.
+    ///
+    /// This exists so [`crate::apply`] can answer "did the caller actually
+    /// change this unit?" by comparing the candidate against the parse-time
+    /// truth instead of the live (possibly mutated) [`Self::units`] slice.
+    /// The Tauri frontend uses the [`Self::find_unit_mut`] / `units_mut`
+    /// pattern, which mutates [`Self::units`] in place; without this
+    /// snapshot, `plan_edits_for_unit`'s `candidate.target == original.target`
+    /// shortcut would silently treat every save as a no-op.
+    pub(crate) original_units: Vec<Unit>,
 }
 
 impl Catalog {
