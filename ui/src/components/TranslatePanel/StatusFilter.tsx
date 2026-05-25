@@ -1,118 +1,96 @@
-// StatusFilter — segmented pill buttons for filtering units by translation state
-// and gate severity. Reusable across MatrixView, FocusView, and any future
-// consumer that evaluates one Unit at a time.
+// StatusFilter — three multi-select toggle pills over Unit.state.
+//
+// The pills are composable: any combination of Untranslated / Proposed /
+// Finished can be selected at once. An empty selection means "show
+// everything" (the natural "no filter" semantics).
 //
 // Two exports:
 //   unitMatchesFilter — pure predicate for a single Unit
-//   StatusFilter      — segmented pill button row component
+//   StatusFilter      — multi-select pill button row component
 
 import { cn } from "../../lib/cn";
-import type { Unit } from "../../lib/types";
-import { severityOf } from "../../lib/types";
+import type { Unit, UnitState } from "../../lib/types";
 
-// ── Filter id union ──────────────────────────────────────────────────────────
+// ── Filter state shape ────────────────────────────────────────────────────────
+//
+// `Set<UnitState>` keeps the shape symmetric with `Unit.state` and makes the
+// predicate trivial. The three UI-editable states are the only valid members;
+// Vanished/Obsolete are never shown regardless of selection.
 
-export type StatusFilterId =
-  | "all"
-  | "all-open"
-  | "untranslated"
-  | "proposed"
-  | "needs-review"
-  | "has-hard-flag"
-  | "proposed-by-model";
+export type StatusFilterState = Set<UnitState>;
+
+export const EMPTY_STATUS_FILTER: StatusFilterState = new Set<UnitState>();
 
 // ── Pure predicate ────────────────────────────────────────────────────────────
 //
-// Evaluates a single Unit against a StatusFilterId. FocusView evaluates one
-// unit at a time; MatrixView maps across rows. Both use this shared predicate.
-//
-// Note on "proposed-by-model": the Unit wire type does not currently expose a
-// distinct origin field for model vs. human proposals, so this filter matches
-// all proposed units (same behaviour as MatrixView's rowMatchesFilter). When
-// a `proposed_by` or `origin` field is added to the Rust type, update the
-// predicate here first.
+// Empty filter → pass everything (the user has chosen "no filter").
+// Non-empty → pass when the unit's state is in the set.
+// Vanished/Obsolete units never pass — they aren't UI-editable.
 
-export function unitMatchesFilter(unit: Unit, filter: StatusFilterId): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "all-open":
-      return (
-        unit.state !== "finished" &&
-        unit.state !== "vanished" &&
-        unit.state !== "obsolete"
-      );
-    case "untranslated":
-      return unit.state === "untranslated";
-    case "proposed":
-      return unit.state === "proposed";
-    case "needs-review":
-      return (
-        Array.isArray(unit.flags) &&
-        unit.flags.some((flag) => severityOf(flag) === "soft")
-      );
-    case "has-hard-flag":
-      return (
-        Array.isArray(unit.flags) &&
-        unit.flags.some((flag) => severityOf(flag) === "hard")
-      );
-    case "proposed-by-model":
-      // No origin field on Unit yet — matches all proposed units as a
-      // conservative approximation. Update when the wire type gains origin.
-      return unit.state === "proposed";
-  }
+export function unitMatchesFilter(
+  unit: Unit,
+  filter: StatusFilterState,
+): boolean {
+  if (unit.state === "vanished" || unit.state === "obsolete") return false;
+  if (filter.size === 0) return true;
+  return filter.has(unit.state);
 }
 
 // ── Pill definitions ──────────────────────────────────────────────────────────
 
 interface Pill {
-  id: StatusFilterId;
+  id: Extract<UnitState, "untranslated" | "proposed" | "finished">;
   label: string;
 }
 
-const PILLS: Pill[] = [
-  { id: "all", label: "All" },
-  { id: "all-open", label: "Open" },
+const PILLS: readonly Pill[] = [
   { id: "untranslated", label: "Untranslated" },
   { id: "proposed", label: "Proposed" },
-  { id: "needs-review", label: "Needs review" },
-  { id: "has-hard-flag", label: "Hard flag" },
-  { id: "proposed-by-model", label: "Model proposal" },
+  { id: "finished", label: "Finished" },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 interface StatusFilterProps {
-  value: StatusFilterId;
-  onChange: (id: StatusFilterId) => void;
+  value: StatusFilterState;
+  onChange: (next: StatusFilterState) => void;
 }
 
 export function StatusFilter({ value, onChange }: StatusFilterProps) {
+  const toggle = (id: Pill["id"]) => {
+    const next = new Set(value);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(next);
+  };
+
   return (
     <div
-      role="tablist"
+      role="toolbar"
       aria-label="Status filter"
       className="flex flex-wrap gap-1"
     >
-      {PILLS.map((pill) => (
-        <button
-          key={pill.id}
-          type="button"
-          role="tab"
-          aria-selected={value === pill.id}
-          onClick={() => onChange(pill.id)}
-          className={cn(
-            "inline-flex items-center h-6 px-2 rounded-sm text-xs font-medium",
-            "transition-colors duration-100 ease-out",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-            value === pill.id
-              ? "text-fg-primary bg-accent-subtle border border-accent-subtle-border"
-              : "text-fg-tertiary border border-transparent hover:text-fg-primary hover:bg-bg-hover",
-          )}
-        >
-          {pill.label}
-        </button>
-      ))}
+      {PILLS.map((pill) => {
+        const active = value.has(pill.id);
+        return (
+          <button
+            key={pill.id}
+            type="button"
+            aria-pressed={active}
+            onClick={() => toggle(pill.id)}
+            className={cn(
+              "inline-flex items-center h-6 px-2 rounded-sm text-xs font-medium",
+              "transition-colors duration-100 ease-out",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              active
+                ? "text-fg-primary bg-accent-subtle border border-accent-subtle-border"
+                : "text-fg-tertiary border border-transparent hover:text-fg-primary hover:bg-bg-hover",
+            )}
+          >
+            {pill.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

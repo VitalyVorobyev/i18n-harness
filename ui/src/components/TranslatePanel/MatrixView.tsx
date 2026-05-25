@@ -27,25 +27,10 @@ import {
   SparklesIcon,
   Spinner,
 } from "../primitives";
-import type { Filter as CatalogFilter } from "./CatalogList/CatalogList";
 import { Inspector } from "./Inspector/Inspector";
 import { MatrixCell } from "./MatrixCell";
-import type { StatusFilterId } from "./StatusFilter";
+import type { StatusFilterState } from "./StatusFilter";
 import { unitMatchesFilter } from "./StatusFilter";
-
-// ── Extended filter union ────────────────────────────────────────────────
-//
-// The legacy CatalogList carries "all" | "untranslated" | "proposed" |
-// "finished" | "needs-review". Matrix mode adds three more saved-view
-// names — they reuse the existing filter state shape since the App state
-// machine is unchanged. Filtering happens client-side over the materialised
-// matrix; no new IPC needed for PR 4.
-
-export type MatrixFilter =
-  | CatalogFilter
-  | "all-open"
-  | "has-hard-flag"
-  | "proposed-by-model";
 
 // ── Inspector collapse persistence ────────────────────────────────────────
 //
@@ -78,12 +63,10 @@ interface Props {
   reports: Record<UnitId, GateReport>;
   busyIds: Set<UnitId>;
   batchActive: boolean;
-  filter: MatrixFilter;
   search: string;
-  /** Status filter lifted from TranslatePanel sub-header — applied on top
-   *  of the saved-view `filter` so both can narrow the row list at once. */
-  statusFilter: StatusFilterId;
-  onFilterChange: (f: MatrixFilter) => void;
+  /** Status filter lifted from TranslatePanel sub-header. Multi-select set
+   *  over the three UI-editable UnitStates. Empty set means "show all". */
+  statusFilter: StatusFilterState;
   onSearchChange: (s: string) => void;
   /** Auto-load a project catalog into the App's openCatalogs cache. The
    *  call is silent — no toast, no selection change. Lets Matrix view
@@ -166,51 +149,6 @@ export function deriveMatrix(
   );
 }
 
-// Filter predicate over a materialised MatrixRow.
-function rowMatchesFilter(
-  row: MatrixRow,
-  filter: MatrixFilter,
-  hideFinished: boolean,
-): boolean {
-  // "Hide finished" hides rows where every loaded cell is finished.
-  if (hideFinished) {
-    const loaded = Array.from(row.byLocale.values());
-    if (
-      loaded.length > 0 &&
-      loaded.every((entry) => entry.unit.state === "finished")
-    ) {
-      return false;
-    }
-  }
-  const cells = Array.from(row.byLocale.values());
-  switch (filter) {
-    case "all":
-    case "all-open":
-      return true;
-    case "untranslated":
-      return cells.some((entry) => entry.unit.state === "untranslated");
-    case "proposed":
-    case "proposed-by-model":
-      return cells.some((entry) => entry.unit.state === "proposed");
-    case "finished":
-      return cells.some((entry) => entry.unit.state === "finished");
-    case "needs-review":
-      return cells.some(
-        (entry) =>
-          entry.unit.review_status === "needs-review" ||
-          (Array.isArray(entry.unit.flags) && entry.unit.flags.length > 0),
-      );
-    case "has-hard-flag":
-      return cells.some(
-        (entry) =>
-          Array.isArray(entry.unit.flags) &&
-          entry.unit.flags.some((flag) => severityOf(flag) === "hard"),
-      );
-    default:
-      return true;
-  }
-}
-
 function rowMatchesSearch(row: MatrixRow, lower: string): boolean {
   if (lower === "") return true;
   if (row.unitId.toLowerCase().includes(lower)) return true;
@@ -264,48 +202,18 @@ function aggregateLocaleStats(
   );
 }
 
-// ── Per-card counters for the saved-view counts in the left rail ─────────
+// ── Header label derivation ─────────────────────────────────────────────
 
-function countByFilter(rows: MatrixRow[]): Record<MatrixFilter, number> {
-  const c: Record<MatrixFilter, number> = {
-    all: 0,
-    "all-open": 0,
-    "needs-review": 0,
-    "has-hard-flag": 0,
-    "proposed-by-model": 0,
-    proposed: 0,
-    untranslated: 0,
-    finished: 0,
-  };
-  for (const row of rows) {
-    c.all += 1;
-    c["all-open"] += 1;
-    if (rowMatchesFilter(row, "needs-review", false)) c["needs-review"] += 1;
-    if (rowMatchesFilter(row, "has-hard-flag", false)) c["has-hard-flag"] += 1;
-    if (rowMatchesFilter(row, "proposed", false)) c.proposed += 1;
-    if (rowMatchesFilter(row, "proposed", false)) c["proposed-by-model"] += 1;
-    if (rowMatchesFilter(row, "untranslated", false)) c.untranslated += 1;
-    if (rowMatchesFilter(row, "finished", false)) c.finished += 1;
+function labelOfStatusFilter(filter: StatusFilterState): string {
+  if (filter.size === 0) return "All units";
+  if (filter.size === 1) {
+    const [only] = filter;
+    if (only === "untranslated") return "Untranslated";
+    if (only === "proposed") return "Proposed";
+    if (only === "finished") return "Finished";
   }
-  return c;
+  return "Filtered units";
 }
-
-// ── Saved-view definitions for the left rail ──────────────────────────────
-
-interface SavedView {
-  id: MatrixFilter;
-  label: string;
-  /** Tint class for the count badge — purely cosmetic. */
-  tint?: "default" | "soft" | "hard" | "proposed";
-}
-
-const SAVED_VIEWS: SavedView[] = [
-  { id: "all-open", label: "All open" },
-  { id: "needs-review", label: "Needs review", tint: "soft" },
-  { id: "has-hard-flag", label: "Has hard flag", tint: "hard" },
-  { id: "proposed-by-model", label: "Proposed by model", tint: "proposed" },
-  { id: "untranslated", label: "Untranslated" },
-];
 
 // ── Component ─────────────────────────────────────────────────────────────
 
@@ -316,10 +224,8 @@ export function MatrixView({
   reports,
   busyIds,
   batchActive,
-  filter,
   search,
   statusFilter,
-  onFilterChange,
   onSearchChange,
   onEnsureCatalogLoaded,
   setFocusLocale,
@@ -353,7 +259,6 @@ export function MatrixView({
 
   // ── Local view state (not persisted) ────────────────────────────────────
 
-  const [hideFinished, setHideFinished] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{
     rowKey: string;
     locale: string;
@@ -383,20 +288,19 @@ export function MatrixView({
   const filteredRows = useMemo(() => {
     const lower = search.trim().toLowerCase();
     return rows.filter((row) => {
-      if (!rowMatchesFilter(row, filter, hideFinished)) return false;
       if (!rowMatchesSearch(row, lower)) return false;
-      // statusFilter from TranslatePanel sub-header: pass if ANY cell in
-      // the row satisfies the unit-level predicate, or if filter is "all".
-      if (statusFilter !== "all") {
+      // Status filter from TranslatePanel sub-header: pass if ANY cell in
+      // the row satisfies the unit-level predicate. Empty filter passes
+      // everything via the predicate's own short-circuit.
+      if (statusFilter.size > 0) {
         const cells = Array.from(row.byLocale.values());
         if (!cells.some((entry) => unitMatchesFilter(entry.unit, statusFilter)))
           return false;
       }
       return true;
     });
-  }, [rows, filter, hideFinished, search, statusFilter]);
+  }, [rows, search, statusFilter]);
 
-  const counts = useMemo(() => countByFilter(rows), [rows]);
   const localeStats = useMemo(
     () => aggregateLocaleStats(summary, openCatalogs),
     [summary, openCatalogs],
@@ -576,7 +480,7 @@ export function MatrixView({
 
   // ── Render ─────────────────────────────────────────────────────────────
 
-  const headerTitle = labelOf(filter);
+  const headerTitle = labelOfStatusFilter(statusFilter);
   const headerSubtitle = `${rows.length} unit${rows.length === 1 ? "" : "s"} · ${openCount} open`;
 
   // Project-wide loading state — while the eager-load is still resolving the
@@ -608,21 +512,7 @@ export function MatrixView({
         )}
         style={{ width: 232 }}
       >
-        <div className="flex flex-col gap-1 px-3 pt-4 pb-2">
-          <div className="px-1 pb-1.5">
-            <Eyebrow>Inbox</Eyebrow>
-          </div>
-          {SAVED_VIEWS.map((view) => (
-            <SavedViewButton
-              key={view.id}
-              view={view}
-              active={filter === view.id}
-              count={counts[view.id] ?? 0}
-              onSelect={() => onFilterChange(view.id)}
-            />
-          ))}
-        </div>
-        <div className="flex flex-col gap-1 px-3 py-2 border-t border-border-subtle">
+        <div className="flex flex-col gap-1 px-3 pt-4 py-2">
           <div className="px-1 pb-1.5">
             <Eyebrow>By locale</Eyebrow>
           </div>
@@ -675,20 +565,6 @@ export function MatrixView({
                 </span>
               </div>
             </div>
-            <label
-              className={cn(
-                "flex items-center gap-2 text-xs text-fg-secondary cursor-pointer",
-                "select-none",
-              )}
-            >
-              <input
-                type="checkbox"
-                checked={hideFinished}
-                onChange={(e) => setHideFinished(e.target.checked)}
-                className="accent-accent"
-              />
-              <span>Hide finished</span>
-            </label>
             <button
               type="button"
               onClick={onRunOnSelected}
@@ -757,15 +633,6 @@ export function MatrixView({
             ) : visibleRows.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-sm text-fg-tertiary gap-2 py-12">
                 <p>No units match this view.</p>
-                {filter !== "all" && filter !== "all-open" && (
-                  <button
-                    type="button"
-                    onClick={() => onFilterChange("all-open")}
-                    className="text-xs text-accent underline-offset-2 hover:underline"
-                  >
-                    Clear filter
-                  </button>
-                )}
               </div>
             ) : (
               visibleRows.map((row) => (
@@ -773,7 +640,6 @@ export function MatrixView({
                   key={row.rowKey}
                   row={row}
                   locales={summary.locales}
-                  hideFinished={hideFinished}
                   dirtyIds={dirtyIds}
                   busyIds={busyIds}
                   focused={focusedRowKey === row.rowKey}
@@ -814,7 +680,6 @@ export function MatrixView({
 interface MatrixCardProps {
   row: MatrixRow;
   locales: string[];
-  hideFinished: boolean;
   dirtyIds: Set<UnitId>;
   busyIds: Set<UnitId>;
   focused: boolean;
@@ -832,7 +697,6 @@ interface MatrixCardProps {
 function MatrixCard({
   row,
   locales,
-  hideFinished,
   dirtyIds,
   busyIds,
   focused,
@@ -843,16 +707,7 @@ function MatrixCard({
   onAccept,
   onReopen,
 }: MatrixCardProps) {
-  const hiddenFinishedLocales = hideFinished
-    ? locales.filter((l) => {
-        const entry = row.byLocale.get(l);
-        return entry?.unit.state === "finished";
-      })
-    : [];
-
-  const visibleLocales = hideFinished
-    ? locales.filter((l) => !hiddenFinishedLocales.includes(l))
-    : locales;
+  const visibleLocales = locales;
 
   return (
     <article
@@ -933,18 +788,6 @@ function MatrixCard({
           );
         })}
       </div>
-
-      {/* Hidden-finished footer */}
-      {hiddenFinishedLocales.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap px-4 py-2 bg-bg-base">
-          <span className="text-[11px] text-fg-tertiary inline-flex items-center gap-1">
-            Finished:
-          </span>
-          {hiddenFinishedLocales.map((l) => (
-            <LocaleTag key={l} locale={l} tone="default" />
-          ))}
-        </div>
-      )}
     </article>
   );
 }
@@ -994,48 +837,6 @@ function dotColor(state: Unit["state"]): string {
 
 // ── Left-rail sub-components ─────────────────────────────────────────────
 
-function SavedViewButton({
-  view,
-  active,
-  count,
-  onSelect,
-}: {
-  view: SavedView;
-  active: boolean;
-  count: number;
-  onSelect: () => void;
-}) {
-  const tintClass =
-    view.tint === "soft"
-      ? "text-severity-soft"
-      : view.tint === "hard"
-        ? "text-severity-hard"
-        : view.tint === "proposed"
-          ? "text-state-proposed"
-          : "text-fg-tertiary";
-
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={active}
-      className={cn(
-        "w-full flex items-center gap-2 h-7 px-2.5 rounded-md text-xs",
-        "transition-colors duration-100 ease-out",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-        active
-          ? "text-fg-primary bg-accent-subtle font-medium"
-          : "text-fg-secondary hover:bg-bg-hover hover:text-fg-primary",
-      )}
-    >
-      <span className="flex-1 text-left truncate">{view.label}</span>
-      <span className={cn("font-mono tabular-nums text-[11px]", tintClass)}>
-        {count}
-      </span>
-    </button>
-  );
-}
-
 function LocaleRowButton({
   stat,
   onSelect,
@@ -1071,23 +872,4 @@ function LocaleRowButton({
       />
     </button>
   );
-}
-
-function labelOf(f: MatrixFilter): string {
-  switch (f) {
-    case "all":
-    case "all-open":
-      return "All open";
-    case "untranslated":
-      return "Untranslated";
-    case "proposed":
-    case "proposed-by-model":
-      return "Proposed by model";
-    case "finished":
-      return "Finished";
-    case "needs-review":
-      return "Needs review";
-    case "has-hard-flag":
-      return "Has hard flag";
-  }
 }

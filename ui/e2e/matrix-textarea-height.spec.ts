@@ -32,9 +32,10 @@ test.describe("Translate Matrix — textarea height on first render", () => {
     for (let i = 0; i < count; i++) {
       const box = await cells.nth(i).boundingBox();
       expect(box, `textarea #${i} has a bounding box`).not.toBeNull();
-      expect(box!.height, `textarea #${i} height ≥ ${FLOOR_PX} px`).toBeGreaterThanOrEqual(
-        FLOOR_PX,
-      );
+      expect(
+        box?.height ?? 0,
+        `textarea #${i} height ≥ ${FLOOR_PX} px`,
+      ).toBeGreaterThanOrEqual(FLOOR_PX);
     }
 
     // Save a screenshot so the visual can be eyeballed if a CI fails.

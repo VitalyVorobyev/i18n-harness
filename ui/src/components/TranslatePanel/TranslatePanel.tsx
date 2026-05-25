@@ -24,12 +24,11 @@ import type {
   UnitId,
 } from "../../lib/types";
 import { FocusView } from "./FocusView";
-import type { MatrixFilter } from "./MatrixView";
 import { MatrixView } from "./MatrixView";
 import type { ScopePair, StartPairFn } from "./RunOnScopeModal";
 import { RunOnScopeModal } from "./RunOnScopeModal";
-import type { StatusFilterId } from "./StatusFilter";
-import { StatusFilter } from "./StatusFilter";
+import type { StatusFilterState } from "./StatusFilter";
+import { EMPTY_STATUS_FILTER, StatusFilter } from "./StatusFilter";
 import type { UnitEditorHandle } from "./UnitEditor/UnitEditor";
 
 interface Props {
@@ -41,7 +40,6 @@ interface Props {
   activeCatalogPath: string | null;
   catalog: CatalogResponse | null;
   selectedId: UnitId | null;
-  filter: MatrixFilter;
   search: string;
   dirtyIds: Set<UnitId>;
   reports: Record<UnitId, GateReport>;
@@ -56,7 +54,6 @@ interface Props {
 
   // ── Per-unit IPC dispatchers (owned by App) ─────────────────────────────
   onSelect: (id: UnitId) => void;
-  onFilterChange: (filter: MatrixFilter) => void;
   onSearchChange: (search: string) => void;
   onEdit: (id: UnitId, edit: TargetEdit) => Promise<void>;
   onTranslate: (id: UnitId) => void;
@@ -81,11 +78,9 @@ export function TranslatePanel({
   reports,
   busyIds,
   batchActive,
-  filter,
   search,
   focusLocale,
   setFocusLocale,
-  onFilterChange,
   onSearchChange,
   onEnsureCatalogLoaded,
   onTranslateUnitFor,
@@ -97,9 +92,11 @@ export function TranslatePanel({
   // ── Shared sub-header state ─────────────────────────────────────────────
   //
   // statusFilter persists across Single ↔ Matrix switches so the user's
-  // selection is not lost when toggling modes.
+  // selection is not lost when toggling modes. Empty set = "show all".
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilterId>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterState>(
+    () => new Set(EMPTY_STATUS_FILTER),
+  );
 
   // ── RunOnScopeModal state ───────────────────────────────────────────────
   //
@@ -248,10 +245,8 @@ export function TranslatePanel({
           reports={reports}
           busyIds={busyIds}
           batchActive={batchActive}
-          filter={filter}
           search={search}
           statusFilter={statusFilter}
-          onFilterChange={onFilterChange}
           onSearchChange={onSearchChange}
           onEnsureCatalogLoaded={onEnsureCatalogLoaded}
           setFocusLocale={setFocusLocale}

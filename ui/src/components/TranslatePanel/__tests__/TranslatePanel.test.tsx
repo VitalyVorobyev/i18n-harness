@@ -5,7 +5,8 @@
 //   2. Clicking "Matrix" while in Single mode calls setFocusLocale(null).
 //   3. Clicking "Single" while in Matrix mode calls setFocusLocale with the
 //      first available locale.
-//   4. Changing the StatusFilter selection persists when toggling modes.
+//   4. The StatusFilter multi-select pills are visible in both modes and
+//      selections accumulate when pills are clicked.
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -42,7 +43,6 @@ const BASE_PROPS = {
   activeCatalogPath: null,
   catalog: null,
   selectedId: null,
-  filter: "all-open" as const,
   search: "",
   dirtyIds: new Set<string>(),
   reports: {},
@@ -51,7 +51,6 @@ const BASE_PROPS = {
   error: null,
   editorRef: { current: null },
   onSelect: vi.fn(),
-  onFilterChange: vi.fn(),
   onSearchChange: vi.fn(),
   onEdit: vi.fn(),
   onTranslate: vi.fn(),
@@ -152,10 +151,10 @@ describe("TranslatePanel mode switching", () => {
   });
 });
 
-// ── StatusFilter persistence across mode switches ─────────────────────────────
+// ── StatusFilter visibility + multi-select behavior across modes ─────────────
 
 describe("StatusFilter persists across mode switches", () => {
-  it("StatusFilter is visible in Matrix mode", () => {
+  it("StatusFilter renders exactly 3 pill buttons in Matrix mode", () => {
     render(
       <TranslatePanel
         {...BASE_PROPS}
@@ -163,12 +162,15 @@ describe("StatusFilter persists across mode switches", () => {
         setFocusLocale={vi.fn()}
       />,
     );
-    // The StatusFilter renders a tablist with 7 tabs.
-    const tablist = screen.getByRole("tablist", { name: /status filter/i });
-    expect(tablist).toBeInTheDocument();
+    const toolbar = screen.getByRole("toolbar", { name: /status filter/i });
+    expect(toolbar).toBeInTheDocument();
+    const labels = Array.from(toolbar.querySelectorAll("button")).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(["Untranslated", "Proposed", "Finished"]);
   });
 
-  it("StatusFilter is visible in Single mode", () => {
+  it("StatusFilter renders exactly 3 pill buttons in Single mode", () => {
     render(
       <TranslatePanel
         {...BASE_PROPS}
@@ -176,11 +178,15 @@ describe("StatusFilter persists across mode switches", () => {
         setFocusLocale={vi.fn()}
       />,
     );
-    const tablist = screen.getByRole("tablist", { name: /status filter/i });
-    expect(tablist).toBeInTheDocument();
+    const toolbar = screen.getByRole("toolbar", { name: /status filter/i });
+    expect(toolbar).toBeInTheDocument();
+    const labels = Array.from(toolbar.querySelectorAll("button")).map(
+      (b) => b.textContent,
+    );
+    expect(labels).toEqual(["Untranslated", "Proposed", "Finished"]);
   });
 
-  it("StatusFilter selection changes the active pill in the same render", async () => {
+  it("clicking a pill toggles its aria-pressed state", async () => {
     render(
       <TranslatePanel
         {...BASE_PROPS}
@@ -188,19 +194,16 @@ describe("StatusFilter persists across mode switches", () => {
         setFocusLocale={vi.fn()}
       />,
     );
-    // Initial: "All" is selected.
-    const allTab = screen.getByRole("tab", { name: "All" });
-    expect(allTab).toHaveAttribute("aria-selected", "true");
+    const toolbar = screen.getByRole("toolbar", { name: /status filter/i });
+    const buttons = Array.from(toolbar.querySelectorAll("button"));
+    const byLabel = (label: string) =>
+      buttons.find((b) => b.textContent === label) as HTMLButtonElement;
 
-    // Click "Untranslated".
-    await userEvent.click(screen.getByRole("tab", { name: "Untranslated" }));
-    expect(screen.getByRole("tab", { name: "Untranslated" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("tab", { name: "All" })).toHaveAttribute(
-      "aria-selected",
-      "false",
-    );
+    expect(byLabel("Proposed")).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(byLabel("Proposed"));
+    expect(byLabel("Proposed")).toHaveAttribute("aria-pressed", "true");
+    // Other pills remain unpressed (multi-select, but only one was clicked).
+    expect(byLabel("Untranslated")).toHaveAttribute("aria-pressed", "false");
+    expect(byLabel("Finished")).toHaveAttribute("aria-pressed", "false");
   });
 });

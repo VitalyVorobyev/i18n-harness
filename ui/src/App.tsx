@@ -11,7 +11,6 @@ import { QualityPanel } from "./components/QualityPanel/QualityPanel";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
-import type { MatrixFilter } from "./components/TranslatePanel";
 import { TranslatePanel } from "./components/TranslatePanel";
 import type {
   PairJobHandle,
@@ -86,7 +85,6 @@ export function App() {
     : null;
 
   const [selectedId, setSelectedId] = useState<UnitId | null>(null);
-  const [filter, setFilter] = useState<MatrixFilter>("all");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -295,7 +293,6 @@ export function App() {
       setOpenCatalogs(new Map());
       setActiveCatalogPath(null);
       setSelectedId(null);
-      setFilter("all");
       setSearch("");
       setDirtyIds(new Set());
       setDirtyCatalogPaths(new Set());
@@ -417,7 +414,6 @@ export function App() {
       if (cachedEntry !== undefined) {
         setActiveCatalogPath(absPath);
         // Reset per-catalog UI state that does not carry over between catalogs.
-        setFilter("all");
         setSearch("");
         setReports({});
         setBusyIds(new Set());
@@ -442,7 +438,6 @@ export function App() {
           response.units.find((u) => u.state === "untranslated") ??
           response.units[0];
         setSelectedId(first?.id ?? null);
-        setFilter("all");
         setSearch("");
         setDirtyIds(new Set());
         setReports({});
@@ -1416,7 +1411,6 @@ export function App() {
                 activeCatalogPath={activeCatalogPath}
                 catalog={catalog}
                 selectedId={selectedId}
-                filter={filter}
                 search={search}
                 dirtyIds={dirtyIds}
                 reports={reports}
@@ -1427,7 +1421,6 @@ export function App() {
                 focusLocale={focusLocale}
                 setFocusLocale={setFocusLocale}
                 onSelect={setSelectedId}
-                onFilterChange={setFilter}
                 onSearchChange={setSearch}
                 onEdit={onEditTarget}
                 onTranslate={onTranslate}

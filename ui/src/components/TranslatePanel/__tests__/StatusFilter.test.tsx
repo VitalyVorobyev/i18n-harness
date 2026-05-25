@@ -1,10 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { Unit } from "../../../lib/types";
+import type { Unit, UnitState } from "../../../lib/types";
 import {
+  EMPTY_STATUS_FILTER,
   StatusFilter,
-  type StatusFilterId,
+  type StatusFilterState,
   unitMatchesFilter,
 } from "../StatusFilter";
 
@@ -28,179 +29,145 @@ function makeUnit(overrides: Partial<Unit> = {}): Unit {
   };
 }
 
+function set(...states: UnitState[]): StatusFilterState {
+  return new Set(states);
+}
+
 // ── unitMatchesFilter ─────────────────────────────────────────────────────────
 
 describe("unitMatchesFilter", () => {
-  it("all — always true regardless of state", () => {
-    for (const state of [
-      "untranslated",
-      "proposed",
-      "finished",
-      "vanished",
-      "obsolete",
-    ] as const) {
-      expect(unitMatchesFilter(makeUnit({ state }), "all")).toBe(true);
+  it("empty filter passes every UI-editable unit state", () => {
+    for (const state of ["untranslated", "proposed", "finished"] as const) {
+      expect(unitMatchesFilter(makeUnit({ state }), EMPTY_STATUS_FILTER)).toBe(
+        true,
+      );
     }
   });
 
-  it("all-open — true for untranslated and proposed", () => {
+  it("vanished/obsolete units never pass regardless of filter", () => {
+    for (const state of ["vanished", "obsolete"] as const) {
+      expect(unitMatchesFilter(makeUnit({ state }), EMPTY_STATUS_FILTER)).toBe(
+        false,
+      );
+      expect(
+        unitMatchesFilter(
+          makeUnit({ state }),
+          set("untranslated", "proposed", "finished"),
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("single-state filter — only matching state passes", () => {
     expect(
-      unitMatchesFilter(makeUnit({ state: "untranslated" }), "all-open"),
+      unitMatchesFilter(makeUnit({ state: "proposed" }), set("proposed")),
     ).toBe(true);
-    expect(unitMatchesFilter(makeUnit({ state: "proposed" }), "all-open")).toBe(
+    expect(
+      unitMatchesFilter(makeUnit({ state: "untranslated" }), set("proposed")),
+    ).toBe(false);
+    expect(
+      unitMatchesFilter(makeUnit({ state: "finished" }), set("proposed")),
+    ).toBe(false);
+  });
+
+  it("multi-state filter — any matching state passes", () => {
+    const filter = set("untranslated", "finished");
+    expect(unitMatchesFilter(makeUnit({ state: "untranslated" }), filter)).toBe(
       true,
     );
-  });
-
-  it("all-open — false for finished, vanished, and obsolete", () => {
-    expect(unitMatchesFilter(makeUnit({ state: "finished" }), "all-open")).toBe(
-      false,
-    );
-    expect(unitMatchesFilter(makeUnit({ state: "vanished" }), "all-open")).toBe(
-      false,
-    );
-    expect(unitMatchesFilter(makeUnit({ state: "obsolete" }), "all-open")).toBe(
-      false,
-    );
-  });
-
-  it("untranslated — true only when state is untranslated", () => {
-    expect(
-      unitMatchesFilter(makeUnit({ state: "untranslated" }), "untranslated"),
-    ).toBe(true);
-    expect(
-      unitMatchesFilter(makeUnit({ state: "proposed" }), "untranslated"),
-    ).toBe(false);
-    expect(
-      unitMatchesFilter(makeUnit({ state: "finished" }), "untranslated"),
-    ).toBe(false);
-  });
-
-  it("proposed — true only when state is proposed", () => {
-    expect(unitMatchesFilter(makeUnit({ state: "proposed" }), "proposed")).toBe(
+    expect(unitMatchesFilter(makeUnit({ state: "finished" }), filter)).toBe(
       true,
     );
-    expect(
-      unitMatchesFilter(makeUnit({ state: "untranslated" }), "proposed"),
-    ).toBe(false);
-  });
-
-  it("needs-review — true when unit has at least one soft flag", () => {
-    // length-warn is soft
-    const unit = makeUnit({ flags: ["length-warn"] });
-    expect(unitMatchesFilter(unit, "needs-review")).toBe(true);
-  });
-
-  it("needs-review — false when only hard flags present", () => {
-    const unit = makeUnit({ flags: ["placeholder-mismatch"] });
-    expect(unitMatchesFilter(unit, "needs-review")).toBe(false);
-  });
-
-  it("needs-review — false when flags array is empty", () => {
-    expect(unitMatchesFilter(makeUnit({ flags: [] }), "needs-review")).toBe(
+    expect(unitMatchesFilter(makeUnit({ state: "proposed" }), filter)).toBe(
       false,
     );
   });
 
-  it("needs-review — true when both hard and soft flags are present", () => {
-    const unit = makeUnit({
-      flags: ["placeholder-mismatch", "length-warn"],
-    });
-    expect(unitMatchesFilter(unit, "needs-review")).toBe(true);
-  });
-
-  it("has-hard-flag — true when unit has at least one hard flag", () => {
-    // placeholder-mismatch is hard
-    const unit = makeUnit({ flags: ["placeholder-mismatch"] });
-    expect(unitMatchesFilter(unit, "has-hard-flag")).toBe(true);
-  });
-
-  it("has-hard-flag — false when only soft flags present", () => {
-    const unit = makeUnit({ flags: ["length-warn"] });
-    expect(unitMatchesFilter(unit, "has-hard-flag")).toBe(false);
-  });
-
-  it("has-hard-flag — false when flags array is empty", () => {
-    expect(unitMatchesFilter(makeUnit({ flags: [] }), "has-hard-flag")).toBe(
-      false,
-    );
-  });
-
-  it("proposed-by-model — true for proposed state", () => {
-    expect(
-      unitMatchesFilter(makeUnit({ state: "proposed" }), "proposed-by-model"),
-    ).toBe(true);
-  });
-
-  it("proposed-by-model — false for non-proposed state", () => {
-    expect(
-      unitMatchesFilter(
-        makeUnit({ state: "untranslated" }),
-        "proposed-by-model",
-      ),
-    ).toBe(false);
-    expect(
-      unitMatchesFilter(makeUnit({ state: "finished" }), "proposed-by-model"),
-    ).toBe(false);
+  it("all three states selected — every UI-editable unit passes", () => {
+    const filter = set("untranslated", "proposed", "finished");
+    for (const state of ["untranslated", "proposed", "finished"] as const) {
+      expect(unitMatchesFilter(makeUnit({ state }), filter)).toBe(true);
+    }
   });
 });
 
 // ── StatusFilter component ────────────────────────────────────────────────────
 
 describe("StatusFilter component", () => {
-  it("renders exactly 7 pill buttons", () => {
-    render(<StatusFilter value="all" onChange={() => {}} />);
-    const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(7);
+  it("renders exactly 3 pill buttons", () => {
+    render(<StatusFilter value={EMPTY_STATUS_FILTER} onChange={() => {}} />);
+    const toolbar = screen.getByRole("toolbar", { name: /status filter/i });
+    expect(toolbar.querySelectorAll("button")).toHaveLength(3);
   });
 
-  it("clicking a pill calls onChange with the correct id", async () => {
-    const onChange = vi.fn();
-    render(<StatusFilter value="all" onChange={onChange} />);
+  it("renders the three unit-state labels", () => {
+    render(<StatusFilter value={EMPTY_STATUS_FILTER} onChange={() => {}} />);
+    expect(screen.getByText("Untranslated")).toBeInTheDocument();
+    expect(screen.getByText("Proposed")).toBeInTheDocument();
+    expect(screen.getByText("Finished")).toBeInTheDocument();
+  });
 
-    const pills: Array<[StatusFilterId, string]> = [
-      ["all", "All"],
-      ["all-open", "Open"],
-      ["untranslated", "Untranslated"],
-      ["proposed", "Proposed"],
-      ["needs-review", "Needs review"],
-      ["has-hard-flag", "Hard flag"],
-      ["proposed-by-model", "Model proposal"],
-    ];
-
-    for (const [id, label] of pills) {
-      const btn = screen.getByText(label);
-      await userEvent.click(btn);
-      expect(onChange).toHaveBeenLastCalledWith(id);
+  it("empty filter — every button has aria-pressed=false", () => {
+    render(<StatusFilter value={EMPTY_STATUS_FILTER} onChange={() => {}} />);
+    const toolbar = screen.getByRole("toolbar", { name: /status filter/i });
+    for (const btn of toolbar.querySelectorAll("button")) {
+      expect(btn).toHaveAttribute("aria-pressed", "false");
     }
   });
 
-  it("active button has aria-selected=true", () => {
-    render(<StatusFilter value="untranslated" onChange={() => {}} />);
-    const tabs = screen.getAllByRole("tab");
-    const activeTab = tabs.find(
-      (t) => t.getAttribute("aria-selected") === "true",
+  it("aria-pressed reflects each pill's membership in the set", () => {
+    render(<StatusFilter value={set("proposed")} onChange={() => {}} />);
+    expect(screen.getByText("Proposed").closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    expect(activeTab).toBeDefined();
-    // biome-ignore lint/style/noNonNullAssertion: asserted defined above
-    expect(activeTab!.textContent).toBe("Untranslated");
+    expect(screen.getByText("Untranslated").closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByText("Finished").closest("button")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
-  it("only the active button has aria-selected=true", () => {
-    render(<StatusFilter value="proposed" onChange={() => {}} />);
-    const tabs = screen.getAllByRole("tab");
-    const activeTabs = tabs.filter(
-      (t) => t.getAttribute("aria-selected") === "true",
-    );
-    expect(activeTabs).toHaveLength(1);
+  it("clicking an inactive pill adds its state to the filter set", async () => {
+    const onChange = vi.fn();
+    render(<StatusFilter value={EMPTY_STATUS_FILTER} onChange={onChange} />);
+    await userEvent.click(screen.getByText("Proposed"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0]?.[0] as StatusFilterState;
+    expect(Array.from(next)).toEqual(["proposed"]);
   });
 
-  it("inactive buttons have aria-selected=false", () => {
-    render(<StatusFilter value="all" onChange={() => {}} />);
-    const tabs = screen.getAllByRole("tab");
-    const inactiveTabs = tabs.filter(
-      (t) => t.getAttribute("aria-selected") === "false",
+  it("clicking an active pill removes its state from the filter set", async () => {
+    const onChange = vi.fn();
+    render(
+      <StatusFilter
+        value={set("untranslated", "proposed")}
+        onChange={onChange}
+      />,
     );
-    expect(inactiveTabs).toHaveLength(6);
+    await userEvent.click(screen.getByText("Proposed"));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0]?.[0] as StatusFilterState;
+    expect(Array.from(next)).toEqual(["untranslated"]);
+  });
+
+  it("multi-select — selecting all three pills accumulates the set", async () => {
+    let current: StatusFilterState = EMPTY_STATUS_FILTER;
+    const onChange = vi.fn((next: StatusFilterState) => {
+      current = next;
+    });
+    const { rerender } = render(
+      <StatusFilter value={current} onChange={onChange} />,
+    );
+    for (const label of ["Untranslated", "Proposed", "Finished"]) {
+      await userEvent.click(screen.getByText(label));
+      rerender(<StatusFilter value={current} onChange={onChange} />);
+    }
+    expect(Array.from(current).sort()).toEqual(
+      ["finished", "proposed", "untranslated"].sort(),
+    );
   });
 });

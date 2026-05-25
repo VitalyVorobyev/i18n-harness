@@ -28,8 +28,8 @@ import {
 } from "../primitives";
 import { StateBadge } from "../StateBadge/StateBadge";
 import { Inspector } from "./Inspector/Inspector";
-import type { StatusFilterId } from "./StatusFilter";
-import { unitMatchesFilter } from "./StatusFilter";
+import type { StatusFilterState } from "./StatusFilter";
+import { EMPTY_STATUS_FILTER, unitMatchesFilter } from "./StatusFilter";
 import { UntranslatedDraftEditor } from "./UntranslatedDraftEditor";
 
 // ── Prop types ─────────────────────────────────────────────────────────────
@@ -43,9 +43,11 @@ interface Props {
   reports: Record<UnitId, GateReport>;
   busyIds: Set<UnitId>;
   batchActive: boolean;
-  /** Status filter lifted from TranslatePanel — persists across mode switches. */
-  statusFilter: StatusFilterId;
-  onStatusFilterChange?: (id: StatusFilterId) => void;
+  /** Status filter lifted from TranslatePanel — persists across mode switches.
+   *  Multi-select set over the three UI-editable UnitStates. Empty set means
+   *  "show everything". */
+  statusFilter: StatusFilterState;
+  onStatusFilterChange?: (next: StatusFilterState) => void;
   onEnsureCatalogLoaded: (absPath: string) => Promise<void>;
   onTranslateUnit: (catalogPath: string, unit: Unit) => void;
   onEditUnit: (catalogPath: string, unit: Unit, edit: TargetEdit) => void;
@@ -568,12 +570,12 @@ export function FocusView({
           {filteredEntries.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-fg-tertiary">
               <p>Nothing to translate here.</p>
-              {(search || statusFilter !== "all") && (
+              {(search || statusFilter.size > 0) && (
                 <button
                   type="button"
                   onClick={() => {
                     setSearch("");
-                    onStatusFilterChange?.("all");
+                    onStatusFilterChange?.(EMPTY_STATUS_FILTER);
                   }}
                   className="text-xs text-accent underline-offset-2 hover:underline"
                 >
