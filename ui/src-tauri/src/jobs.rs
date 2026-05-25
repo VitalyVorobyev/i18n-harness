@@ -36,7 +36,8 @@
 //!   "alive" vs "removed".
 //! - Not persistent. In-flight jobs do not survive an app restart.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use uuid::Uuid;
@@ -146,6 +147,148 @@ impl JobRegistry {
     }
 }
 
+// ── Typed batch-slot tracking ─────────────────────────────────────────────────
+
+/// Identifies which "batch slot" a worker is claiming.
+///
+/// `Catalog` is used by per-catalog/per-locale batch translates; two workers
+/// cannot run concurrently against the same pair. `Eval` is the single global
+/// evaluation slot — replacing the old `("__eval__", "__eval__")` magic key.
+#[derive(Debug, Clone)]
+pub(crate) enum BatchSlot {
+    Catalog { abs: PathBuf, locale: String },
+    Eval,
+}
+
+/// Typed wrapper over per-catalog and eval concurrency tracking.
+///
+/// Replaces the old `Mutex<BTreeSet<(PathBuf, String)>>` field on `AppState`
+/// and the `("__eval__", "__eval__")` magic key. The eval slot is an
+/// explicit boolean rather than a tuple inserted into the same set, so
+/// misuses (accidentally claiming the catalog slot with eval coordinates) are
+/// compile-time impossible.
+#[derive(Default)]
+pub(crate) struct ActiveBatches {
+    per_catalog: Mutex<BTreeSet<(PathBuf, String)>>,
+    eval_running: Mutex<bool>,
+}
+
+impl ActiveBatches {
+    /// Try to claim a slot.
+    ///
+    /// Returns an `Err` string suitable for returning to the JS layer when
+    /// the slot is already busy. Error strings are byte-stable with the old
+    /// code paths so the UI error messages don't drift.
+    pub(crate) fn try_claim(&self, slot: &BatchSlot) -> Result<(), String> {
+        match slot {
+            BatchSlot::Catalog { abs, locale } => {
+                let mut set = self
+                    .per_catalog
+                    .lock()
+                    .map_err(crate::error::lock_poisoned("active_batches"))?;
+                let key = (abs.clone(), locale.clone());
+                if !set.insert(key) {
+                    return Err(
+                        "a translation is already running for this catalog/locale".to_string()
+                    );
+                }
+                Ok(())
+            }
+            BatchSlot::Eval => {
+                let mut flag = self
+                    .eval_running
+                    .lock()
+                    .map_err(crate::error::lock_poisoned("active_batches"))?;
+                if *flag {
+                    return Err("an evaluation is already running".to_string());
+                }
+                *flag = true;
+                Ok(())
+            }
+        }
+    }
+
+    /// Release a previously-claimed slot. Idempotent — releasing an unheld
+    /// slot is a no-op. A poisoned lock is logged and ignored so workers
+    /// never panic in Drop.
+    pub(crate) fn release(&self, slot: &BatchSlot) {
+        match slot {
+            BatchSlot::Catalog { abs, locale } => {
+                if let Ok(mut set) = self.per_catalog.lock() {
+                    set.remove(&(abs.clone(), locale.clone()));
+                }
+            }
+            BatchSlot::Eval => {
+                if let Ok(mut flag) = self.eval_running.lock() {
+                    *flag = false;
+                }
+            }
+        }
+    }
+}
+
+// ── RAII scope guard ──────────────────────────────────────────────────────────
+
+/// RAII guard that owns a job-id registration AND a batch-slot claim.
+///
+/// On Drop, deregisters the job from the [`JobRegistry`] and releases the
+/// [`BatchSlot`] from [`ActiveBatches`] — in that order per the plan's
+/// documented sequence (deregister first, then release).
+///
+/// # Lifetime constraint
+///
+/// `ScopedJobRegistration<'a>` borrows `JobRegistry` and `ActiveBatches` by
+/// shared reference; the `'a` lifetime must outlive the guard. This means
+/// the guard must be created inside the worker thread body (where the
+/// `tauri::State<'_, AppState>` lifetime is long enough) rather than on the
+/// command-dispatch thread. Wired in the following commit.
+// `#[allow(dead_code)]`: used in the next commit; present here so the types
+// are visible and compile-checked before they are wired into worker entry points.
+#[allow(dead_code)]
+pub(crate) struct ScopedJobRegistration<'a> {
+    jobs: &'a JobRegistry,
+    active: &'a ActiveBatches,
+    pub(crate) job_id: JobId,
+    token: CancellationToken,
+    slot: BatchSlot,
+}
+
+#[allow(dead_code)]
+impl<'a> ScopedJobRegistration<'a> {
+    /// Claim the slot and register a new job atomically from the caller's
+    /// perspective (slot claim is visible before the job id is returned to JS).
+    ///
+    /// On error the slot is never claimed — the caller sees the busy-slot
+    /// message without any side effects.
+    pub(crate) fn claim(
+        jobs: &'a JobRegistry,
+        active: &'a ActiveBatches,
+        slot: BatchSlot,
+    ) -> Result<Self, String> {
+        active.try_claim(&slot)?;
+        let (job_id, token) = jobs.register();
+        Ok(Self {
+            jobs,
+            active,
+            job_id,
+            token,
+            slot,
+        })
+    }
+
+    pub(crate) fn token(&self) -> &CancellationToken {
+        &self.token
+    }
+}
+
+impl Drop for ScopedJobRegistration<'_> {
+    fn drop(&mut self) {
+        // Deregister the job first, then release the slot — per plan sequence.
+        self.jobs.deregister(&self.job_id);
+        self.active.release(&self.slot);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +376,73 @@ mod tests {
         let (id, _) = r.register();
         assert_eq!(id.len(), 32, "uuid simple form is 32 hex chars");
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    // ── ActiveBatches tests ───────────────────────────────────────────────────
+
+    fn catalog_slot(path: &str, locale: &str) -> BatchSlot {
+        BatchSlot::Catalog {
+            abs: PathBuf::from(path),
+            locale: locale.to_string(),
+        }
+    }
+
+    #[test]
+    fn active_batches_claim_release_per_catalog_is_independent_per_pair() {
+        let ab = ActiveBatches::default();
+        let slot_a = catalog_slot("/a/b.ts", "de");
+        let slot_b = catalog_slot("/a/b.ts", "es"); // different locale
+        let slot_c = catalog_slot("/x/y.ts", "de"); // different path
+
+        // All three distinct pairs can be claimed simultaneously.
+        assert!(ab.try_claim(&slot_a).is_ok());
+        assert!(ab.try_claim(&slot_b).is_ok());
+        assert!(ab.try_claim(&slot_c).is_ok());
+
+        // Releasing one slot does not disturb the others.
+        ab.release(&slot_a);
+        assert!(ab.try_claim(&slot_a).is_ok()); // re-claimable after release
+        assert!(ab.try_claim(&slot_b).is_err()); // still held
+        assert!(ab.try_claim(&slot_c).is_err()); // still held
+    }
+
+    #[test]
+    fn active_batches_second_claim_on_same_pair_returns_busy_error() {
+        let ab = ActiveBatches::default();
+        let slot = catalog_slot("/catalog.ts", "zh");
+
+        assert!(ab.try_claim(&slot).is_ok());
+
+        let err = ab.try_claim(&slot).unwrap_err();
+        assert_eq!(
+            err,
+            "a translation is already running for this catalog/locale"
+        );
+
+        ab.release(&slot);
+        // After release, a third claim succeeds.
+        assert!(ab.try_claim(&slot).is_ok());
+    }
+
+    #[test]
+    fn active_batches_eval_slot_excludes_itself_but_not_per_catalog() {
+        let ab = ActiveBatches::default();
+        let eval = BatchSlot::Eval;
+        let catalog = catalog_slot("/c.ts", "fr");
+
+        // Claiming eval does not block a catalog slot.
+        assert!(ab.try_claim(&eval).is_ok());
+        assert!(ab.try_claim(&catalog).is_ok());
+
+        // Second eval claim returns the busy message.
+        let err = ab.try_claim(&eval).unwrap_err();
+        assert_eq!(err, "an evaluation is already running");
+
+        // Releasing eval allows it to be claimed again.
+        ab.release(&eval);
+        assert!(ab.try_claim(&eval).is_ok());
+
+        // Catalog slot is still held.
+        assert!(ab.try_claim(&catalog).is_err());
     }
 }

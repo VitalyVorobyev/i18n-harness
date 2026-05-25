@@ -12,7 +12,7 @@ use i18n_harness_glossary::Glossary;
 use i18n_harness_project::Project;
 
 use crate::backing::BackingCatalog;
-use crate::jobs::JobRegistry;
+use crate::jobs::{ActiveBatches, JobRegistry};
 
 /// Process-wide state shared across Tauri commands.
 ///
@@ -48,13 +48,11 @@ pub struct AppState {
     /// worker thread deregisters on exit. Per-catalog/per-locale
     /// exclusion is enforced at the command level via `active_batches`.
     pub(crate) jobs: JobRegistry,
-    /// `(absolute catalog path, locale id)` pairs that have a bulk
-    /// translate in flight (M4.2c.2). Inserted by
-    /// `translate_batch_in_project` before spawning the worker, removed
-    /// by the worker's exit path. The pair is the granularity we refuse
-    /// concurrent runs on — two workers writing to the same catalog
-    /// would race on the merge step.
-    pub(crate) active_batches: Mutex<std::collections::BTreeSet<(PathBuf, String)>>,
+    /// Typed concurrency tracker for bulk translate and evaluation workers
+    /// (M4.2c.2). Replaces the old `Mutex<BTreeSet<(PathBuf, String)>>` and
+    /// the `("__eval__", "__eval__")` magic key. See [`ActiveBatches`] for
+    /// the claim/release contract.
+    pub(crate) active_batches: ActiveBatches,
 }
 
 /// An entry in the project-scoped multi-catalog store.

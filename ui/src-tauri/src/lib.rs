@@ -1331,28 +1331,19 @@ fn translate_batch_in_project(
     let total = unit_ids.len();
 
     // 3. Refuse concurrent bulk runs on the same (catalog, locale) pair.
-    let active_key = (abs.clone(), locale_id.clone());
-    {
-        let mut active = state
-            .active_batches
-            .lock()
-            .map_err(error::lock_poisoned("active_batches"))?;
-        if active.contains(&active_key) {
-            return Err("a translation is already running for this catalog/locale".to_string());
-        }
-        active.insert(active_key.clone());
-    }
+    let active_slot = jobs::BatchSlot::Catalog {
+        abs: abs.clone(),
+        locale: locale_id.clone(),
+    };
+    state.active_batches.try_claim(&active_slot)?;
 
     // 4. Construct the backend on the calling thread so config errors surface
-    //    synchronously; if this fails we release the active-key slot before
-    //    returning.
+    //    synchronously; if this fails we release the active slot before returning.
     let backend = match OllamaBackend::new() {
         Ok(b) => b,
         Err(e) => {
             // Release the active slot we just claimed.
-            if let Ok(mut active) = state.active_batches.lock() {
-                active.remove(&active_key);
-            }
+            state.active_batches.release(&active_slot);
             return Err(format!("ollama backend construction failed: {e}"));
         }
     };
@@ -1369,7 +1360,10 @@ fn translate_batch_in_project(
     let worker_job_id = job_id.clone();
     let worker_abs = abs.clone();
     let worker_unit_ids = unit_ids;
-    let worker_active_key = active_key;
+    // Clone the slot for the spawn-failure cleanup path; the original moves
+    // into the worker.
+    let spawn_fail_slot = active_slot.clone();
+    let worker_active_slot = active_slot;
 
     std::thread::Builder::new()
         .name(format!("translate-batch-{job_id}"))
@@ -1385,15 +1379,13 @@ fn translate_batch_in_project(
                 locale,
                 worker_glossary,
                 token,
-                worker_active_key,
+                worker_active_slot,
             );
         })
         .map_err(|e| {
             // Failed to spawn — undo the registry + active-batches inserts.
             state.jobs.deregister(&job_id);
-            if let Ok(mut active) = state.active_batches.lock() {
-                active.remove(&(abs.clone(), locale_id.clone()));
-            }
+            state.active_batches.release(&spawn_fail_slot);
             format!("failed to spawn translate-batch worker: {e}")
         })?;
 
@@ -1455,7 +1447,7 @@ mod batch_scope_tests {
 /// Run the per-unit translate loop on a worker thread, emitting Tauri events
 /// for each completed unit and a single terminal event before exiting.
 ///
-/// Always deregisters the job and clears the `active_batches` slot before
+/// Always deregisters the job and releases the `active_batches` slot before
 /// returning, regardless of outcome. The terminal event is emitted exactly
 /// once.
 #[cfg(feature = "ollama")]
@@ -1471,7 +1463,7 @@ fn run_batch_worker(
     locale: &'static Locale,
     glossary: Option<Glossary>,
     token: cancellation::CancellationToken,
-    active_key: (PathBuf, String),
+    active_slot: jobs::BatchSlot,
 ) {
     use tauri::{Emitter, Manager};
 
@@ -1543,12 +1535,10 @@ fn run_batch_worker(
         tracing::warn!(job_id = %job_id, error = %e, "batch terminal emit failed");
     }
 
-    // Cleanup: deregister the job and clear the active-batches slot. Always
-    // executed on every exit path.
+    // Cleanup: deregister the job and release the active-batches slot. Always
+    // executed on every exit path (success, cancellation, or failure).
     state.jobs.deregister(&job_id);
-    if let Ok(mut active) = state.active_batches.lock() {
-        active.remove(&active_key);
-    }
+    state.active_batches.release(&active_slot);
 }
 
 /// Signal cancellation for an in-flight `translate_batch_in_project` job.
@@ -2184,28 +2174,16 @@ fn run_evaluation_in_project(
 
     let total = examples_with_corrections.len();
 
-    // 2. Refuse if any evaluation job is already running. We use a dedicated
-    //    active_batches key format so the eval slot is separate from per-catalog
-    //    batch slots.
-    let eval_key = (PathBuf::from("__eval__"), "__eval__".to_string());
-    {
-        let mut active = state
-            .active_batches
-            .lock()
-            .map_err(error::lock_poisoned("active_batches"))?;
-        if active.contains(&eval_key) {
-            return Err("an evaluation is already running".to_string());
-        }
-        active.insert(eval_key.clone());
-    }
+    // 2. Refuse if any evaluation job is already running. The typed eval slot
+    //    replaces the old ("__eval__", "__eval__") magic key.
+    let eval_slot = jobs::BatchSlot::Eval;
+    state.active_batches.try_claim(&eval_slot)?;
 
     // 3. Construct backend on the calling thread.
     let backend = match OllamaBackend::new() {
         Ok(b) => b,
         Err(e) => {
-            if let Ok(mut active) = state.active_batches.lock() {
-                active.remove(&eval_key);
-            }
+            state.active_batches.release(&eval_slot);
             return Err(format!("ollama backend construction failed: {e}"));
         }
     };
@@ -2221,7 +2199,7 @@ fn run_evaluation_in_project(
     // 6. Spawn the worker.
     let worker_app = app.clone();
     let worker_job_id = job_id.clone();
-    let worker_eval_key = eval_key.clone();
+    let worker_eval_slot = eval_slot.clone();
     // Capture the originating project's EvaluationStore so the run is written
     // to it regardless of any open_project / close_project that happens
     // mid-flight (codex P1 on PR #36).
@@ -2365,17 +2343,14 @@ fn run_evaluation_in_project(
                 tracing::warn!(job_id = %worker_job_id, error = %e, "eval terminal emit failed");
             }
 
-            // Cleanup.
+            // Cleanup: deregister the job and release the eval slot. Always
+            // executed on every exit path.
             app_state.jobs.deregister(&worker_job_id);
-            if let Ok(mut active) = app_state.active_batches.lock() {
-                active.remove(&worker_eval_key);
-            }
+            app_state.active_batches.release(&worker_eval_slot);
         })
         .map_err(|e| {
             state.jobs.deregister(&job_id);
-            if let Ok(mut active) = state.active_batches.lock() {
-                active.remove(&eval_key);
-            }
+            state.active_batches.release(&eval_slot);
             format!("failed to spawn evaluation worker: {e}")
         })?;
 
