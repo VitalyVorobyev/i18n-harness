@@ -95,8 +95,25 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
 
     let mut units = Vec::with_capacity(leaves.len());
     let mut edit_states = Vec::with_capacity(leaves.len());
+    // Per-object key uniqueness is enforced inside the tokenizer, but the
+    // dot-joined-id projection can still collide across nesting levels:
+    // `{"a.b": "x", "a": {"b": "y"}}` produces two units with id `a.b`,
+    // breaking `find_unit_mut` and other id-keyed paths. Reject any
+    // cross-level collision explicitly here, where we own the projected
+    // id. Codex P2 on PR #39.
+    let mut seen_ids: HashSet<String> = HashSet::with_capacity(leaves.len());
 
     for leaf in leaves {
+        if !seen_ids.insert(leaf.path.clone()) {
+            return Err(CatalogError::Parse {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "duplicate flattened unit id `{}` at byte {} (a literal-dot key collides \
+                     with a nested key path); rename one of the conflicting keys",
+                    leaf.path, leaf.value_range.0
+                ),
+            });
+        }
         // Validate ICU brace balance; rejects obviously broken input early.
         let source_icu = to_icu(&leaf.value).map_err(CatalogError::PlaceholderConversion)?;
 

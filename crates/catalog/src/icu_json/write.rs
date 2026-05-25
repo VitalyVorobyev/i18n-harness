@@ -33,6 +33,7 @@ use std::path::Path;
 
 use i18n_harness_core::{Target, Unit, UnitState};
 
+use super::placeholder::from_icu;
 use crate::catalog::{Catalog, ExtractState};
 use crate::error::CatalogError;
 
@@ -83,7 +84,14 @@ pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
         if new_target == edit_state.original_value {
             continue;
         }
-        let escaped = format_json_string(new_target);
+        // Validate ICU brace balance on the EDITED target before writing.
+        // Skipping this would let malformed ICU (unmatched `{`, etc.)
+        // persist to disk and only surface as a runtime error in the
+        // consuming i18n library — the format's own placeholder-conversion
+        // guard MUST run on both extract and apply paths. Codex P1 on
+        // PR #39.
+        let native = from_icu(new_target).map_err(CatalogError::PlaceholderConversion)?;
+        let escaped = format_json_string(&native);
         edits.push((edit_state.value_range.0, edit_state.value_range.1, escaped));
     }
 

@@ -164,6 +164,63 @@ fn extract_validates_icu_brace_balance() {
 }
 
 #[test]
+fn rejects_flattened_id_collision_across_nesting() {
+    // Codex P2 on PR #39: `{"a.b": "x", "a": {"b": "y"}}` would project to
+    // two units with id `a.b`. The unit-id uniqueness invariant in
+    // `Catalog::find_unit_mut` makes one of them unreachable; refuse the
+    // input.
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-harness-icu-id-collide-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let path = dir.join("collide.json");
+    std::fs::write(&path, r#"{"a.b":"x","a":{"b":"y"}}"#).expect("write");
+    let fmt = IcuJsonFormat;
+    let result = fmt.extract(&path);
+    std::fs::remove_file(&path).ok();
+    std::fs::remove_dir(&dir).ok();
+    let err = result.expect_err("expected id collision to be rejected");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("duplicate flattened unit id"),
+        "expected duplicate-id message; got: {msg}"
+    );
+}
+
+#[test]
+fn apply_rejects_malformed_icu_in_target() {
+    // Codex P1 on PR #39: the writer must validate ICU brace balance on
+    // the EDITED target before writing it back; otherwise broken edits
+    // (`hello {name` with no closing brace) reach disk and only fail at
+    // runtime in the consuming i18n library.
+    let fmt = IcuJsonFormat;
+    let fixture = fixtures_dir().join("flat.json");
+    let catalog = fmt.extract(&fixture).expect("extract");
+    let mut units = catalog.units().to_vec();
+    let target = units
+        .iter_mut()
+        .find(|u| u.id.as_str() == "farewell")
+        .expect("farewell");
+    match &mut target.target {
+        i18n_harness_core::Target::Singular { text } => {
+            *text = Some("hello {name".into());
+        }
+        _ => panic!("farewell is singular"),
+    }
+    let tmp = std::env::temp_dir().join(format!(
+        "i18n-harness-icu-bad-apply-{}.json",
+        std::process::id()
+    ));
+    let result = fmt.apply(&catalog, &units, &tmp);
+    std::fs::remove_file(&tmp).ok();
+    assert!(
+        result.is_err(),
+        "expected apply with malformed ICU target to fail"
+    );
+}
+
+#[test]
 fn rejects_non_object_root() {
     let dir = std::env::temp_dir().join(format!("i18n-harness-icu-array-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("mkdir");
