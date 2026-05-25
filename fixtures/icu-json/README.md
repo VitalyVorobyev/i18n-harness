@@ -16,3 +16,4 @@ The PR that adds a new fixture must add it here, never carve one out.
 | `with_plural.json` | ICU `plural` selector — placeholders inside a placeholder. |
 | `mixed_quoting.json` | Strings with `'`, `"`, `\`, `\n`, `\t`. Escape handling. |
 | `empty_object.json` | `{}` — valid but produces zero units. |
+| `with_bom.json` | Leading UTF-8 BOM (`EF BB BF`); tolerated and round-tripped verbatim. |

@@ -212,6 +212,18 @@ impl<'a> Parser<'a> {
     }
 
     fn run(&mut self) -> Result<Vec<Leaf>, String> {
+        // Tolerate a leading UTF-8 BOM (`EF BB BF`). Some Windows /
+        // legacy editor pipelines write JSON with a BOM; the JSON spec
+        // disallows it but the files are otherwise valid catalogs, and
+        // refusing them at the harness layer would surprise translators
+        // who never see the bytes. Stripping it here keeps the byte
+        // ranges captured by the tokenizer aligned with the source
+        // because the BOM bytes are still part of `source_bytes`; the
+        // writer's splice path only touches the value ranges, so the
+        // BOM passes through verbatim on round-trip. Codex P2 on PR #39.
+        if self.bytes.starts_with(b"\xEF\xBB\xBF") {
+            self.cursor = 3;
+        }
         self.skip_ws();
         let mut leaves = Vec::new();
         match self.peek() {
@@ -839,6 +851,24 @@ mod tests {
         let leaves = p.run().expect("parse");
         assert_eq!(leaves[0].line, 2);
         assert_eq!(leaves[1].line, 3);
+    }
+
+    #[test]
+    fn tolerates_leading_utf8_bom() {
+        // Codex P2 on PR #39: ICU-JSON files saved by Windows editors
+        // often carry a leading UTF-8 BOM (EF BB BF). Refusing them at
+        // parse time would block translators from opening otherwise-valid
+        // catalogs. The byte range capture machinery is unaffected because
+        // the BOM bytes are still in the source buffer; the writer's
+        // splice path leaves untouched bytes (including the BOM) verbatim.
+        let mut src_bytes = b"\xEF\xBB\xBF".to_vec();
+        src_bytes.extend_from_slice(br#"{"k":"v"}"#);
+        let src = std::str::from_utf8(&src_bytes).unwrap();
+        let mut p = Parser::new(src);
+        let leaves = p.run().expect("parse with BOM");
+        assert_eq!(leaves.len(), 1);
+        assert_eq!(leaves[0].path, "k");
+        assert_eq!(leaves[0].value, "v");
     }
 
     #[test]

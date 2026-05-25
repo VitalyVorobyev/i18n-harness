@@ -56,14 +56,23 @@ pub(crate) fn from_icu(s: &str) -> Result<String, PlaceholderError> {
 /// Walk `s` and verify that every `{` has a matching `}` later in the string
 /// and no `}` precedes its matching `{`.
 ///
-/// Apostrophe-escaping (`'{'` for a literal brace) is honored conservatively:
-/// a `'` toggles a "quoted" mode in which braces are ignored. Doubled `''`
-/// inside quoted mode is a literal apostrophe and does not exit the mode.
-/// Outside quoted mode, `''` is a literal apostrophe.
+/// Apostrophe handling follows ICU MessageFormat's actual rule (matching
+/// the spec the JDK / ICU4J / format.js implementations all agree on):
 ///
-/// This is not a full ICU lexer — it is the minimum needed to catch the
-/// common breakage modes (an unmatched brace introduced by a hand-edit). The
-/// gate's ICU parser is the authoritative grammar check.
+/// - `''` is always a literal apostrophe.
+/// - Outside quoted mode, a lone `'` starts quoting ONLY when it precedes
+///   an ICU syntax character (`{`, `}`, `#`, `|`). A `'` followed by any
+///   other character (or by end of input) is a literal apostrophe — so
+///   `don't worry` does not enter quoted mode, but `don't {name}` would
+///   not enter it either (the `'` precedes the letter `t`, not a syntax
+///   char).
+/// - Inside quoted mode, a lone `'` ends quoting (and `''` is still a
+///   literal apostrophe).
+///
+/// Getting this rule right matters: a naive "every `'` toggles quoting"
+/// approximation lets strings like `don't {name` slip through brace
+/// validation — the apostrophe enters quoted mode, the unmatched `{` is
+/// ignored, and malformed ICU reaches disk. Codex P1 on PR #39.
 fn validate_braces(s: &str) -> Result<(), PlaceholderError> {
     let bytes = s.as_bytes();
     let mut depth: i32 = 0;
@@ -78,13 +87,20 @@ fn validate_braces(s: &str) -> Result<(), PlaceholderError> {
                     i += 2;
                     continue;
                 }
-                // A lone `'` toggles quoted mode IF the next character can
-                // be a syntax char — ICU's actual rule. We approximate by
-                // toggling unconditionally; the worst case is over-permissive
-                // brace checking, which never produces a false positive
-                // rejection.
-                quoted = !quoted;
-                i += 1;
+                if quoted {
+                    // Inside quoted mode, a lone `'` ends the quote.
+                    quoted = false;
+                    i += 1;
+                } else if let Some(&next) = bytes.get(i + 1)
+                    && is_icu_syntax(next)
+                {
+                    // Starts quoting only when followed by a syntax char.
+                    quoted = true;
+                    i += 1;
+                } else {
+                    // Literal apostrophe.
+                    i += 1;
+                }
             }
             b'{' if !quoted => {
                 depth += 1;
@@ -108,6 +124,13 @@ fn validate_braces(s: &str) -> Result<(), PlaceholderError> {
         )));
     }
     Ok(())
+}
+
+/// The ICU MessageFormat syntax characters that trigger apostrophe quoting.
+/// Matches the set documented in the ICU4J `MessagePattern` source and the
+/// format.js / react-intl tokenizer.
+fn is_icu_syntax(b: u8) -> bool {
+    matches!(b, b'{' | b'}' | b'#' | b'|')
 }
 
 #[cfg(test)]
@@ -155,6 +178,36 @@ mod tests {
     fn accepts_quoted_braces() {
         // ICU's apostrophe-escape lets a literal `{` slip through.
         assert!(to_icu("don't say '{name}' here").is_ok());
+    }
+
+    #[test]
+    fn rejects_unmatched_brace_after_literal_apostrophe() {
+        // Codex P1 on PR #39: a naive "every `'` toggles quoting"
+        // approximation lets `don't {name` slip through — the apostrophe
+        // in `don't` would enter quoted mode and the `{` would be
+        // ignored. The correct ICU rule only starts quoting when `'`
+        // precedes a syntax char (`{`, `}`, `#`, `|`).
+        let err = to_icu("don't {name").unwrap_err();
+        assert!(matches!(err, PlaceholderError::UnsupportedSyntax(_)));
+    }
+
+    #[test]
+    fn doubled_apostrophe_is_literal_and_does_not_quote() {
+        // `''` is always a literal apostrophe — must not affect brace
+        // counting.
+        assert!(to_icu("it's ''wonderful''").is_ok());
+        assert!(to_icu("can't '' open '{x}'").is_ok());
+    }
+
+    #[test]
+    fn lone_apostrophe_before_letter_is_literal() {
+        // ICU rule: `'` before a non-syntax char is literal, NOT a quote
+        // start.
+        assert!(to_icu("it's a test").is_ok());
+        assert!(to_icu("rock 'n' roll").is_ok());
+        // And it must still catch a real unmatched brace later.
+        let err = to_icu("rock 'n' roll }unmatched").unwrap_err();
+        assert!(matches!(err, PlaceholderError::UnsupportedSyntax(_)));
     }
 
     #[test]
