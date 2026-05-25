@@ -7,6 +7,7 @@ import { CatalogList } from "./components/CatalogList/CatalogList";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { HomeScreen, pushRecent } from "./components/HomeScreen/HomeScreen";
 import { Inspector } from "./components/Inspector/Inspector";
+import { OverviewPanel } from "./components/OverviewPanel/OverviewPanel";
 import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
 import { QualityPanel } from "./components/QualityPanel/QualityPanel";
@@ -149,7 +150,12 @@ export function App() {
   });
 
   // Project-mode view tab.
-  const [projectView, setProjectView] = useState<ProjectView>("translate");
+  const [projectView, setProjectView] = useState<ProjectView>("overview");
+
+  // Session-only focus locale — set when the user picks a locale from the
+  // Overview pickup card. NOT persisted to disk or localStorage. PRs 4-5
+  // will consume this to drive Focus mode in TranslatePanel.
+  const [focusLocale, setFocusLocale] = useState<string | null>(null);
 
   // Locale chips multi-select filter. Empty set = "show all".
   const [activeLocaleFilter, setActiveLocaleFilter] = useState<Set<string>>(
@@ -245,7 +251,8 @@ export function App() {
       setDirtyCatalogPaths(new Set());
       setReports({});
       setBusyIds(new Set());
-      setProjectView("translate");
+      setProjectView("overview");
+      setFocusLocale(null);
       setActiveLocaleFilter(new Set());
       setError(null);
       setCloseConfirm({ kind: "none" });
@@ -961,6 +968,18 @@ export function App() {
 
         {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          {/* Overview view */}
+          {projectView === "overview" && (
+            <OverviewPanel
+              summary={summary}
+              openCatalogs={openCatalogs}
+              dirtyCatalogPaths={dirtyCatalogPaths}
+              focusLocale={focusLocale}
+              setFocusLocale={setFocusLocale}
+              setProjectView={setProjectView}
+            />
+          )}
+
           {/* Translate view */}
           <div
             className={

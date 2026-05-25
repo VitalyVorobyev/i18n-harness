@@ -184,6 +184,7 @@ export function TopBar({
 // ── Project-mode TopBar (M4.3a) ───────────────────────────────────────────────
 
 export type ProjectView =
+  | "overview"
   | "translate"
   | "glossary"
   | "settings"
@@ -313,6 +314,12 @@ export function ProjectTopBar({
         aria-label="Project view"
         className="flex items-center gap-1 shrink-0"
       >
+        <TabButton
+          active={view === "overview"}
+          onClick={() => onViewChange("overview")}
+        >
+          Overview
+        </TabButton>
         <TabButton
           active={view === "translate"}
           onClick={() => onViewChange("translate")}
