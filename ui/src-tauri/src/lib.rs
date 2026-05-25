@@ -9,6 +9,7 @@
 
 mod backing;
 mod cancellation;
+mod error;
 mod jobs;
 
 use std::collections::BTreeMap;
@@ -3332,49 +3333,51 @@ fn build_catalog_response_backing(
 }
 
 fn lock_poisoned(
-    _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<OpenCatalog>>>,
+    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<OpenCatalog>>>,
 ) -> String {
-    "catalog state lock poisoned".to_string()
+    error::lock_poisoned::<Option<OpenCatalog>>("catalog")(e)
 }
 
 fn glossary_lock_poisoned(
-    _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Glossary>>>,
+    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Glossary>>>,
 ) -> String {
-    "glossary state lock poisoned".to_string()
+    error::lock_poisoned::<Option<Glossary>>("glossary")(e)
 }
 
 fn project_lock_poisoned(
-    _: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Project>>>,
+    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Project>>>,
 ) -> String {
-    "project state lock poisoned".to_string()
+    error::lock_poisoned::<Option<Project>>("project")(e)
 }
 
 fn project_catalogs_lock_poisoned(
-    _: std::sync::PoisonError<
+    e: std::sync::PoisonError<
         std::sync::MutexGuard<'_, std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
     >,
 ) -> String {
-    "project_catalogs state lock poisoned".to_string()
+    error::lock_poisoned::<std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>(
+        "project_catalogs",
+    )(e)
 }
 
 fn active_batches_lock_poisoned(
-    _: std::sync::PoisonError<
+    e: std::sync::PoisonError<
         std::sync::MutexGuard<'_, std::collections::BTreeSet<(PathBuf, String)>>,
     >,
 ) -> String {
-    "active_batches state lock poisoned".to_string()
+    error::lock_poisoned::<std::collections::BTreeSet<(PathBuf, String)>>("active_batches")(e)
 }
 
 fn no_catalog() -> String {
-    "no catalog open".to_string()
+    error::no_catalog()
 }
 
 fn no_project() -> String {
-    "no project open".to_string()
+    error::no_project()
 }
 
 fn no_catalog_in_project() -> String {
-    "catalog not open in project".to_string()
+    error::no_catalog_in_project()
 }
 
 /// Return `(absolute_path, manifest_relative_path)` for a catalog path that
