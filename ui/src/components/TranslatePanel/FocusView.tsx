@@ -263,6 +263,18 @@ export function FocusView({
   const selectedEntry =
     selectedIdx !== null ? (filteredEntries[selectedIdx] ?? null) : null;
 
+  // Scroll the selected row into view whenever J/K (or a click) changes it.
+  // `block: "nearest"` avoids jumping when the row is already visible.
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const root = containerRef.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>(
+      `[data-focus-row-idx="${selectedIdx}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedIdx]);
+
   // ── Catalog manifest path display ───────────────────────────────────────
 
   const manifestPath = useMemo(() => {
@@ -587,6 +599,7 @@ export function FocusView({
             filteredEntries.map((entry, idx) => (
               <FocusRow
                 key={`${entry.catalogPath}::${entry.unit.id}`}
+                idx={idx}
                 entry={entry}
                 selected={idx === selectedIdx}
                 busy={busyIds.has(entry.unit.id)}
@@ -769,6 +782,8 @@ function LocaleRowButton({
 
 interface FocusRowProps {
   entry: FocusEntry;
+  /** Position in the filtered list — used as the scroll-into-view target. */
+  idx: number;
   selected: boolean;
   busy: boolean;
   dirty: boolean;
@@ -783,6 +798,7 @@ interface FocusRowProps {
 
 function FocusRow({
   entry,
+  idx,
   selected,
   busy,
   dirty,
@@ -812,6 +828,7 @@ function FocusRow({
     <div
       role="option"
       aria-selected={selected}
+      data-focus-row-idx={idx}
       onClick={onSelect}
       onFocus={onSelect}
       tabIndex={0}

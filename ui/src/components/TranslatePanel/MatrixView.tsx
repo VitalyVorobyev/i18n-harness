@@ -346,6 +346,19 @@ export function MatrixView({
     }
   }, [visibleRows, focusedRowKey]);
 
+  // Scroll the focused row into view whenever it changes via keyboard
+  // navigation. `block: "nearest"` avoids jumping to top/bottom when the row
+  // is already visible, matching the CatalogList pattern.
+  useEffect(() => {
+    if (!focusedRowKey) return;
+    const root = containerRef.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>(
+      `[data-row-key="${CSS.escape(focusedRowKey)}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [focusedRowKey]);
+
   const focusedRow = useMemo(
     () => visibleRows.find((r) => r.rowKey === focusedRowKey) ?? null,
     [visibleRows, focusedRowKey],
@@ -393,16 +406,19 @@ export function MatrixView({
       }
       if (!inside && !isAcceptCombo) return;
 
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      // j / J → next row; k / K → previous row. Bound alongside Arrow keys
+      // so vim-style and arrow-key users get the same behavior.
+      const isDownKey = e.key === "ArrowDown" || e.key === "j" || e.key === "J";
+      const isUpKey = e.key === "ArrowUp" || e.key === "k" || e.key === "K";
+      if (isDownKey || isUpKey) {
         if (visibleRows.length === 0) return;
         e.preventDefault();
         const idx = focusedRowKey
           ? visibleRows.findIndex((r) => r.rowKey === focusedRowKey)
           : -1;
-        const next =
-          e.key === "ArrowDown"
-            ? Math.min(visibleRows.length - 1, idx + 1)
-            : Math.max(0, idx - 1);
+        const next = isDownKey
+          ? Math.min(visibleRows.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
         const targetRow = visibleRows[next];
         if (targetRow) {
           setFocusedRowKey(targetRow.rowKey);
@@ -711,6 +727,7 @@ function MatrixCard({
 
   return (
     <article
+      data-row-key={row.rowKey}
       className={cn(
         "shrink-0 rounded-lg overflow-hidden border bg-bg-surface",
         focused ? "border-border-default" : "border-border-subtle",
