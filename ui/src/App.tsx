@@ -1,4 +1,7 @@
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ActiveBatch } from "./components/BatchProgressWidget/BatchProgressWidget";
+import { BatchProgressWidget } from "./components/BatchProgressWidget/BatchProgressWidget";
 import type { Filter } from "./components/CatalogList/CatalogList";
 import { CatalogList } from "./components/CatalogList/CatalogList";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
@@ -16,6 +19,7 @@ import {
 } from "./components/UnitEditor/UnitEditor";
 import {
   acceptUnitInProject,
+  cancelTranslation,
   closeProject,
   currentProjectSummary,
   discardChangesInProject,
@@ -23,11 +27,14 @@ import {
   saveAllDirty,
   saveCatalogInProject,
   scanProjectReviewState,
+  translateBatchInProject,
   translateUnitInProject,
   updateUnitTargetInProject,
 } from "./lib/tauri";
+import { listenBatchProgress } from "./lib/tauri-events";
 import { useTheme } from "./lib/theme";
 import type {
+  BatchScope,
   CatalogResponse,
   GateReport,
   ProjectOpenResponse,
@@ -87,6 +94,20 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+
+  // ── Batch translate state (M4.8) ─────────────────────────────────────────
+  // Single active batch slot; the Rust side enforces one job per (catalog,
+  // locale) pair — if a second start arrives for the same pair, the IPC call
+  // errors and we toast it. The UI only tracks one batch at a time (the one
+  // that is running most recently).
+  const [activeBatch, setActiveBatch] = useState<ActiveBatch | null>(null);
+  const unlistenRef = useRef<UnlistenFn | null>(null);
+  // Mirror of activeBatch kept in a ref so the unmount cleanup can read the
+  // latest value without capturing a stale closure.
+  const activeBatchRef = useRef<ActiveBatch | null>(null);
+  useEffect(() => {
+    activeBatchRef.current = activeBatch;
+  });
 
   // ── Review queue (M4.7) ───────────────────────────────────────────────────
   // null = not yet scanned; populated eagerly when a project is open and
@@ -204,6 +225,15 @@ export function App() {
 
   const handleProjectOpened = useCallback(
     (summary: ProjectSummary) => {
+      // Cancel any in-flight batch from the previous project (fire-and-forget).
+      if (activeBatch) {
+        cancelTranslation(activeBatch.jobId).catch(() => {});
+        if (unlistenRef.current) {
+          unlistenRef.current();
+          unlistenRef.current = null;
+        }
+        setActiveBatch(null);
+      }
       setMode({ kind: "project", summary });
       // Clear the catalog cache so stale data from a previous project is gone.
       setOpenCatalogs(new Map());
@@ -223,7 +253,7 @@ export function App() {
       setReviewQueue(null);
       scheduleRescan();
     },
-    [scheduleRescan],
+    [scheduleRescan, activeBatch],
   );
 
   // Called after every Settings-view mutation. Updates the in-memory summary so
@@ -242,6 +272,15 @@ export function App() {
 
   // Internal: perform the close without any dirty-state checks.
   const _doCloseProject = useCallback(async () => {
+    // Cancel any in-flight batch (fire-and-forget; don't block close on terminal).
+    if (activeBatch) {
+      cancelTranslation(activeBatch.jobId).catch(() => {});
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
+      setActiveBatch(null);
+    }
     try {
       await closeProject();
     } catch {
@@ -257,7 +296,7 @@ export function App() {
     setReviewQueue(null);
     setError(null);
     setCloseConfirm({ kind: "none" });
-  }, []);
+  }, [activeBatch]);
 
   // Public entry point — raises inline confirmation when there are unsaved catalogs.
   const handleCloseProject = useCallback(() => {
@@ -578,6 +617,200 @@ export function App() {
     ],
   );
 
+  // ── Batch translate (M4.8) ───────────────────────────────────────────────
+
+  // Called from the "Translate all" button in CatalogList.
+  const onTranslateAll = useCallback(
+    async (scope: BatchScope) => {
+      if (!activeCatalogPath) return;
+
+      // Derive a display name from the catalog path (basename only).
+      const catalogName =
+        activeCatalogPath.replace(/\\/g, "/").split("/").pop() ??
+        activeCatalogPath;
+
+      // Start the batch first to get the server-assigned job_id (we cannot
+      // subscribe to the per-job event channels before knowing the id).
+      // After receiving the id, we subscribe before arming the UI state so
+      // the handlers exist as early as possible. A stuck-batch safety timer
+      // handles the unlikely case where the terminal event was emitted in
+      // the gap between the Rust handler spawning the worker and our
+      // `listenBatchProgress` call resolving (possible with instant backends;
+      // impossible with Ollama's network latency). Tracked for a cleaner fix
+      // in M4.8.1 (reserve-job-id command so subscribe can precede start).
+      let started: { job_id: string; total: number };
+      try {
+        started = await translateBatchInProject(activeCatalogPath, scope);
+      } catch (e) {
+        flashError(`Translate all failed to start: ${formatError(e)}`);
+        return;
+      }
+
+      const { job_id: jobId, total } = started;
+
+      // Subscribe to events BEFORE we set activeBatch so the handlers are
+      // registered before any state transitions.
+      //
+      // Race note: the worker thread is spawned inside the Rust handler before
+      // the IPC response is serialised and delivered to the JS side. For
+      // low-latency backends (e.g. the `manual` backend used in tests) the
+      // worker could complete and emit the terminal event before our
+      // `listenBatchProgress` call resolves. To guard against a stuck-batch,
+      // we install a timeout that clears the batch state if no terminal event
+      // arrives within 10 s of the subscribe call completing. The timeout is
+      // cancelled the moment any terminal event lands.
+      //
+      // A proper fix requires a Rust-side protocol change (reserve a job slot
+      // and return the job_id before starting the worker; tracked in M4.8.1).
+      let terminalReceived = false;
+      const stuckGuardMs = 10_000;
+      let stuckGuardTimer: ReturnType<typeof setTimeout> | null = null;
+
+      // Capture activeCatalogPath in a local for the callbacks — the React
+      // state captured in closures may be stale if the user navigates.
+      const batchCatalogPath = activeCatalogPath;
+
+      const unlisten = await listenBatchProgress(
+        jobId,
+        // onProgress
+        (payload) => {
+          // Any progress event means the terminal was not missed.
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
+
+          // Update batch progress UI.
+          setActiveBatch((prev) => {
+            if (!prev || prev.jobId !== jobId) return prev;
+            const recent = [payload.unit.id, ...prev.recent].slice(0, 3);
+            return { ...prev, completed: payload.completed, recent };
+          });
+
+          // Merge the translated unit into the cached catalog.
+          setOpenCatalogs((prev) => {
+            const entry = prev.get(batchCatalogPath);
+            if (!entry) return prev; // catalog was removed mid-batch — ignore
+            const next = new Map(prev);
+            next.set(batchCatalogPath, {
+              ...entry,
+              units: entry.units.map((u) =>
+                u.id === payload.unit.id ? payload.unit : u,
+              ),
+            });
+            return next;
+          });
+
+          // Mark the unit + catalog dirty.
+          setDirtyIds((prev) => {
+            if (prev.has(payload.unit.id)) return prev;
+            const next = new Set(prev);
+            next.add(payload.unit.id);
+            return next;
+          });
+          markCatalogDirty(batchCatalogPath);
+        },
+        // onTerminal
+        (payload, status) => {
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
+          // Tear down listeners.
+          if (unlistenRef.current) {
+            unlistenRef.current();
+            unlistenRef.current = null;
+          }
+          setActiveBatch(null);
+
+          // Toast with outcome.
+          if (status === "failed" && payload.failed_reason) {
+            flashError(
+              `Batch failed at ${payload.completed} of ${payload.total}: ${payload.failed_reason}`,
+            );
+          } else if (payload.cancelled) {
+            flashInfo(
+              `Batch cancelled at ${payload.completed} of ${payload.total} units.`,
+            );
+          } else {
+            flashInfo(`Translated ${payload.completed} units.`);
+          }
+
+          // Rescan review queue to pick up newly-flagged units.
+          scheduleRescan();
+        },
+      );
+
+      // Stash so we can call it on cleanup or user-cancel.
+      unlistenRef.current = unlisten;
+
+      // Now that listeners are registered, initialise the batch UI state.
+      setActiveBatch({
+        jobId,
+        catalogPath: activeCatalogPath,
+        catalogName,
+        completed: 0,
+        total,
+        recent: [],
+      });
+
+      // Arm the stuck-batch guard: if the terminal event never arrives
+      // (missed before subscribe completed), clear the batch widget after
+      // stuckGuardMs so the UI is not permanently blocked.
+      if (!terminalReceived) {
+        stuckGuardTimer = setTimeout(() => {
+          stuckGuardTimer = null;
+          if (!terminalReceived) {
+            // Terminal was missed — clean up defensively.
+            if (unlistenRef.current) {
+              unlistenRef.current();
+              unlistenRef.current = null;
+            }
+            setActiveBatch(null);
+            flashError(
+              `Batch for ${catalogName} may have completed before listeners were ready. Check the catalog for translated units.`,
+            );
+            scheduleRescan();
+          }
+        }, stuckGuardMs);
+      }
+    },
+    [
+      activeCatalogPath,
+      markCatalogDirty,
+      scheduleRescan,
+      flashInfo,
+      flashError,
+    ],
+  );
+
+  // Cancel any in-flight batch.
+  const onCancelBatch = useCallback(() => {
+    if (!activeBatch) return;
+    // Fire-and-forget: the terminal event will arrive asynchronously.
+    // The UI stays in "batch active" state until then.
+    cancelTranslation(activeBatch.jobId).catch(() => {
+      // If cancel itself errors, we still wait for the terminal event.
+    });
+  }, [activeBatch]);
+
+  // Cleanup on unmount: cancel any in-flight batch and unsubscribe.
+  // Uses activeBatchRef to avoid a stale-closure over the activeBatch state.
+  useEffect(() => {
+    return () => {
+      const batch = activeBatchRef.current;
+      if (batch) {
+        cancelTranslation(batch.jobId).catch(() => {});
+      }
+      if (unlistenRef.current) {
+        unlistenRef.current();
+        unlistenRef.current = null;
+      }
+    };
+  }, []);
+
   // ── Locale filter + sibling quick-switch ────────────────────────────────────
 
   // Naive stem heuristic: strip the trailing `_<locale>` segment from the
@@ -746,6 +979,8 @@ export function App() {
                   onSelect={setSelectedId}
                   onFilterChange={setFilter}
                   onSearchChange={setSearch}
+                  onTranslateAll={onTranslateAll}
+                  batchActive={activeBatch !== null}
                 />
                 {selectedUnit ? (
                   <UnitEditor
@@ -857,31 +1092,39 @@ export function App() {
         </div>
       </div>
 
-      {/* Footer bar — shown in Translate view; Save all button when there are unsaved catalogs */}
-      {projectView === "translate" && (
-        <footer className="shrink-0 h-9 px-4 flex items-center justify-between border-t border-border-subtle bg-bg-surface text-xs text-fg-tertiary">
-          <span>
-            {summary.catalogs.length}{" "}
-            {summary.catalogs.length === 1 ? "catalog" : "catalogs"}
-            {unsavedCatalogCount > 0 && (
-              <>
-                {" "}
-                &middot;{" "}
-                <span className="text-state-proposed font-medium">
-                  {unsavedCatalogCount} unsaved
-                </span>
-              </>
-            )}
-          </span>
-          {unsavedCatalogCount > 0 && (
-            <button
-              type="button"
-              onClick={onSaveAll}
-              className="h-6 px-3 rounded-md border border-border-default bg-transparent text-xs font-medium text-fg-secondary hover:bg-bg-hover hover:text-fg-primary hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-              title="Save all unsaved catalogs (Cmd+Shift+S)"
-            >
-              Save all
-            </button>
+      {/* Footer bar — always visible in project mode; shows batch progress or catalog/save summary */}
+      {(projectView === "translate" || activeBatch !== null) && (
+        <footer className="shrink-0 h-9 px-4 flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface text-xs text-fg-tertiary">
+          {activeBatch ? (
+            /* Batch in-flight: show progress widget across full footer width */
+            <BatchProgressWidget batch={activeBatch} onCancel={onCancelBatch} />
+          ) : (
+            /* Normal Translate view footer */
+            <>
+              <span>
+                {summary.catalogs.length}{" "}
+                {summary.catalogs.length === 1 ? "catalog" : "catalogs"}
+                {unsavedCatalogCount > 0 && (
+                  <>
+                    {" "}
+                    &middot;{" "}
+                    <span className="text-state-proposed font-medium">
+                      {unsavedCatalogCount} unsaved
+                    </span>
+                  </>
+                )}
+              </span>
+              {unsavedCatalogCount > 0 && (
+                <button
+                  type="button"
+                  onClick={onSaveAll}
+                  className="h-6 px-3 rounded-md border border-border-default bg-transparent text-xs font-medium text-fg-secondary hover:bg-bg-hover hover:text-fg-primary hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                  title="Save all unsaved catalogs (Cmd+Shift+S)"
+                >
+                  Save all
+                </button>
+              )}
+            </>
           )}
         </footer>
       )}

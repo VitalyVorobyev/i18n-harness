@@ -21,8 +21,8 @@ glossary in a separate panel. Shipped in M0–M3.
 - Round-trip PO or ICU-JSON catalogs (only Qt today).
 - Have the LLM flag units that need human attention.
 - Triage a project-wide "needs review" queue.
-- Bulk-translate every untranslated unit in a locale with cancellable
-  progress.
+- ~~Bulk-translate every untranslated unit in a locale with cancellable
+  progress.~~ (shipped M4.8)
 - See per-project quality numbers (acceptance rate, edit rate per
   locale) and turn human corrections into a tuning loop that improves
   the project's prompt.
@@ -474,7 +474,7 @@ the command doc comment. PO and ICU-JSON will be wired in M4.4/M4.5.
 hash) is deferred to a follow-on slice once `source_hash` is written to
 `review.jsonl` on Accept.
 
-### M4.8 — Bulk translate
+### M4.8 — Bulk translate ✓ shipped
 
 Per-catalog × per-locale "Translate all untranslated" with live
 progress, cancel mid-run, and flagged units routed to the review queue.

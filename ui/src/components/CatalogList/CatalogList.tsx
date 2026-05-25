@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef } from "react";
 import { cn } from "../../lib/cn";
-import type { Unit, UnitId, UnitRow, UnitState } from "../../lib/types";
+import type {
+  BatchScope,
+  Unit,
+  UnitId,
+  UnitRow,
+  UnitState,
+} from "../../lib/types";
 import { unitRow } from "../../lib/types";
 import { StateBadge } from "../StateBadge/StateBadge";
+import { TranslateAllButton } from "../TranslateAllButton/TranslateAllButton";
 
 export type Filter =
   | "all"
@@ -20,6 +27,10 @@ interface Props {
   onSelect: (id: UnitId) => void;
   onFilterChange: (f: Filter) => void;
   onSearchChange: (s: string) => void;
+  /** When provided, renders the "Translate all" dropdown in the filter bar. */
+  onTranslateAll?: (scope: BatchScope) => void;
+  /** True when a batch is in flight; hides the translate-all button. */
+  batchActive?: boolean;
 }
 
 export function CatalogList({
@@ -31,6 +42,8 @@ export function CatalogList({
   onSelect,
   onFilterChange,
   onSearchChange,
+  onTranslateAll,
+  batchActive = false,
 }: Props) {
   const rows = useMemo(() => units.map(unitRow), [units]);
 
@@ -111,45 +124,56 @@ export function CatalogList({
         />
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Unit filter"
-        className="flex gap-1 px-3 pb-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {(
-          [
-            "all",
-            "untranslated",
-            "proposed",
-            "finished",
-            "needs-review",
-          ] as Filter[]
-        ).map((f) => (
-          <button
-            key={f}
-            type="button"
-            role="tab"
-            aria-selected={filter === f}
-            onClick={() => onFilterChange(f)}
-            className={cn(
-              "inline-flex items-center gap-2 h-6 px-2 rounded-md whitespace-nowrap",
-              "text-xs font-medium border transition-colors duration-100 ease-out",
-              filter === f
-                ? "text-fg-primary bg-accent-subtle border-accent-subtle-border"
-                : "text-fg-secondary bg-transparent border-transparent hover:bg-bg-hover hover:text-fg-primary",
-            )}
-          >
-            <span>{labelOf(f)}</span>
-            <span
+      <div className="flex items-center gap-1 px-3 pb-2">
+        <div
+          role="tablist"
+          aria-label="Unit filter"
+          className="flex gap-1 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {(
+            [
+              "all",
+              "untranslated",
+              "proposed",
+              "finished",
+              "needs-review",
+            ] as Filter[]
+          ).map((f) => (
+            <button
+              key={f}
+              type="button"
+              role="tab"
+              aria-selected={filter === f}
+              onClick={() => onFilterChange(f)}
               className={cn(
-                "tabular-nums",
-                filter === f ? "text-accent" : "text-fg-tertiary",
+                "inline-flex items-center gap-2 h-6 px-2 rounded-md whitespace-nowrap",
+                "text-xs font-medium border transition-colors duration-100 ease-out",
+                filter === f
+                  ? "text-fg-primary bg-accent-subtle border-accent-subtle-border"
+                  : "text-fg-secondary bg-transparent border-transparent hover:bg-bg-hover hover:text-fg-primary",
               )}
             >
-              {counts[f]}
-            </span>
-          </button>
-        ))}
+              <span>{labelOf(f)}</span>
+              <span
+                className={cn(
+                  "tabular-nums",
+                  filter === f ? "text-accent" : "text-fg-tertiary",
+                )}
+              >
+                {counts[f]}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* "Translate all" button — only rendered when the caller provides the handler */}
+        {onTranslateAll && (
+          <TranslateAllButton
+            units={units}
+            onStart={onTranslateAll}
+            batchActive={batchActive}
+          />
+        )}
       </div>
 
       <div
