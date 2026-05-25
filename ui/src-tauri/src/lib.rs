@@ -308,7 +308,10 @@ fn open_catalog(
     let catalog =
         i18n_harness_adapter_qt::extract(&abs).map_err(|e| format!("extract failed: {e}"))?;
     let response = build_catalog_response(&abs, &catalog);
-    let mut current = state.catalog.lock().map_err(lock_poisoned)?;
+    let mut current = state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))?;
     *current = Some(OpenCatalog { path: abs, catalog });
     Ok(response)
 }
@@ -324,8 +327,11 @@ fn update_unit_target(
     edit: TargetEdit,
     state: tauri::State<'_, AppState>,
 ) -> Result<Unit, String> {
-    let mut current = state.catalog.lock().map_err(lock_poisoned)?;
-    let open = current.as_mut().ok_or_else(no_catalog)?;
+    let mut current = state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))?;
+    let open = current.as_mut().ok_or_else(error::no_catalog)?;
     let id = UnitId::from(unit_id);
     let unit = open
         .catalog
@@ -389,8 +395,11 @@ fn save_catalog(
     out_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<SaveSummary, String> {
-    let current = state.catalog.lock().map_err(lock_poisoned)?;
-    let open = current.as_ref().ok_or_else(no_catalog)?;
+    let current = state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))?;
+    let open = current.as_ref().ok_or_else(error::no_catalog)?;
     let target = out_path
         .map(PathBuf::from)
         .unwrap_or_else(|| open.path.clone());
@@ -461,7 +470,10 @@ fn load_glossary(
         },
         warnings: warnings.into_iter().map(|w| w.to_string()).collect(),
     };
-    *state.glossary.lock().map_err(glossary_lock_poisoned)? = Some(glossary);
+    *state
+        .glossary
+        .lock()
+        .map_err(error::lock_poisoned("glossary"))? = Some(glossary);
     Ok(response)
 }
 
@@ -528,8 +540,11 @@ fn save_glossary(path: String, payload: GlossaryPayload) -> Result<GlossarySaveR
 /// UI's "Discard changes" / revert action.
 #[tauri::command]
 fn discard_changes(state: tauri::State<'_, AppState>) -> Result<CatalogResponse, String> {
-    let mut current = state.catalog.lock().map_err(lock_poisoned)?;
-    let open = current.as_mut().ok_or_else(no_catalog)?;
+    let mut current = state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))?;
+    let open = current.as_mut().ok_or_else(error::no_catalog)?;
     let fresh =
         i18n_harness_adapter_qt::extract(&open.path).map_err(|e| format!("extract failed: {e}"))?;
     let response = build_catalog_response(&open.path, &fresh);
@@ -553,8 +568,11 @@ fn translate_unit(
     };
     use i18n_harness_core::{Batch, BatchKey, FlagSet};
 
-    let mut current = state.catalog.lock().map_err(lock_poisoned)?;
-    let open = current.as_mut().ok_or_else(no_catalog)?;
+    let mut current = state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))?;
+    let open = current.as_mut().ok_or_else(error::no_catalog)?;
     let language = open
         .catalog
         .language()
@@ -584,7 +602,7 @@ fn translate_unit(
     let glossary = state
         .glossary
         .lock()
-        .map_err(glossary_lock_poisoned)?
+        .map_err(error::lock_poisoned("glossary"))?
         .clone();
     let outcomes = backend
         .translate_batch(&batch, locale, glossary.as_ref())
@@ -877,15 +895,24 @@ pub(crate) fn open_project_impl(
     let glossary_for_slot = project.glossary().cloned();
 
     {
-        let mut current = state.project.lock().map_err(project_lock_poisoned)?;
+        let mut current = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
         *current = Some(project);
     }
     {
-        let mut g = state.glossary.lock().map_err(glossary_lock_poisoned)?;
+        let mut g = state
+            .glossary
+            .lock()
+            .map_err(error::lock_poisoned("glossary"))?;
         *g = glossary_for_slot;
     }
     {
-        let mut c = state.catalog.lock().map_err(lock_poisoned)?;
+        let mut c = state
+            .catalog
+            .lock()
+            .map_err(error::lock_poisoned("catalog"))?;
         *c = None;
     }
 
@@ -922,15 +949,24 @@ fn create_project(
     let glossary_for_slot = project.glossary().cloned();
 
     {
-        let mut current = state.project.lock().map_err(project_lock_poisoned)?;
+        let mut current = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
         *current = Some(project);
     }
     {
-        let mut g = state.glossary.lock().map_err(glossary_lock_poisoned)?;
+        let mut g = state
+            .glossary
+            .lock()
+            .map_err(error::lock_poisoned("glossary"))?;
         *g = glossary_for_slot;
     }
     {
-        let mut c = state.catalog.lock().map_err(lock_poisoned)?;
+        let mut c = state
+            .catalog
+            .lock()
+            .map_err(error::lock_poisoned("catalog"))?;
         *c = None;
     }
 
@@ -948,13 +984,22 @@ fn create_project(
 /// issue.
 #[tauri::command]
 fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    *state.project.lock().map_err(project_lock_poisoned)? = None;
-    *state.glossary.lock().map_err(glossary_lock_poisoned)? = None;
-    *state.catalog.lock().map_err(lock_poisoned)? = None;
+    *state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))? = None;
+    *state
+        .glossary
+        .lock()
+        .map_err(error::lock_poisoned("glossary"))? = None;
+    *state
+        .catalog
+        .lock()
+        .map_err(error::lock_poisoned("catalog"))? = None;
     state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?
+        .map_err(error::lock_poisoned("project_catalogs"))?
         .clear();
     Ok(())
 }
@@ -966,7 +1011,10 @@ fn close_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
 fn current_project_summary(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<ProjectSummary>, String> {
-    let current = state.project.lock().map_err(project_lock_poisoned)?;
+    let current = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
     Ok(current.as_ref().map(Project::summary))
 }
 
@@ -976,8 +1024,11 @@ fn current_project_summary(
 /// should gate this command behind a successful `open_project`.
 #[tauri::command]
 fn list_catalogs(state: tauri::State<'_, AppState>) -> Result<Vec<CatalogRef>, String> {
-    let current = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = current.as_ref().ok_or_else(no_project)?;
+    let current = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = current.as_ref().ok_or_else(error::no_project)?;
     Ok(project.catalogs().to_vec())
 }
 
@@ -989,8 +1040,11 @@ fn list_catalogs(state: tauri::State<'_, AppState>) -> Result<Vec<CatalogRef>, S
 /// after each batch of mutations.
 #[tauri::command]
 fn save_manifest(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let current = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = current.as_ref().ok_or_else(no_project)?;
+    let current = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = current.as_ref().ok_or_else(error::no_project)?;
     project.save_manifest().map_err(|e| e.to_string())
 }
 
@@ -1025,8 +1079,11 @@ pub(crate) fn open_catalog_in_project_impl(
 ) -> Result<CatalogResponse, String> {
     let path = PathBuf::from(catalog_path);
 
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
     let catalog_ref = project
         .catalog(&path)
@@ -1043,7 +1100,7 @@ pub(crate) fn open_catalog_in_project_impl(
     state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?
+        .map_err(error::lock_poisoned("project_catalogs"))?
         .insert(
             abs,
             OpenCatalogEntry {
@@ -1088,8 +1145,10 @@ pub(crate) fn update_unit_target_in_project_impl(
     let mut store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
-    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
+    let entry = store
+        .get_mut(&abs)
+        .ok_or_else(error::no_catalog_in_project)?;
     let id = UnitId::from(unit_id.to_owned());
     let unit = entry
         .catalog
@@ -1155,8 +1214,10 @@ fn save_catalog_in_project(
     let mut store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
-    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
+    let entry = store
+        .get_mut(&abs)
+        .ok_or_else(error::no_catalog_in_project)?;
     let units = entry.catalog.units().to_vec();
     entry.catalog.apply(&units, &abs)?;
     entry.dirty = false;
@@ -1205,7 +1266,7 @@ pub(crate) fn save_all_dirty_impl(state: &AppState) -> Result<SaveAllDirtyRespon
     let mut store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
     let mut saved: Vec<SaveSummary> = Vec::new();
     for (abs, entry) in store.iter_mut() {
         if !entry.dirty {
@@ -1248,8 +1309,11 @@ fn discard_changes_in_project(
 ) -> Result<CatalogResponse, String> {
     let abs = PathBuf::from(&catalog_path);
 
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
     // Confirm the catalog is in the store before doing I/O, and capture its
     // format so we dispatch to the right reader.
@@ -1257,9 +1321,9 @@ fn discard_changes_in_project(
         let store = state
             .project_catalogs
             .lock()
-            .map_err(project_catalogs_lock_poisoned)?;
+            .map_err(error::lock_poisoned("project_catalogs"))?;
         if !store.contains_key(&abs) {
-            return Err(no_catalog_in_project());
+            return Err(error::no_catalog_in_project());
         }
         project
             .catalog(&abs)
@@ -1276,7 +1340,7 @@ fn discard_changes_in_project(
     state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?
+        .map_err(error::lock_poisoned("project_catalogs"))?
         .insert(
             abs,
             OpenCatalogEntry {
@@ -1298,7 +1362,7 @@ fn list_open_catalogs(state: tauri::State<'_, AppState>) -> Result<Vec<String>, 
     let store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
     Ok(store
         .keys()
         .map(|p| p.to_string_lossy().into_owned())
@@ -1325,7 +1389,7 @@ pub(crate) fn is_catalog_dirty_impl(catalog_path: &str, state: &AppState) -> Res
     let store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
     Ok(store.get(&abs).is_some_and(|e| e.dirty))
 }
 
@@ -1405,8 +1469,11 @@ async fn translate_glossary_term(
     // drop the lock before the network call.
     let (term_source, glossary, locale) = {
         let abs = PathBuf::from(&project_path);
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let project_guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
         // Validate the caller is referencing the currently-open project.
         if project.paths().root() != abs {
@@ -1530,8 +1597,11 @@ fn resolve_project_translate_context(
 ) -> Result<(&'static Locale, Option<Glossary>), String> {
     use i18n_harness_project::BackendKind;
 
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
     let catalog_ref = project
         .catalog(abs)
@@ -1607,8 +1677,8 @@ fn translate_one(
     let original = {
         let store = project_catalogs
             .lock()
-            .map_err(project_catalogs_lock_poisoned)?;
-        let entry = store.get(abs).ok_or_else(no_catalog_in_project)?;
+            .map_err(error::lock_poisoned("project_catalogs"))?;
+        let entry = store.get(abs).ok_or_else(error::no_catalog_in_project)?;
         let unit = entry
             .catalog
             .units()
@@ -1699,8 +1769,10 @@ fn translate_one(
     {
         let mut store = project_catalogs
             .lock()
-            .map_err(project_catalogs_lock_poisoned)?;
-        let entry = store.get_mut(abs).ok_or_else(no_catalog_in_project)?;
+            .map_err(error::lock_poisoned("project_catalogs"))?;
+        let entry = store
+            .get_mut(abs)
+            .ok_or_else(error::no_catalog_in_project)?;
         if let Some(slot) = entry.catalog.find_unit_mut(id) {
             *slot = merged.clone();
         }
@@ -1710,7 +1782,7 @@ fn translate_one(
     // 4. Durable review-event write (with project lock only).
     if needs_review {
         let source_hash = merged.source_hash.clone().unwrap_or_default();
-        let project_guard = project.lock().map_err(project_lock_poisoned)?;
+        let project_guard = project.lock().map_err(error::lock_poisoned("project"))?;
         if let Some(project) = project_guard.as_ref() {
             project
                 .set_review_status(
@@ -1866,8 +1938,8 @@ fn translate_batch_in_project(
         let store = state
             .project_catalogs
             .lock()
-            .map_err(project_catalogs_lock_poisoned)?;
-        let entry = store.get(&abs).ok_or_else(no_catalog_in_project)?;
+            .map_err(error::lock_poisoned("project_catalogs"))?;
+        let entry = store.get(&abs).ok_or_else(error::no_catalog_in_project)?;
         entry
             .catalog
             .units()
@@ -1884,7 +1956,7 @@ fn translate_batch_in_project(
         let mut active = state
             .active_batches
             .lock()
-            .map_err(active_batches_lock_poisoned)?;
+            .map_err(error::lock_poisoned("active_batches"))?;
         if active.contains(&active_key) {
             return Err("a translation is already running for this catalog/locale".to_string());
         }
@@ -2127,8 +2199,11 @@ fn record_correction_in_project(
 ) -> Result<CorrectionIdResponse, String> {
     use i18n_harness_project::CorrectionFilter;
 
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
     let (_, manifest_relative) = resolve_catalog_path(project, &req.catalog_path)?;
 
@@ -2168,8 +2243,11 @@ fn list_corrections_in_project(
 ) -> Result<Vec<Correction>, String> {
     use i18n_harness_project::CorrectionFilter;
 
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
     let catalog_manifest = filter
         .catalog_path
@@ -2206,8 +2284,11 @@ fn promote_correction_to_curated(
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let corr_id = parse_correction_id(&id)?;
-    let mut project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_mut().ok_or_else(no_project)?;
+    let mut project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_mut().ok_or_else(error::no_project)?;
     project
         .promote_to_curated(corr_id, note)
         .map_err(|e| e.to_string())
@@ -2221,8 +2302,11 @@ fn promote_correction_to_curated(
 #[tauri::command]
 fn un_curate_correction(id: String, state: tauri::State<'_, AppState>) -> Result<bool, String> {
     let corr_id = parse_correction_id(&id)?;
-    let mut project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_mut().ok_or_else(no_project)?;
+    let mut project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_mut().ok_or_else(error::no_project)?;
     project.un_curate(&corr_id).map_err(|e| e.to_string())
 }
 
@@ -2238,8 +2322,11 @@ fn un_curate_correction(id: String, state: tauri::State<'_, AppState>) -> Result
 fn list_curated_in_project(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<i18n_harness_project::CuratedExample>, String> {
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
     Ok(project.curated().examples().cloned().collect())
 }
 
@@ -2262,8 +2349,11 @@ fn set_review_status_in_project(
     let abs = PathBuf::from(&catalog_path);
 
     {
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let project_guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = project_guard.as_ref().ok_or_else(error::no_project)?;
         let uid = UnitId::from(unit_id.clone());
         project
             .set_review_status(
@@ -2353,8 +2443,11 @@ fn scan_project_review_state(
     // project lock; drop the lock before any I/O so we do not hold it across
     // extract calls.
     let catalog_refs: Vec<i18n_harness_project::CatalogRef> = {
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let project_guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = project_guard.as_ref().ok_or_else(error::no_project)?;
         project.catalogs().to_vec()
     };
 
@@ -2387,7 +2480,7 @@ fn scan_project_review_state(
             let store = state
                 .project_catalogs
                 .lock()
-                .map_err(project_catalogs_lock_poisoned)?;
+                .map_err(error::lock_poisoned("project_catalogs"))?;
             store.contains_key(&abs)
         };
 
@@ -2398,7 +2491,10 @@ fn scan_project_review_state(
 
             // Fold review state in.
             {
-                let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+                let project_guard = state
+                    .project
+                    .lock()
+                    .map_err(error::lock_poisoned("project"))?;
                 if let Some(project) = project_guard.as_ref() {
                     project.apply_review_state(&abs, catalog.units_mut());
                 }
@@ -2408,7 +2504,7 @@ fn scan_project_review_state(
             state
                 .project_catalogs
                 .lock()
-                .map_err(project_catalogs_lock_poisoned)?
+                .map_err(error::lock_poisoned("project_catalogs"))?
                 .insert(
                     abs.clone(),
                     OpenCatalogEntry {
@@ -2423,7 +2519,7 @@ fn scan_project_review_state(
     let store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
 
     // Build a manifest-path lookup by absolute path.
     let manifest_path_of: std::collections::HashMap<String, String> = catalog_refs
@@ -2639,7 +2735,7 @@ fn accept_unit_in_project(
         let store = state
             .project_catalogs
             .lock()
-            .map_err(project_catalogs_lock_poisoned)?;
+            .map_err(error::lock_poisoned("project_catalogs"))?;
         let entry = store
             .get(&abs)
             .ok_or_else(|| "catalog not open in project".to_string())?;
@@ -2656,8 +2752,11 @@ fn accept_unit_in_project(
     // Durable write first. If this fails, the in-memory state is untouched
     // and the caller can retry safely.
     {
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let project_guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = project_guard.as_ref().ok_or_else(error::no_project)?;
         project
             .set_review_status(&abs, &uid, Some(ReviewStatus::Reviewed), source_hash, None)
             .map_err(|e| format!("set_review_status failed: {e}"))?;
@@ -2667,7 +2766,7 @@ fn accept_unit_in_project(
     let mut store = state
         .project_catalogs
         .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
+        .map_err(error::lock_poisoned("project_catalogs"))?;
     let entry = store
         .get_mut(&abs)
         .ok_or_else(|| "catalog not open in project".to_string())?;
@@ -2705,8 +2804,11 @@ fn add_catalog_to_project(
     entry: CatalogEntry,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project.add_catalog(entry).map_err(|e| e.to_string())?;
     project.save_manifest().map_err(|e| e.to_string())?;
     let summary = project.summary();
@@ -2732,8 +2834,11 @@ fn remove_catalog_from_project(
 
     // Acquire project lock, mutate, and release before taking project_catalogs.
     let (summary, abs_path) = {
-        let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = guard.as_mut().ok_or_else(no_project)?;
+        let mut guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = guard.as_mut().ok_or_else(error::no_project)?;
 
         // Resolve the absolute path before the mutation for the catalog eviction
         // step below — after removal the catalog() lookup would return None.
@@ -2772,8 +2877,11 @@ fn update_locale_in_project(
     config: LocaleConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project
         .update_locale(&id, config)
         .map_err(|e| e.to_string())?;
@@ -2793,8 +2901,11 @@ fn remove_locale_from_project(
     id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project.remove_locale(&id).map_err(|e| e.to_string())?;
     project.save_manifest().map_err(|e| e.to_string())?;
     let summary = project.summary();
@@ -2812,8 +2923,11 @@ fn set_backend_in_project(
     config: BackendConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project.set_backend(config).map_err(|e| e.to_string())?;
     project.save_manifest().map_err(|e| e.to_string())?;
     let summary = project.summary();
@@ -2831,8 +2945,11 @@ fn set_glossary_in_project(
     config: GlossaryConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project.set_glossary(config).map_err(|e| e.to_string())?;
     project.save_manifest().map_err(|e| e.to_string())?;
     let summary = project.summary();
@@ -2850,8 +2967,11 @@ fn set_prompts_in_project(
     config: PromptsConfig,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let mut guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = guard.as_mut().ok_or_else(no_project)?;
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
     project.set_prompts(config).map_err(|e| e.to_string())?;
     project.save_manifest().map_err(|e| e.to_string())?;
     let summary = project.summary();
@@ -2949,8 +3069,11 @@ fn run_evaluation_in_project(
         Vec<LocaleEntry>,
         i18n_harness_project::EvaluationStore,
     ) = {
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        let project_guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = project_guard.as_ref().ok_or_else(error::no_project)?;
 
         // Resolve all curated examples that have a backing correction.
         let curated = project.curated();
@@ -3031,7 +3154,7 @@ fn run_evaluation_in_project(
         let mut active = state
             .active_batches
             .lock()
-            .map_err(active_batches_lock_poisoned)?;
+            .map_err(error::lock_poisoned("active_batches"))?;
         if active.contains(&eval_key) {
             return Err("an evaluation is already running".to_string());
         }
@@ -3229,8 +3352,11 @@ fn run_evaluation_in_project(
 fn list_evaluation_runs_in_project(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<i18n_harness_project::EvaluationRun>, String> {
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
     let mut runs = project.evaluations().list().map_err(|e| e.to_string())?;
     // Return newest-first.
     runs.reverse();
@@ -3273,8 +3399,11 @@ pub struct ExportTuningBundleResponse {
 fn export_tuning_bundle_in_project(
     state: tauri::State<'_, AppState>,
 ) -> Result<ExportTuningBundleResponse, String> {
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
     let summary = project.export_tuning_bundle().map_err(|e| e.to_string())?;
     Ok(ExportTuningBundleResponse {
         path: summary.path,
@@ -3294,8 +3423,11 @@ fn export_tuning_bundle_in_project(
 fn list_tuning_bundles_in_project(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ExportTuningBundleResponse>, String> {
-    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-    let project = project_guard.as_ref().ok_or_else(no_project)?;
+    let project_guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = project_guard.as_ref().ok_or_else(error::no_project)?;
     let bundles = project.list_tuning_bundles().map_err(|e| e.to_string())?;
     Ok(bundles
         .into_iter()
@@ -3330,54 +3462,6 @@ fn build_catalog_response_backing(
         language: catalog.language().map(str::to_owned),
         units: catalog.units().to_vec(),
     }
-}
-
-fn lock_poisoned(
-    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<OpenCatalog>>>,
-) -> String {
-    error::lock_poisoned::<Option<OpenCatalog>>("catalog")(e)
-}
-
-fn glossary_lock_poisoned(
-    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Glossary>>>,
-) -> String {
-    error::lock_poisoned::<Option<Glossary>>("glossary")(e)
-}
-
-fn project_lock_poisoned(
-    e: std::sync::PoisonError<std::sync::MutexGuard<'_, Option<Project>>>,
-) -> String {
-    error::lock_poisoned::<Option<Project>>("project")(e)
-}
-
-fn project_catalogs_lock_poisoned(
-    e: std::sync::PoisonError<
-        std::sync::MutexGuard<'_, std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
-    >,
-) -> String {
-    error::lock_poisoned::<std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>(
-        "project_catalogs",
-    )(e)
-}
-
-fn active_batches_lock_poisoned(
-    e: std::sync::PoisonError<
-        std::sync::MutexGuard<'_, std::collections::BTreeSet<(PathBuf, String)>>,
-    >,
-) -> String {
-    error::lock_poisoned::<std::collections::BTreeSet<(PathBuf, String)>>("active_batches")(e)
-}
-
-fn no_catalog() -> String {
-    error::no_catalog()
-}
-
-fn no_project() -> String {
-    error::no_project()
-}
-
-fn no_catalog_in_project() -> String {
-    error::no_catalog_in_project()
 }
 
 /// Return `(absolute_path, manifest_relative_path)` for a catalog path that
