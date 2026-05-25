@@ -629,17 +629,15 @@ export function App() {
         activeCatalogPath.replace(/\\/g, "/").split("/").pop() ??
         activeCatalogPath;
 
-      // Set up listeners BEFORE calling the start command to avoid a
-      // race where a very-fast first unit emits before we subscribe.
-      // We use a placeholder jobId for listener setup; it will be replaced
-      // immediately after the start call returns. However, the event name
-      // includes the job_id which we don't know yet — so we start the batch
-      // first, then subscribe with the known job_id.
-      //
-      // The worker thread emits events from a spawned OS thread that calls
-      // translate_one (blocking network call) per unit, so the first event
-      // cannot arrive before the start command round-trip completes on any
-      // real network. This is safe in practice.
+      // Start the batch first to get the server-assigned job_id (we cannot
+      // subscribe to the per-job event channels before knowing the id).
+      // After receiving the id, we subscribe before arming the UI state so
+      // the handlers exist as early as possible. A stuck-batch safety timer
+      // handles the unlikely case where the terminal event was emitted in
+      // the gap between the Rust handler spawning the worker and our
+      // `listenBatchProgress` call resolving (possible with instant backends;
+      // impossible with Ollama's network latency). Tracked for a cleaner fix
+      // in M4.8.1 (reserve-job-id command so subscribe can precede start).
       let started: { job_id: string; total: number };
       try {
         started = await translateBatchInProject(activeCatalogPath, scope);
@@ -650,15 +648,23 @@ export function App() {
 
       const { job_id: jobId, total } = started;
 
-      // Initialise the active batch.
-      setActiveBatch({
-        jobId,
-        catalogPath: activeCatalogPath,
-        catalogName,
-        completed: 0,
-        total,
-        recent: [],
-      });
+      // Subscribe to events BEFORE we set activeBatch so the handlers are
+      // registered before any state transitions.
+      //
+      // Race note: the worker thread is spawned inside the Rust handler before
+      // the IPC response is serialised and delivered to the JS side. For
+      // low-latency backends (e.g. the `manual` backend used in tests) the
+      // worker could complete and emit the terminal event before our
+      // `listenBatchProgress` call resolves. To guard against a stuck-batch,
+      // we install a timeout that clears the batch state if no terminal event
+      // arrives within 10 s of the subscribe call completing. The timeout is
+      // cancelled the moment any terminal event lands.
+      //
+      // A proper fix requires a Rust-side protocol change (reserve a job slot
+      // and return the job_id before starting the worker; tracked in M4.8.1).
+      let terminalReceived = false;
+      const stuckGuardMs = 10_000;
+      let stuckGuardTimer: ReturnType<typeof setTimeout> | null = null;
 
       // Capture activeCatalogPath in a local for the callbacks — the React
       // state captured in closures may be stale if the user navigates.
@@ -668,6 +674,13 @@ export function App() {
         jobId,
         // onProgress
         (payload) => {
+          // Any progress event means the terminal was not missed.
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
+
           // Update batch progress UI.
           setActiveBatch((prev) => {
             if (!prev || prev.jobId !== jobId) return prev;
@@ -700,6 +713,11 @@ export function App() {
         },
         // onTerminal
         (payload, status) => {
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
           // Tear down listeners.
           if (unlistenRef.current) {
             unlistenRef.current();
@@ -727,6 +745,37 @@ export function App() {
 
       // Stash so we can call it on cleanup or user-cancel.
       unlistenRef.current = unlisten;
+
+      // Now that listeners are registered, initialise the batch UI state.
+      setActiveBatch({
+        jobId,
+        catalogPath: activeCatalogPath,
+        catalogName,
+        completed: 0,
+        total,
+        recent: [],
+      });
+
+      // Arm the stuck-batch guard: if the terminal event never arrives
+      // (missed before subscribe completed), clear the batch widget after
+      // stuckGuardMs so the UI is not permanently blocked.
+      if (!terminalReceived) {
+        stuckGuardTimer = setTimeout(() => {
+          stuckGuardTimer = null;
+          if (!terminalReceived) {
+            // Terminal was missed — clean up defensively.
+            if (unlistenRef.current) {
+              unlistenRef.current();
+              unlistenRef.current = null;
+            }
+            setActiveBatch(null);
+            flashError(
+              `Batch for ${catalogName} may have completed before listeners were ready. Check the catalog for translated units.`,
+            );
+            scheduleRescan();
+          }
+        }, stuckGuardMs);
+      }
     },
     [
       activeCatalogPath,
