@@ -22,6 +22,13 @@ use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use i18n_harness_project::Project;
 
+// Re-imported at module scope so the intra-doc links in `MergeOutcome` and
+// `merge_outcome` resolve under `cargo doc -- -D warnings`. The function
+// bodies below still pull the type in locally; both refer to the same item.
+#[cfg(feature = "ollama")]
+#[allow(unused_imports)]
+use i18n_harness_backend::TranslationOutcome;
+
 use crate::dto::BatchScope;
 use crate::error;
 use crate::state::OpenCatalogEntry;
