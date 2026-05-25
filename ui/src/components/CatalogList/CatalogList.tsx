@@ -4,7 +4,12 @@ import type { Unit, UnitId, UnitRow, UnitState } from "../../lib/types";
 import { unitRow } from "../../lib/types";
 import { StateBadge } from "../StateBadge/StateBadge";
 
-type Filter = "all" | "untranslated" | "proposed" | "finished";
+export type Filter =
+  | "all"
+  | "untranslated"
+  | "proposed"
+  | "finished"
+  | "needs-review";
 
 interface Props {
   units: Unit[];
@@ -35,12 +40,14 @@ export function CatalogList({
       untranslated: 0,
       proposed: 0,
       finished: 0,
+      "needs-review": 0,
     };
     for (const r of rows) {
       c.all += 1;
       if (r.state === "untranslated") c.untranslated += 1;
       else if (r.state === "proposed") c.proposed += 1;
       else if (r.state === "finished") c.finished += 1;
+      if (r.needsReview) c["needs-review"] += 1;
     }
     return c;
   }, [rows]);
@@ -48,7 +55,11 @@ export function CatalogList({
   const filtered = useMemo(() => {
     const lower = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (filter !== "all" && r.state !== (filter as UnitState)) return false;
+      if (filter === "needs-review") {
+        if (!r.needsReview) return false;
+      } else if (filter !== "all" && r.state !== (filter as UnitState)) {
+        return false;
+      }
       if (lower && !rowMatches(r, lower)) return false;
       return true;
     });
@@ -105,34 +116,40 @@ export function CatalogList({
         aria-label="Unit filter"
         className="flex gap-1 px-3 pb-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {(["all", "untranslated", "proposed", "finished"] as Filter[]).map(
-          (f) => (
-            <button
-              key={f}
-              type="button"
-              role="tab"
-              aria-selected={filter === f}
-              onClick={() => onFilterChange(f)}
+        {(
+          [
+            "all",
+            "untranslated",
+            "proposed",
+            "finished",
+            "needs-review",
+          ] as Filter[]
+        ).map((f) => (
+          <button
+            key={f}
+            type="button"
+            role="tab"
+            aria-selected={filter === f}
+            onClick={() => onFilterChange(f)}
+            className={cn(
+              "inline-flex items-center gap-2 h-6 px-2 rounded-md whitespace-nowrap",
+              "text-xs font-medium border transition-colors duration-100 ease-out",
+              filter === f
+                ? "text-fg-primary bg-accent-subtle border-accent-subtle-border"
+                : "text-fg-secondary bg-transparent border-transparent hover:bg-bg-hover hover:text-fg-primary",
+            )}
+          >
+            <span>{labelOf(f)}</span>
+            <span
               className={cn(
-                "inline-flex items-center gap-2 h-6 px-2 rounded-md whitespace-nowrap",
-                "text-xs font-medium border transition-colors duration-100 ease-out",
-                filter === f
-                  ? "text-fg-primary bg-accent-subtle border-accent-subtle-border"
-                  : "text-fg-secondary bg-transparent border-transparent hover:bg-bg-hover hover:text-fg-primary",
+                "tabular-nums",
+                filter === f ? "text-accent" : "text-fg-tertiary",
               )}
             >
-              <span>{labelOf(f)}</span>
-              <span
-                className={cn(
-                  "tabular-nums",
-                  filter === f ? "text-accent" : "text-fg-tertiary",
-                )}
-              >
-                {counts[f]}
-              </span>
-            </button>
-          ),
-        )}
+              {counts[f]}
+            </span>
+          </button>
+        ))}
       </div>
 
       <div
@@ -267,6 +284,8 @@ function labelOf(f: Filter): string {
       return "Proposed";
     case "finished":
       return "Finished";
+    case "needs-review":
+      return "Needs review";
   }
 }
 

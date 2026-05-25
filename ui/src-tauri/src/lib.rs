@@ -1625,6 +1625,267 @@ fn set_review_status_in_project(
     Ok(())
 }
 
+// ── M4.7 — Project-wide review queue scan ────────────────────────────────────
+
+/// One unit that requires human attention in the project-wide review queue.
+///
+/// A unit qualifies if `review_status == NeedsReview` OR `flags` is non-empty.
+/// Both conditions are surfaced because flags are themselves a "human attention"
+/// signal even before an explicit `NeedsReview` event has been recorded.
+#[derive(Debug, Serialize)]
+pub struct ReviewQueueItem {
+    /// Absolute path to the catalog file on disk.
+    pub catalog_path: String,
+    /// Manifest-relative path for display in the table.
+    pub catalog_manifest_path: String,
+    /// Target locale id (e.g. `"de_DE"`).
+    pub locale: String,
+    /// The unit's id string.
+    pub unit_id: String,
+    /// Source text, truncated to 120 chars at a word boundary where possible.
+    pub source_preview: String,
+    /// Target text, truncated to 120 chars; empty string when untranslated.
+    pub target_preview: String,
+    /// Kebab-case flag names; empty when only `NeedsReview` triggered inclusion.
+    pub flags: Vec<String>,
+    /// Kebab-case `ReviewStatus` variant, or `None` when not set.
+    pub review_status: Option<String>,
+    /// Kebab-case unit state (`"untranslated"`, `"proposed"`, `"finished"`, …).
+    pub state: String,
+}
+
+/// Aggregated result of a project-wide review-queue scan.
+#[derive(Debug, Serialize)]
+pub struct ReviewQueueResponse {
+    /// Total units that need review across all catalogs.
+    pub total_count: usize,
+    /// Per-catalog unit count, keyed by absolute catalog path.
+    pub by_catalog: BTreeMap<String, usize>,
+    /// All items, sorted by catalog path then unit id.
+    pub items: Vec<ReviewQueueItem>,
+}
+
+/// Scan every catalog in the open project for units that need human review.
+///
+/// A unit qualifies if:
+/// - `unit.review_status == NeedsReview`, OR
+/// - `unit.flags` is non-empty (any flag — gate-produced or model-supplied).
+///
+/// Catalogs that have already been opened in `project_catalogs` are scanned
+/// from the in-memory store. Catalogs that are NOT yet open are extracted via
+/// the Qt adapter and folded with `Project::apply_review_state`, then cached
+/// into the store with `dirty: false` — the same side-effect as
+/// `open_catalog_in_project`.
+///
+/// Only `qt-ts` catalogs are supported today. Non-`qt-ts` catalogs are
+/// skipped with a `tracing::warn!` and will be wired in M4.4/M4.5.
+#[tauri::command]
+fn scan_project_review_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<ReviewQueueResponse, String> {
+    use i18n_harness_core::ReviewStatus;
+
+    // Collect the list of catalog refs from the project while holding the
+    // project lock; drop the lock before any I/O so we do not hold it across
+    // extract calls.
+    let catalog_refs: Vec<i18n_harness_project::CatalogRef> = {
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project = project_guard.as_ref().ok_or_else(no_project)?;
+        project.catalogs().to_vec()
+    };
+
+    // For each catalog, ensure it is in the project_catalogs store.
+    // If it is already open, skip the I/O; otherwise extract + apply and insert.
+    for catalog_ref in &catalog_refs {
+        // Only qt-ts is supported today.
+        if catalog_ref.format != i18n_harness_project::CatalogFormat::QtTs {
+            tracing::warn!(
+                path = %catalog_ref.manifest_path,
+                format = ?catalog_ref.format,
+                "scan_project_review_state: non-qt-ts catalog skipped (M4.4/M4.5 will wire PO/ICU-JSON)"
+            );
+            continue;
+        }
+
+        let abs = std::path::PathBuf::from(&catalog_ref.absolute_path);
+
+        // Check whether already cached.
+        let already_open = {
+            let store = state
+                .project_catalogs
+                .lock()
+                .map_err(project_catalogs_lock_poisoned)?;
+            store.contains_key(&abs)
+        };
+
+        if !already_open {
+            // Extract from disk.
+            let mut catalog = i18n_harness_adapter_qt::extract(&abs)
+                .map_err(|e| format!("extract failed for {}: {e}", catalog_ref.manifest_path))?;
+
+            // Fold review state in.
+            {
+                let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+                if let Some(project) = project_guard.as_ref() {
+                    project.apply_review_state(&abs, catalog.units_mut());
+                }
+            }
+
+            // Insert into the store.
+            state
+                .project_catalogs
+                .lock()
+                .map_err(project_catalogs_lock_poisoned)?
+                .insert(
+                    abs.clone(),
+                    OpenCatalogEntry {
+                        catalog,
+                        dirty: false,
+                    },
+                );
+        }
+    }
+
+    // Now scan all open catalogs and collect review items.
+    let store = state
+        .project_catalogs
+        .lock()
+        .map_err(project_catalogs_lock_poisoned)?;
+
+    // Build a manifest-path lookup by absolute path.
+    let manifest_path_of: std::collections::HashMap<String, String> = catalog_refs
+        .iter()
+        .map(|r| (r.absolute_path.clone(), r.manifest_path.clone()))
+        .collect();
+    let locale_of: std::collections::HashMap<String, String> = catalog_refs
+        .iter()
+        .map(|r| (r.absolute_path.clone(), r.locale.clone()))
+        .collect();
+
+    let mut items: Vec<ReviewQueueItem> = Vec::new();
+    let mut by_catalog: BTreeMap<String, usize> = BTreeMap::new();
+
+    // Iterate in BTreeMap order (= absolute path order) for deterministic output.
+    for (abs, entry) in store.iter() {
+        let abs_str = abs.to_string_lossy().into_owned();
+        let manifest_path = manifest_path_of
+            .get(&abs_str)
+            .cloned()
+            .unwrap_or_else(|| abs_str.clone());
+        let locale = locale_of.get(&abs_str).cloned().unwrap_or_default();
+
+        let mut catalog_count: usize = 0;
+
+        for unit in entry.catalog.units() {
+            // Serialize flags via serde to get the kebab-case strings that the
+            // `#[serde(rename_all = "kebab-case")]` attribute on `Flag` produces.
+            // `format!("{:?}")` would give PascalCase debug output instead.
+            let flags: Vec<String> = unit
+                .flags
+                .iter()
+                .filter_map(|f| {
+                    serde_json::to_value(f)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                })
+                .collect();
+
+            let needs_review =
+                unit.review_status == Some(ReviewStatus::NeedsReview) || !flags.is_empty();
+            if !needs_review {
+                continue;
+            }
+
+            let source_preview = truncate_preview(&unit.source, 120);
+            let target_preview = extract_target_text(&unit.target, 120);
+
+            // Serialize review_status via serde for the kebab-case string.
+            let review_status_str: Option<String> = unit.review_status.and_then(|s| {
+                serde_json::to_value(s)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_owned))
+            });
+
+            // Serialize state via serde for the kebab-case string.
+            let state_str: String = serde_json::to_value(unit.state)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "unknown".to_string());
+
+            items.push(ReviewQueueItem {
+                catalog_path: abs_str.clone(),
+                catalog_manifest_path: manifest_path.clone(),
+                locale: locale.clone(),
+                unit_id: unit.id.to_string(),
+                source_preview,
+                target_preview,
+                flags,
+                review_status: review_status_str,
+                state: state_str.to_string(),
+            });
+            catalog_count += 1;
+        }
+
+        if catalog_count > 0 {
+            by_catalog.insert(abs_str, catalog_count);
+        }
+    }
+
+    // Sort: by catalog_path then unit_id (both strings, BTreeMap already gave
+    // catalog order; within each catalog units came in document order — resort
+    // by unit_id for stable output).
+    items.sort_by(|a, b| {
+        a.catalog_path
+            .cmp(&b.catalog_path)
+            .then_with(|| a.unit_id.cmp(&b.unit_id))
+    });
+
+    let total_count = items.len();
+
+    Ok(ReviewQueueResponse {
+        total_count,
+        by_catalog,
+        items,
+    })
+}
+
+/// Truncate `s` to at most `max_chars` characters, preferring a word boundary.
+fn truncate_preview(s: &str, max_chars: usize) -> String {
+    let s = s.replace('\n', " ");
+    if s.chars().count() <= max_chars {
+        return s;
+    }
+    // Try to break at a word boundary within the last 20 chars of the limit.
+    let cutoff = s
+        .char_indices()
+        .nth(max_chars)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    let search_start = cutoff.saturating_sub(20);
+    let best = s[search_start..cutoff]
+        .rfind(' ')
+        .map(|off| search_start + off)
+        .unwrap_or(cutoff);
+    format!("{}…", s[..best].trim_end())
+}
+
+/// Extract a plain-text preview from a `Target`, truncated to `max_chars`.
+fn extract_target_text(target: &i18n_harness_core::Target, max_chars: usize) -> String {
+    match target {
+        i18n_harness_core::Target::Singular { text: Some(t) } => truncate_preview(t, max_chars),
+        i18n_harness_core::Target::Plural { forms } => {
+            // Use the first non-None form as the preview.
+            forms
+                .iter()
+                .flatten()
+                .next()
+                .map(|t| truncate_preview(t, max_chars))
+                .unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
 // ── M4.6.2 — Accept (clear flags, mark Reviewed) ────────────────────────────
 
 /// Accept a unit as reviewed: clear its flags and flag notes, then append a
@@ -2003,6 +2264,7 @@ pub fn run() {
         set_backend_in_project,
         set_glossary_in_project,
         set_prompts_in_project,
+        scan_project_review_state,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -2044,6 +2306,7 @@ pub fn run() {
         set_backend_in_project,
         set_glossary_in_project,
         set_prompts_in_project,
+        scan_project_review_state,
     ]);
 
     builder

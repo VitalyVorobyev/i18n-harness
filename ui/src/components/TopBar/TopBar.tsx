@@ -183,7 +183,12 @@ export function TopBar({
 
 // ── Project-mode TopBar (M4.3a) ───────────────────────────────────────────────
 
-export type ProjectView = "translate" | "glossary" | "settings" | "quality";
+export type ProjectView =
+  | "translate"
+  | "glossary"
+  | "settings"
+  | "quality"
+  | "review";
 
 interface ProjectTopBarProps {
   projectName: string;
@@ -195,6 +200,8 @@ interface ProjectTopBarProps {
   theme: Theme;
   onToggleTheme: () => void;
   onCloseProject: () => void;
+  /** Total units needing review across the project; drives the badge on the Review tab. */
+  reviewQueueCount?: number;
 }
 
 export function ProjectTopBar({
@@ -207,6 +214,7 @@ export function ProjectTopBar({
   theme,
   onToggleTheme,
   onCloseProject,
+  reviewQueueCount = 0,
 }: ProjectTopBarProps) {
   const hasFilter = activeLocaleFilter.size > 0;
 
@@ -331,6 +339,18 @@ export function ProjectTopBar({
         >
           Quality
         </TabButton>
+        <TabButtonWithBadge
+          active={view === "review"}
+          onClick={() => onViewChange("review")}
+          aria-label={
+            reviewQueueCount > 0
+              ? `Review queue — ${reviewQueueCount} units need review`
+              : "Review queue"
+          }
+          badge={reviewQueueCount > 0 ? reviewQueueCount : undefined}
+        >
+          Review
+        </TabButtonWithBadge>
       </div>
 
       {/* Right: theme toggle + close project */}
@@ -407,6 +427,53 @@ function TabButton({
       )}
     >
       {children}
+    </button>
+  );
+}
+
+/** Tab button that shows an optional count badge — used for the Review tab. */
+function TabButtonWithBadge({
+  active,
+  onClick,
+  children,
+  badge,
+  "aria-label": ariaLabel,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  badge?: number;
+  "aria-label"?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-label={ariaLabel}
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 h-6 px-2 rounded-sm text-xs font-medium",
+        "transition-colors duration-100 ease-out",
+        active
+          ? "text-fg-primary bg-accent-subtle border border-accent-subtle-border"
+          : "text-fg-tertiary border border-transparent hover:text-fg-primary hover:bg-bg-hover",
+      )}
+    >
+      {children}
+      {badge !== undefined && (
+        <span
+          className={cn(
+            "inline-flex items-center h-4 px-1 rounded-pill border tabular-nums leading-none text-[10px] font-semibold",
+            active
+              ? "bg-severity-soft-bg border-severity-soft-border text-severity-soft"
+              : "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
+          )}
+          aria-hidden="true"
+        >
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

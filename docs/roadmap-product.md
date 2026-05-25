@@ -416,17 +416,42 @@ clears flags + flag_notes in memory, and appends a `Reviewed` event to
 `review.jsonl`. The `BackendMalformedResponse` finding detail now renders
 its `reason` field in `summarizeDetail`.
 
-### M4.7 — Review queue
+### M4.7 — Review queue ✓ shipped
 
-- "Needs review" filter on the unit list inside the Translate tab,
-  driven by `Unit.review_status == NeedsReview` (M4.1.5) and the
-  per-unit `flags` from M4.6.
-- "Source changed" filter, driven by comparing the current extract's
-  `Unit.source_hash` against the last-saved value.
-- Project-wide flag count badge in the sidebar ("12 flagged across
-  project, 3 source-changed"); clicking opens a virtual catalog view
-  listing every flagged or source-changed unit across catalogs and
-  locales.
+New Tauri command `scan_project_review_state` scans every registered
+catalog (eagerly opening any not yet in the project store via the Qt
+adapter) and returns `ReviewQueueResponse` — a count per catalog plus
+a flat sorted list of `ReviewQueueItem` covering every unit where
+`review_status == NeedsReview` OR `flags` is non-empty.
+
+UI additions:
+
+- **"Needs review" filter** on the CatalogList unit list (fifth tab,
+  joining All / Untrans. / Proposed / Finished). Filter logic:
+  `unit.review_status === "needs-review" || unit.flags.length > 0`.
+  `UnitRow` gained a `needsReview` boolean derived from those two fields.
+- **Sidebar badge**: a warning-colored `⚑N` chip in the project name
+  row when `total_count > 0`; click opens the Review view. Per-catalog
+  count indicators appear next to each catalog entry.
+- **Review tab** in the topbar (fifth tab after Translate / Glossary /
+  Settings / Quality) with a live count badge driven by
+  `reviewQueueCount`. Tab badge uses `severity-soft` palette.
+- **Virtual review-queue view** (`ReviewQueue.tsx`): table of all items
+  with Catalog / Locale / Unit ID / Source / Target / Flags / Status /
+  State columns; "Open" button navigates to the catalog + unit in the
+  Translate view. Catalog column is clickable to filter to that catalog.
+  Empty state: "No units need review. Great work."
+- **Live badge**: rescan is triggered (debounced 200ms) after every
+  translate, accept, edit, save, discard, and project open.
+
+CSS: added `--color-severity-soft-border` token (dark and light themes).
+
+Non-`qt-ts` catalogs are skipped with a `tracing::warn!` and noted in
+the command doc comment. PO and ICU-JSON will be wired in M4.4/M4.5.
+
+"Source changed" filter (comparing `source_hash` against the last-saved
+hash) is deferred to a follow-on slice once `source_hash` is written to
+`review.jsonl` on Accept.
 
 ### M4.8 — Bulk translate
 
