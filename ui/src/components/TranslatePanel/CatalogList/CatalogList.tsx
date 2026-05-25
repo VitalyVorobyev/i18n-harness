@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef } from "react";
-import { cn } from "../../lib/cn";
+import { cn } from "../../../lib/cn";
 import type {
   BatchScope,
   Unit,
   UnitId,
   UnitRow,
   UnitState,
-} from "../../lib/types";
-import { unitRow } from "../../lib/types";
-import { StateBadge } from "../StateBadge/StateBadge";
-import { TranslateAllButton } from "../TranslateAllButton/TranslateAllButton";
+} from "../../../lib/types";
+import { unitRow } from "../../../lib/types";
+import { StateBadge } from "../../StateBadge/StateBadge";
+import { TranslateAllButton } from "../../TranslateAllButton/TranslateAllButton";
 
 export type Filter =
   | "all"

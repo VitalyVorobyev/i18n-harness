@@ -1,12 +1,12 @@
-import { cn } from "../../lib/cn";
+import { cn } from "../../../lib/cn";
 import type {
   AnyFlag,
   Finding,
   GateReport,
   ModelFlag,
   Unit,
-} from "../../lib/types";
-import { humanizeFlag, severityOf } from "../../lib/types";
+} from "../../../lib/types";
+import { humanizeFlag, severityOf } from "../../../lib/types";
 
 interface Props {
   unit: Unit;

@@ -7,10 +7,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { cn } from "../../lib/cn";
-import { type Token, tokenize } from "../../lib/highlight";
-import type { TargetEdit, Unit, UnitId } from "../../lib/types";
-import { StateBadge } from "../StateBadge/StateBadge";
+import { cn } from "../../../lib/cn";
+import { type Token, tokenize } from "../../../lib/highlight";
+import type { TargetEdit, Unit, UnitId } from "../../../lib/types";
+import { StateBadge } from "../../StateBadge/StateBadge";
 
 /// Imperative handle exposed by UnitEditor — App calls this before
 /// saving to make sure the textarea's in-progress edit lands in the

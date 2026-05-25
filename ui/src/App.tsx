@@ -1,12 +1,9 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActiveBatch } from "./components/BatchProgressWidget/BatchProgressWidget";
 import { BatchProgressWidget } from "./components/BatchProgressWidget/BatchProgressWidget";
-import type { Filter } from "./components/CatalogList/CatalogList";
-import { CatalogList } from "./components/CatalogList/CatalogList";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { HomeScreen, pushRecent } from "./components/HomeScreen/HomeScreen";
-import { Inspector } from "./components/Inspector/Inspector";
 import { OverviewPanel } from "./components/OverviewPanel/OverviewPanel";
 import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
@@ -14,10 +11,9 @@ import { QualityPanel } from "./components/QualityPanel/QualityPanel";
 import { ReviewQueue } from "./components/ReviewQueue/ReviewQueue";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
-import {
-  UnitEditor,
-  type UnitEditorHandle,
-} from "./components/UnitEditor/UnitEditor";
+import type { MatrixFilter } from "./components/TranslatePanel";
+import { TranslatePanel } from "./components/TranslatePanel";
+import type { UnitEditorHandle } from "./components/TranslatePanel/UnitEditor/UnitEditor";
 import {
   acceptUnitInProject,
   cancelTranslation,
@@ -82,7 +78,7 @@ export function App() {
     : null;
 
   const [selectedId, setSelectedId] = useState<UnitId | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<MatrixFilter>("all");
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -624,17 +620,154 @@ export function App() {
     ],
   );
 
+  // ── Matrix-mode multi-catalog IPC helpers ────────────────────────────────
+  //
+  // The legacy onEdit / onTranslate / onAccept above assume the change
+  // applies to `activeCatalogPath`. Matrix mode operates across every
+  // per-locale catalog at once, so we expose `*For` variants that take an
+  // explicit catalog path. Each merges into the shared `openCatalogs` /
+  // `dirtyCatalogPaths` state machine so save / discard / batch all keep
+  // working on the cells the matrix touched.
+
+  // Merge an updated unit into the cached CatalogResponse for an arbitrary
+  // catalog path (matrix mode — not bound to activeCatalogPath).
+  const replaceUnitFor = useCallback((absPath: string, updated: Unit) => {
+    setOpenCatalogs((prev) => {
+      const entry = prev.get(absPath);
+      if (!entry) return prev;
+      const next = new Map(prev);
+      next.set(absPath, {
+        ...entry,
+        units: entry.units.map((u) => (u.id === updated.id ? updated : u)),
+      });
+      return next;
+    });
+  }, []);
+
+  // Open a project catalog into the cache without touching active selection.
+  // Concurrent calls for the same path are safe — the setter is a final-
+  // write-wins merge keyed on the absolute path.
+  const ensureCatalogLoaded = useCallback(
+    async (absPath: string) => {
+      if (openCatalogs.has(absPath)) return;
+      try {
+        const response = await openCatalogInProject(absPath);
+        setOpenCatalogs((prev) =>
+          prev.has(absPath) ? prev : new Map(prev).set(absPath, response),
+        );
+      } catch (e) {
+        // Surface the failure via toast but do not throw — the matrix
+        // simply renders the locale's cells as "loading…" placeholders.
+        flashError(`Could not open catalog: ${formatError(e)}`);
+      }
+    },
+    [openCatalogs, flashError],
+  );
+
+  const onEditUnitFor = useCallback(
+    (absPath: string, unit: Unit, edit: TargetEdit) => {
+      void (async () => {
+        try {
+          const updated = await updateUnitTargetInProject(
+            absPath,
+            unit.id,
+            edit,
+          );
+          replaceUnitFor(absPath, updated);
+          markDirty(updated.id);
+          markCatalogDirty(absPath);
+          scheduleRescan();
+        } catch (e) {
+          flashError(`Edit failed: ${formatError(e)}`);
+        }
+      })();
+    },
+    [replaceUnitFor, markDirty, markCatalogDirty, scheduleRescan, flashError],
+  );
+
+  const onTranslateUnitFor = useCallback(
+    (absPath: string, unit: Unit) => {
+      const id = unit.id;
+      setBusyIds((prev) => new Set(prev).add(id));
+      void (async () => {
+        try {
+          const result = await translateUnitInProject(absPath, id);
+          replaceUnitFor(absPath, result.unit);
+          setReports((prev) => ({ ...prev, [id]: result.report }));
+          markDirty(id);
+          markCatalogDirty(absPath);
+          scheduleRescan();
+          const findings = result.report.findings.length;
+          flashInfo(
+            findings === 0
+              ? "Translated. Gate clean — review and save to accept."
+              : `Translated with ${findings} finding(s).`,
+          );
+        } catch (e) {
+          flashError(`Translate failed: ${formatError(e)}`);
+        } finally {
+          setBusyIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      })();
+    },
+    [
+      replaceUnitFor,
+      markDirty,
+      markCatalogDirty,
+      scheduleRescan,
+      flashInfo,
+      flashError,
+    ],
+  );
+
+  const onAcceptUnitFor = useCallback(
+    (absPath: string, unit: Unit) => {
+      const id = unit.id;
+      setBusyIds((prev) => new Set(prev).add(id));
+      void (async () => {
+        try {
+          const updated = await acceptUnitInProject(absPath, id);
+          replaceUnitFor(absPath, updated);
+          markCatalogDirty(absPath);
+          setDirtyIds((prev) => {
+            if (prev.has(id)) return prev;
+            const next = new Set(prev);
+            next.add(id);
+            return next;
+          });
+          scheduleRescan();
+          flashInfo(`Marked unit ${id} as reviewed`);
+        } catch (e) {
+          flashError(`Accept failed: ${formatError(e)}`);
+        } finally {
+          setBusyIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }
+      })();
+    },
+    [replaceUnitFor, markCatalogDirty, scheduleRescan, flashInfo, flashError],
+  );
+
   // ── Batch translate (M4.8) ───────────────────────────────────────────────
 
-  // Called from the "Translate all" button in CatalogList.
+  // Called from the "Translate all" button in CatalogList (focus-mode
+  // fallback) and the "Run model on selected" button in Matrix mode. The
+  // matrix dispatches one call per locale that has work; the existing
+  // single-slot stuck guard on the Rust side serialises them.
   const onTranslateAll = useCallback(
-    async (scope: BatchScope) => {
-      if (!activeCatalogPath) return;
+    async (catalogPath: string, scope: BatchScope) => {
+      if (!catalogPath) return;
 
       // Derive a display name from the catalog path (basename only).
       const catalogName =
-        activeCatalogPath.replace(/\\/g, "/").split("/").pop() ??
-        activeCatalogPath;
+        catalogPath.replace(/\\/g, "/").split("/").pop() ?? catalogPath;
 
       // Start the batch first to get the server-assigned job_id (we cannot
       // subscribe to the per-job event channels before knowing the id).
@@ -647,7 +780,7 @@ export function App() {
       // in M4.8.1 (reserve-job-id command so subscribe can precede start).
       let started: { job_id: string; total: number };
       try {
-        started = await translateBatchInProject(activeCatalogPath, scope);
+        started = await translateBatchInProject(catalogPath, scope);
       } catch (e) {
         flashError(`Translate all failed to start: ${formatError(e)}`);
         return;
@@ -673,9 +806,8 @@ export function App() {
       const stuckGuardMs = 10_000;
       let stuckGuardTimer: ReturnType<typeof setTimeout> | null = null;
 
-      // Capture activeCatalogPath in a local for the callbacks — the React
-      // state captured in closures may be stale if the user navigates.
-      const batchCatalogPath = activeCatalogPath;
+      // The path passed in is already captured; alias for clarity in callbacks.
+      const batchCatalogPath = catalogPath;
 
       const unlisten = await listenBatchProgress(
         jobId,
@@ -756,7 +888,7 @@ export function App() {
       // Now that listeners are registered, initialise the batch UI state.
       setActiveBatch({
         jobId,
-        catalogPath: activeCatalogPath,
+        catalogPath,
         catalogName,
         completed: 0,
         total,
@@ -784,13 +916,7 @@ export function App() {
         }, stuckGuardMs);
       }
     },
-    [
-      activeCatalogPath,
-      markCatalogDirty,
-      scheduleRescan,
-      flashInfo,
-      flashError,
-    ],
+    [markCatalogDirty, scheduleRescan, flashInfo, flashError],
   );
 
   // Cancel any in-flight batch.
@@ -872,7 +998,9 @@ export function App() {
       const k = e.key.toLowerCase();
       if (k === "s") {
         e.preventDefault();
-        if (e.shiftKey) {
+        // ⌘S in matrix mode (no single "active catalog") routes to Save All
+        // so a user editing across several locales does not see a no-op.
+        if (e.shiftKey || !activeCatalogPath) {
           void onSaveAll();
         } else {
           void onSave();
@@ -881,7 +1009,7 @@ export function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [mode, onSave, onSaveAll]);
+  }, [mode, activeCatalogPath, onSave, onSaveAll]);
 
   // ── Review queue navigation ───────────────────────────────────────────────
 
@@ -896,14 +1024,6 @@ export function App() {
     },
     [handleCatalogSelect],
   );
-
-  const selectedUnit = useMemo(() => {
-    if (!catalog || !selectedId) return null;
-    return catalog.units.find((u) => u.id === selectedId) ?? null;
-  }, [catalog, selectedId]);
-
-  const selectedReport = selectedId ? (reports[selectedId] ?? null) : null;
-  const selectedBusy = selectedId ? busyIds.has(selectedId) : false;
 
   // ── Home screen ───────────────────────────────────────────────────────────
 
@@ -988,56 +1108,34 @@ export function App() {
                 : "hidden"
             }
           >
-            {catalog ? (
-              <>
-                <CatalogList
-                  units={catalog.units}
-                  selectedId={selectedId}
-                  filter={filter}
-                  search={search}
-                  dirtyIds={dirtyIds}
-                  onSelect={setSelectedId}
-                  onFilterChange={setFilter}
-                  onSearchChange={setSearch}
-                  onTranslateAll={onTranslateAll}
-                  batchActive={activeBatch !== null}
-                />
-                {selectedUnit ? (
-                  <UnitEditor
-                    ref={editorRef}
-                    unit={selectedUnit}
-                    busy={selectedBusy}
-                    hasOllama={Boolean(catalog.language)}
-                    onEdit={onEditTarget}
-                    onTranslate={onTranslate}
-                  />
-                ) : (
-                  <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary bg-bg-base">
-                    <p>Select a unit on the left to inspect it.</p>
-                  </div>
-                )}
-                {selectedUnit && (
-                  <Inspector
-                    unit={selectedUnit}
-                    report={selectedReport}
-                    activeCatalogPath={activeCatalogPath}
-                    busyIds={busyIds}
-                    onAccept={onAccept}
-                  />
-                )}
-              </>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-fg-tertiary">
-                <p className="text-sm">
-                  Select a catalog from the sidebar to start translating.
-                </p>
-                {error && (
-                  <p className="text-sm text-severity-hard max-w-sm text-center">
-                    {error}
-                  </p>
-                )}
-              </div>
-            )}
+            <TranslatePanel
+              summary={summary}
+              openCatalogs={openCatalogs}
+              activeCatalogPath={activeCatalogPath}
+              catalog={catalog}
+              selectedId={selectedId}
+              filter={filter}
+              search={search}
+              dirtyIds={dirtyIds}
+              reports={reports}
+              busyIds={busyIds}
+              batchActive={activeBatch !== null}
+              error={error}
+              editorRef={editorRef}
+              focusLocale={focusLocale}
+              setFocusLocale={setFocusLocale}
+              onSelect={setSelectedId}
+              onFilterChange={setFilter}
+              onSearchChange={setSearch}
+              onEdit={onEditTarget}
+              onTranslate={onTranslate}
+              onAccept={onAccept}
+              onEnsureCatalogLoaded={ensureCatalogLoaded}
+              onTranslateUnitFor={onTranslateUnitFor}
+              onEditUnitFor={onEditUnitFor}
+              onAcceptUnitFor={onAcceptUnitFor}
+              onTranslateAll={onTranslateAll}
+            />
           </div>
 
           {/* Glossary view */}
