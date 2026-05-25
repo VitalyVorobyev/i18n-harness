@@ -175,6 +175,116 @@ pub(crate) fn dispatch_glossary_term_translation(
     }
 }
 
+// ── Merge / gate helper ──────────────────────────────────────────────────────
+
+/// Result of merging a backend outcome into a source unit and running the gate.
+#[cfg(feature = "ollama")]
+#[derive(Debug)]
+pub(crate) struct MergeOutcome {
+    /// The unit after the merge. On [`TranslationOutcome::Translated`] its
+    /// `target`, `state`, `flags`, `confidence`, and `flag_notes` fields are
+    /// updated. On [`TranslationOutcome::Failed { MalformedResponse }`] this
+    /// is the *original* unit, unchanged — the error is in `report`.
+    pub merged: Unit,
+    /// The gate report run on `merged` (or a synthesized
+    /// [`GateReport::backend_malformed_response`] for malformed responses).
+    pub report: GateReport,
+    /// `true` if `merged.flags` is non-empty after the merge. Pre-computed so
+    /// callers (project mode) can decide the `NeedsReview` side effect without
+    /// re-inspecting the `FlagSet`.
+    pub flagged: bool,
+}
+
+/// Merge a backend [`TranslationOutcome`] into a cloned source unit, run the
+/// gate, and return the merged unit plus gate report.
+///
+/// # Outcomes
+///
+/// - [`TranslationOutcome::Translated`]: the new text replaces the unit's
+///   target (singular string or all plural forms), state becomes
+///   [`UnitState::Proposed`], flags/confidence/flag_notes are copied, gate
+///   runs with `glossary = None`.
+/// - [`TranslationOutcome::Skipped`]: returns `Err("backend skipped: …")`.
+/// - `TranslationOutcome::Failed { MalformedResponse, .. }`: returns
+///   `Ok(MergeOutcome { merged: original, report: <synthesized>, flagged: false })`.
+///   The unit is returned unchanged so the caller can display it next to the
+///   error finding. No catalog state changes.
+/// - Any other `TranslationOutcome::Failed`: returns `Err("backend failed: …")`.
+///
+/// # Gate note
+///
+/// Both the file-mode and project-mode callers pass `None` for the glossary
+/// argument of `i18n_harness_gate::validate`. This is the canonical behaviour:
+/// glossary cross-checking is a project-level concern tracked separately.
+#[cfg(feature = "ollama")]
+pub(crate) fn merge_outcome(
+    original: Unit,
+    outcome: i18n_harness_backend::TranslationOutcome,
+    locale: &Locale,
+) -> Result<MergeOutcome, String> {
+    use i18n_harness_backend::{FailureKind, TranslatedText, TranslationOutcome};
+    use i18n_harness_core::FlagSet;
+
+    let mut merged = original.clone();
+
+    match outcome {
+        TranslationOutcome::Translated {
+            text,
+            flags,
+            confidence,
+            flag_notes,
+        } => {
+            merged.target = match text {
+                TranslatedText::Singular(s) => Target::Singular { text: Some(s) },
+                TranslatedText::Plural(forms) => Target::Plural {
+                    forms: forms.into_iter().map(Some).collect(),
+                },
+            };
+            // M4.3a.1: translate always lands as Proposed; the human
+            // explicitly promotes to Finished via save/accept. Auto-
+            // promoting hid model output behind a "done" badge before
+            // the translator could review.
+            merged.state = UnitState::Proposed;
+            let mut flagset = FlagSet::new();
+            for f in flags {
+                flagset.insert(f);
+            }
+            merged.flags = flagset;
+            merged.confidence = confidence;
+            merged.flag_notes = flag_notes;
+        }
+        TranslationOutcome::Skipped { reason } => {
+            return Err(format!("backend skipped: {reason}"));
+        }
+        TranslationOutcome::Failed {
+            reason,
+            failure_kind: FailureKind::MalformedResponse,
+            ..
+        } => {
+            // Surface as an inline hard gate finding rather than an Err.
+            // The unit is returned unchanged so the Inspector can display
+            // it alongside the error; no catalog state changes occur.
+            let report = GateReport::backend_malformed_response(original.id.clone(), reason);
+            return Ok(MergeOutcome {
+                merged: original,
+                report,
+                flagged: false,
+            });
+        }
+        TranslationOutcome::Failed { reason, .. } => {
+            return Err(format!("backend failed: {reason}"));
+        }
+    }
+
+    let report = i18n_harness_gate::validate(&merged, locale, None);
+    let flagged = !merged.flags.is_empty();
+    Ok(MergeOutcome {
+        merged,
+        report,
+        flagged,
+    })
+}
+
 // ── Core translate helper ────────────────────────────────────────────────────
 
 /// Translate one project-stored unit: read it from the catalog store, call the
@@ -217,8 +327,8 @@ pub(crate) fn translate_one(
     locale: &Locale,
     glossary: Option<&Glossary>,
 ) -> Result<crate::dto::TranslateResult, String> {
-    use i18n_harness_backend::{FailureKind, TranslationBackend, TranslationOutcome};
-    use i18n_harness_core::{Batch, BatchKey, FlagSet, ReviewStatus};
+    use i18n_harness_backend::TranslationBackend;
+    use i18n_harness_core::{Batch, BatchKey, ReviewStatus};
 
     // 1. Snapshot the source unit under a brief lock, then drop the lock so
     //    the network call does not hold up other commands.
@@ -253,62 +363,16 @@ pub(crate) fn translate_one(
         .next()
         .ok_or_else(|| format!("backend `{backend_name}` returned no outcomes"))?;
 
-    let mut merged = original.clone();
-    match outcome {
-        TranslationOutcome::Translated {
-            text,
-            flags,
-            confidence,
-            flag_notes,
-        } => {
-            merged.target = match text {
-                i18n_harness_backend::TranslatedText::Singular(s) => {
-                    Target::Singular { text: Some(s) }
-                }
-                i18n_harness_backend::TranslatedText::Plural(forms) => Target::Plural {
-                    forms: forms.into_iter().map(Some).collect(),
-                },
-            };
-            // M4.3a.1: translate always lands as Proposed; the human
-            // explicitly promotes to Finished via save/accept.
-            merged.state = UnitState::Proposed;
-            let mut flagset = FlagSet::new();
-            for f in flags {
-                flagset.insert(f);
-            }
-            merged.flags = flagset;
-            merged.confidence = confidence;
-            merged.flag_notes = flag_notes;
-        }
-        TranslationOutcome::Skipped { reason } => {
-            return Err(format!("backend skipped: {reason}"));
-        }
-        TranslationOutcome::Failed {
-            reason,
-            failure_kind: FailureKind::MalformedResponse,
-            ..
-        } => {
-            // Surface as an inline hard gate finding so the Inspector renders
-            // it next to the unit and the user can investigate the prompt.
-            // No catalog state changes, no review event.
-            let report = GateReport::backend_malformed_response(original.id.clone(), reason);
-            return Ok(crate::dto::TranslateResult {
-                unit: original,
-                report,
-            });
-        }
-        TranslationOutcome::Failed { reason, .. } => {
-            return Err(format!("backend failed: {reason}"));
-        }
-    }
-
-    let report = i18n_harness_gate::validate(&merged, locale, None);
+    let MergeOutcome {
+        mut merged,
+        report,
+        flagged: needs_review,
+    } = merge_outcome(original, outcome, locale)?;
 
     // M4.6.1: flagged units land in the review queue automatically. Set
     // `merged.review_status` on the in-memory unit BEFORE writing to the
     // catalog slot and BEFORE returning, so the UI sees the queued state
     // immediately rather than only after the next review-map fold.
-    let needs_review = !merged.flags.is_empty();
     if needs_review {
         merged.review_status = Some(ReviewStatus::NeedsReview);
     }
@@ -472,5 +536,115 @@ mod batch_scope_tests {
         let u = unit_in(UnitState::Proposed);
         assert!(!unit_matches_scope(&u, BatchScope::Untranslated));
         assert!(unit_matches_scope(&u, BatchScope::UntranslatedAndProposed));
+    }
+}
+
+#[cfg(all(test, feature = "ollama"))]
+mod merge_outcome_tests {
+    use super::{MergeOutcome, merge_outcome};
+    use i18n_harness_backend::{FailureKind, TranslationOutcome};
+    use i18n_harness_core::{Unit, UnitState};
+    use i18n_harness_locales::Locale;
+
+    fn de_de() -> &'static Locale {
+        Locale::by_id("de_DE").expect("de_DE locale must exist")
+    }
+
+    fn untranslated_singular(id: &str, source: &str) -> Unit {
+        Unit::untranslated_singular(id, source)
+    }
+
+    fn untranslated_plural(id: &str, source: &str) -> Unit {
+        use i18n_harness_core::Target;
+        let mut u = Unit::untranslated_singular(id, source);
+        u.target = Target::Plural {
+            forms: vec![None, None],
+        };
+        u.plural_arity = Some(2);
+        u
+    }
+
+    #[test]
+    fn merge_outcome_translated_singular_sets_proposed_state() {
+        let original = untranslated_singular("u1", "Hello");
+        let outcome = TranslationOutcome::translated_singular("Hallo");
+
+        let MergeOutcome {
+            merged,
+            report: _,
+            flagged,
+        } = merge_outcome(original, outcome, de_de()).unwrap();
+
+        assert_eq!(merged.state, UnitState::Proposed);
+        assert!(!flagged);
+        match merged.target {
+            i18n_harness_core::Target::Singular { text } => {
+                assert_eq!(text.as_deref(), Some("Hallo"));
+            }
+            other => panic!("expected singular target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_outcome_translated_plural_replaces_all_forms() {
+        let original = untranslated_plural("u2", "file");
+        let outcome = TranslationOutcome::translated_plural(["Datei", "Dateien"]);
+
+        let MergeOutcome {
+            merged, flagged, ..
+        } = merge_outcome(original, outcome, de_de()).unwrap();
+
+        assert_eq!(merged.state, UnitState::Proposed);
+        assert!(!flagged);
+        match merged.target {
+            i18n_harness_core::Target::Plural { forms } => {
+                assert_eq!(forms.len(), 2);
+                assert_eq!(forms[0].as_deref(), Some("Datei"));
+                assert_eq!(forms[1].as_deref(), Some("Dateien"));
+            }
+            other => panic!("expected plural target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merge_outcome_malformed_response_returns_synthetic_gate_report() {
+        let original = untranslated_singular("u3", "Save");
+        let outcome = TranslationOutcome::Failed {
+            reason: "json-parse-error".to_owned(),
+            retryable: false,
+            failure_kind: FailureKind::MalformedResponse,
+        };
+
+        let MergeOutcome {
+            merged,
+            report,
+            flagged,
+        } = merge_outcome(original.clone(), outcome, de_de()).unwrap();
+
+        // Unit is returned unchanged.
+        assert_eq!(merged.id, original.id);
+        assert_eq!(merged.state, original.state);
+        // Synthetic report should carry at least one finding.
+        assert!(
+            !report.findings.is_empty(),
+            "expected at least one synthesized finding"
+        );
+        assert!(!flagged, "malformed-response path must not set flagged");
+    }
+
+    #[test]
+    fn merge_outcome_other_failure_returns_error() {
+        let original = untranslated_singular("u4", "Cancel");
+        let outcome = TranslationOutcome::Failed {
+            reason: "network-timeout".to_owned(),
+            retryable: true,
+            failure_kind: FailureKind::Network,
+        };
+
+        let err = merge_outcome(original, outcome, de_de()).unwrap_err();
+        assert!(
+            err.contains("backend failed"),
+            "expected 'backend failed' in error, got: {err}"
+        );
     }
 }

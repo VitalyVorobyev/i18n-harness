@@ -22,11 +22,9 @@ pub(crate) use state::{OpenCatalog, OpenCatalogEntry};
 use std::path::{Path, PathBuf};
 
 use i18n_harness_adapter_qt::Catalog;
-use i18n_harness_core::{Target, Unit, UnitId, UnitState};
+use i18n_harness_core::{Unit, UnitId, UnitState};
 
 use backing::{BackingCatalog, extract_for_format};
-#[cfg(feature = "ollama")]
-use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use i18n_harness_project::{
@@ -269,10 +267,8 @@ fn translate_unit(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
-    use i18n_harness_backend::{
-        FailureKind, OllamaBackend, TranslationBackend, TranslationOutcome,
-    };
-    use i18n_harness_core::{Batch, BatchKey, FlagSet};
+    use i18n_harness_backend::{OllamaBackend, TranslationBackend};
+    use i18n_harness_core::{Batch, BatchKey};
 
     let mut current = state
         .catalog
@@ -318,58 +314,8 @@ fn translate_unit(
         .next()
         .ok_or_else(|| format!("backend `{backend_name}` returned no outcomes"))?;
 
-    let mut merged = original.clone();
-    match outcome {
-        TranslationOutcome::Translated {
-            text,
-            flags,
-            confidence,
-            flag_notes,
-        } => {
-            merged.target = match text {
-                i18n_harness_backend::TranslatedText::Singular(s) => {
-                    Target::Singular { text: Some(s) }
-                }
-                i18n_harness_backend::TranslatedText::Plural(forms) => Target::Plural {
-                    forms: forms.into_iter().map(Some).collect(),
-                },
-            };
-            // M4.3a.1: translate always lands as Proposed; the human
-            // explicitly promotes to Finished via save/accept. Auto-
-            // promoting hid model output behind a "done" badge before
-            // the translator could review.
-            merged.state = UnitState::Proposed;
-            let mut flagset = FlagSet::new();
-            for f in flags {
-                flagset.insert(f);
-            }
-            merged.flags = flagset;
-            merged.confidence = confidence;
-            merged.flag_notes = flag_notes;
-        }
-        TranslationOutcome::Skipped { reason } => {
-            return Err(format!("backend skipped: {reason}"));
-        }
-        TranslationOutcome::Failed {
-            reason,
-            failure_kind: FailureKind::MalformedResponse,
-            ..
-        } => {
-            // Surface as an inline hard gate finding rather than an Err.
-            // The legacy `translate_unit` has no project handle, so we
-            // do not touch review status here.
-            let report = GateReport::backend_malformed_response(original.id.clone(), reason);
-            return Ok(TranslateResult {
-                unit: original,
-                report,
-            });
-        }
-        TranslationOutcome::Failed { reason, .. } => {
-            return Err(format!("backend failed: {reason}"));
-        }
-    }
-
-    let report = i18n_harness_gate::validate(&merged, locale, None);
+    let services::translate::MergeOutcome { merged, report, .. } =
+        services::translate::merge_outcome(original, outcome, locale)?;
 
     // Persist the merged unit back into the catalog.
     if let Some(slot) = open.catalog.find_unit_mut(&id) {
