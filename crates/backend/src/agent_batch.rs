@@ -18,9 +18,11 @@
 //!
 //! # Format stability
 //!
-//! `units.jsonl` and `targets.jsonl` are the stable contract M5.1, M5.2,
-//! and external agents consume. Field names are snake_case; the `kind`
-//! tag in `targets.jsonl` mirrors [`crate::ManualResponse`].
+//! `units.jsonl` and `targets.jsonl` are the stable on-disk contract
+//! the CLI subcommands and external agents consume. Field names are
+//! snake_case; the `kind` tag in `targets.jsonl` mirrors
+//! [`crate::ManualResponse`]. The `meta.json` `format_version` field
+//! gates schema bumps.
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};

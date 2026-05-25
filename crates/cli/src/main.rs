@@ -1,11 +1,16 @@
 //! `harness` — the headless CLI entry point for `i18n-harness`.
 //!
-//! See `docs/initial_design.md`. The CLI grows one subcommand per milestone:
-//! `round-trip` (M0) proves the byte-stability contract; `gate` (M1) runs
-//! the validation gate against a target locale and optionally writes JSONL
-//! metrics; `translate` (M2) runs the end-to-end loop (extract → batch →
-//! backend → gate → apply); `export-batch` / `import-batch` (M5) implement
-//! the two-phase agent translation flow.
+//! See `docs/initial_design.md`. Subcommands:
+//! - `round-trip` — proves the byte-stability contract for a catalog.
+//! - `gate` — runs the validation gate against a target locale and
+//!   optionally writes JSONL metrics.
+//! - `translate` — runs the end-to-end loop (extract → batch → backend
+//!   → gate → apply).
+//! - `init` / `open` — discover and load i18n-harness projects.
+//! - `export-batch` / `import-batch` — the two-phase agent translation
+//!   flow; `export-batch` writes a batch folder an external agent
+//!   (Claude Code / Copilot / Codex) fills, `import-batch` ingests the
+//!   result through the manual backend.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -233,7 +238,8 @@ struct ImportBatchArgs {
 enum BackendChoice {
     /// The closure-driven `ManualBackend`. The CLI wires an identity-echo
     /// closure (returns source verbatim) so the loop is testable end-to-end
-    /// without a model. The same backend powers the M4 two-phase agent path.
+    /// without a model. The same backend powers the two-phase agent CLI
+    /// (`harness import-batch`).
     Manual,
     /// Local Ollama server at `http://localhost:11434`. Requires the CLI to
     /// be built with `--features ollama` (forwards to the backend crate's
@@ -1662,10 +1668,10 @@ fn file_hash(path: &std::path::Path) -> Result<String> {
     use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).with_context(|| format!("read {} for hash", path.display()))?;
     // SHA-256 hex (lower-case). The `core::Batch` contract treats the
-    // hash as an opaque string; this commits us to a specific algorithm
-    // for the on-disk resume-key persistence that lands with M3's batch-
-    // state recovery. Using a cryptographic hash from the start avoids a
-    // forced migration once persisted state references it.
+    // hash as an opaque string; we commit to a specific algorithm here
+    // so on-disk resume-key persistence stays consistent. Using a
+    // cryptographic hash from the start avoids a forced migration
+    // once persisted state references it.
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(format!("{:x}", hasher.finalize()))

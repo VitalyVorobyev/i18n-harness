@@ -1,8 +1,13 @@
 # CLAUDE.md — i18n-harness working agreement
 
-A local-first, offline desktop translation harness. Install a local model
-(Ollama + Gemma 4 by default), point it at translation catalogs (Qt `.ts`,
-PO, ICU-JSON), translate UI strings — no API key, no cloud. The full design
+A local-first, offline-by-default desktop translation harness. The
+default path is a local model server (Ollama + Gemma 4) with no API key
+and no cloud egress; the `openai-compatible` backend supports cloud
+LLMs (OpenAI, Anthropic, vLLM, LM Studio) as an opt-in per-project
+config, and the two-phase agent CLI (`harness export-batch` /
+`harness import-batch` plus the `translate-i18n-batch` skill) delegates
+to an external Claude Code / Copilot / Codex session on the user's
+machine. Catalogs: Qt `.ts`, gettext PO, ICU-JSON. The full design
 lives in [`docs/initial_design.md`](docs/initial_design.md); the
 translator-facing milestones in
 [`docs/roadmap-product.md`](docs/roadmap-product.md); the maintainer-facing
@@ -39,14 +44,15 @@ Lab features live in the lab tool and only there. The shared substrate
 is the validation gate, the catalog adapters, the backend trait, and
 the per-project `.i18n-harness/` state; everything else is split.
 
-M0–M4 are shipped (M4 closed with M4.5 ICU-JSON + M4.10 tuning bundle).
-M5 ships the two-phase agent translation flow: `harness export-batch` /
-`harness import-batch` CLI subcommands plus the
-[`skills/translate-i18n-batch/`](skills/translate-i18n-batch/) spec for
-filling the batch from an external Claude Code / Copilot / Codex
-session. **No UI wiring yet** — the agent flow is a developer/CLI
-surface until M6 promotes it into Settings + the Translate view.
-See `docs/roadmap-product.md` for the sub-milestones.
+The current shipping surface: the validation gate, all three catalog
+adapters (Qt, PO, ICU-JSON) with byte-stable round-trip, project mode
+(multi-catalog manifests), the Tauri desktop UI for translation and
+review, quality eval + tuning bundle export, and the two-phase agent
+translation CLI plus its skill spec. The agent flow is currently a
+CLI surface; UI integration (Settings backend picker + an in-app
+"Translate via Claude Code" affordance) is the next visible step.
+See [`docs/roadmap-product.md`](docs/roadmap-product.md) for the
+sub-milestone history.
 
 ## Workspace map
 
@@ -64,11 +70,10 @@ See `docs/roadmap-product.md` for the sub-milestones.
 | `ui/` | Tauri 2 + Vite + React + TS desktop shell ([ui/README.md](ui/README.md)) |
 | `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
 
-`crates/adapter-log/` is *not* present and will not be created until its
-milestone — the log adapter was the docs' original "M5 design-only" item
-and has been deferred indefinitely. The current M5 (above) is the
-agent translation flow; the log work moves to a later, separately-
-planned milestone.
+`crates/adapter-log/` is *not* present and will not be created until
+the structured-log adapter milestone is planned — that work is
+currently deferred. Translator-facing catalog formats (Qt, PO,
+ICU-JSON) ship; logs are a separate concern.
 
 ## Commands
 
@@ -116,9 +121,9 @@ CI runs all of the above on push and PR. See `.github/workflows/ci.yml`.
 ## Round-trip is sacred
 
 For any adapter, `extract → apply` with zero unit changes must be
-**byte-identical on disk** for every fixture. This is the M0 contract and
-it never goes red without immediate rollback. New fixtures get added to
-the round-trip suite, never carved out.
+**byte-identical on disk** for every fixture. This is the load-bearing
+adapter contract and it never goes red without immediate rollback. New
+fixtures get added to the round-trip suite, never carved out.
 
 ## Adding things — use the project skills
 
@@ -140,7 +145,8 @@ the round-trip suite, never carved out.
   existing pattern.
 - `rust-architect` (Opus) — load-bearing design and tricky implementations
   (gate, XML round-trip, ICU converters, trait surfaces, batching).
-- `ui-implementer` (Sonnet) — Tauri + React + Vite work (M3+ only).
+- `ui-implementer` (Sonnet) — Tauri + React + Vite work for the
+  desktop shell under `ui/`.
 
 ## Outstanding setup notes
 

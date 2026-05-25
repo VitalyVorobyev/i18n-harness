@@ -134,16 +134,16 @@ fn export_batch_writes_complete_folder() {
 
 // ── export_batch_round_trip_byte_identical ───────────────────────────────────
 
-/// M0 invariant on the agent path: the adapter's round-trip contract must hold
-/// for files written by `import-batch`.
+/// Byte-stable round-trip invariant on the agent path: the adapter's
+/// round-trip contract must hold for files written by `import-batch`.
 ///
 /// Procedure:
 /// 1. `export-batch` a fixture Qt `.ts`.
 /// 2. Fill `targets.jsonl` with the source verbatim for each unit.
 /// 3. `import-batch … --out <new>` to produce a translated catalog.
 /// 4. `round-trip <new>` — the written catalog itself must be byte-stable
-///    under extract → apply. This is the M0 invariant on the adapter, not
-///    a claim that the translated file is byte-identical to the untranslated
+///    under extract → apply. This is the adapter invariant, not a claim
+///    that the translated file is byte-identical to the untranslated
 ///    input (it won't be, since translations are now filled in).
 #[test]
 fn export_batch_round_trip_byte_identical() {
@@ -211,7 +211,7 @@ fn export_batch_round_trip_byte_identical() {
     );
     assert!(out_ts.exists(), "import-batch must have written --out file");
 
-    // Phase 3: the M0 adapter round-trip check on the written catalog.
+    // Phase 3: adapter round-trip check on the written catalog.
     // `harness round-trip` runs extract → apply and asserts byte-identity;
     // this verifies the adapter is not corrupted by the agent write-back path.
     let rt_out = harness()

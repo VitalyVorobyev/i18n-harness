@@ -5,10 +5,13 @@
 [![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-red.svg)](#status)
 
-Local-first, offline translation harness for UI strings. Point it at your
-translation catalogs, let a local LLM fill in untranslated entries, and
-write back a byte-stable result — no API key, no cloud, no agent in the
-loop.
+Local-first, offline-by-default translation harness for UI strings.
+Point it at your translation catalogs, let a model fill in untranslated
+entries, and write back a byte-stable result. The default path is fully
+offline (Ollama running on your laptop, no API key, no cloud egress).
+Cloud LLM backends are supported as an opt-in via per-project config,
+and the two-phase CLI lets you delegate translation to an external
+agent (Claude Code / Copilot / Codex) when you want to.
 
 > **The two invariants this project rests on**
 >
@@ -31,35 +34,39 @@ pair.
 
 ## Status
 
-**Pre-alpha, M0–M5 shipped.** See
+**Pre-alpha.** Core, multi-catalog project mode, all three target
+catalog formats (Qt `.ts`, PO, ICU-JSON), the validation gate, the
+local Ollama and `openai-compatible` backends, the Tauri desktop UI,
+quality evaluation, and the two-phase agent translation CLI are all
+in. UI integration of the agent flow is the next visible step. See
 [`docs/roadmap-product.md`](docs/roadmap-product.md) for the
 translator-facing milestone log and
 [`docs/initial_design.md`](docs/initial_design.md) for the full design.
-
-- **M0–M3:** core (Qt `.ts` round-trip, validation gate, locales,
-  glossary, manual + ollama backends, initial Tauri UI).
-- **M4 (product turn):** project mode (multi-catalog manifests), PO +
-  ICU-JSON serializers, the React adapter, review queue, bulk translate
-  UI with cancellation, quality eval, prompt-tuning bundle export.
-- **M5 (agent flow, CLI-only):** `harness export-batch` /
-  `harness import-batch` two-phase subcommands for filling translations
-  from an external Claude Code / Copilot / Codex session, plus the
-  [`translate-i18n-batch`](skills/translate-i18n-batch/) skill spec.
-  The agent flow is a CLI surface today — UI integration is the next
-  milestone.
 
 ## Scope
 
 **Catalog formats:** Qt Linguist `.ts`, gettext / Lingui PO, ICU-JSON
 for react-intl / i18next. Each is a `CatalogFormat` plugin behind a
-stable extension point.
+stable extension point — new formats land as serializers, not
+parser rewrites.
 
-**Translation engines:** `manual` (no model, closure-driven), `ollama`
-(local Gemma 4 by default), `openai-compatible` (covers vLLM, LM
-Studio, and cloud APIs). The M5 two-phase CLI
-(`harness export-batch` / `harness import-batch`) routes through the
-manual backend and lets Claude Code, Copilot, or any out-of-process
-agent act as the translator without any in-process model dependency.
+**Translation engines:**
+
+- `manual` — closure-driven, no model. The trait substrate; also the
+  engine the agent-translation CLI routes through.
+- `ollama` — local Gemma 4 by default; the offline-by-default path.
+- `openai-compatible` — covers vLLM, LM Studio, and cloud APIs
+  (OpenAI, Anthropic, any provider speaking OpenAI Chat Completions).
+  Endpoint and API key per-project; the harness itself stores no
+  credentials.
+- **Two-phase agent CLI** (`harness export-batch` /
+  `harness import-batch` + the
+  [`translate-i18n-batch`](skills/translate-i18n-batch/) skill) for
+  delegating translation to an external Claude Code, Copilot, or
+  Codex session running on the user's machine. The harness writes a
+  self-contained batch folder; the agent fills `targets.jsonl`; the
+  harness ingests the result and runs the validation gate. No
+  in-process model dependency.
 
 **Locales:** `en` source plus `de_DE`, `es_ES`, `zh_Hans` targets out
 of the box. Adding a new locale is a single config-row change in
