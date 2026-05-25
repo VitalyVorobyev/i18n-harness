@@ -12,6 +12,7 @@ mod cancellation;
 mod dto;
 mod error;
 mod jobs;
+mod services;
 mod state;
 
 pub use dto::*;
@@ -91,51 +92,7 @@ fn update_unit_target(
         .catalog
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
-    if !unit.state.is_ui_editable() {
-        return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not editable",
-            state = unit.state,
-        ));
-    }
-    match (&mut unit.target, edit) {
-        (Target::Singular { text }, TargetEdit::Singular { text: new }) => *text = new,
-        (Target::Plural { forms }, TargetEdit::Plural { form_index, text }) => {
-            let i = form_index as usize;
-            if i >= forms.len() {
-                return Err(format!(
-                    "plural form index {i} out of range (have {})",
-                    forms.len()
-                ));
-            }
-            forms[i] = text;
-        }
-        (Target::Singular { .. }, TargetEdit::Plural { .. }) => {
-            return Err("cannot apply plural edit to singular unit".into());
-        }
-        (Target::Plural { .. }, TargetEdit::Singular { .. }) => {
-            return Err("cannot apply singular edit to plural unit".into());
-        }
-    }
-    // State auto-transitions on edit:
-    //   Untranslated          → Proposed      once any text is set
-    //   Proposed | Finished   → Untranslated  once the target is fully cleared
-    //   Finished              → Proposed      when text changes (human reconsidering)
-    match unit.state {
-        UnitState::Untranslated if !unit.target.is_empty() => {
-            unit.state = UnitState::Proposed;
-        }
-        UnitState::Proposed | UnitState::Finished if unit.target.is_empty() => {
-            unit.state = UnitState::Untranslated;
-            unit.flags = Default::default();
-        }
-        UnitState::Finished if !unit.target.is_empty() => {
-            // M4.3a.1: editing a Finished unit reverts it to Proposed — the
-            // human is actively reconsidering the finalized translation, so
-            // it should re-enter the review loop.
-            unit.state = UnitState::Proposed;
-        }
-        _ => {}
-    }
+    crate::services::unit_edit::apply_target_edit(unit, edit)?;
     Ok(unit.clone())
 }
 
@@ -806,47 +763,7 @@ pub(crate) fn update_unit_target_in_project_impl(
         .find_unit_mut(&id)
         .ok_or_else(|| format!("unit not found: {id}"))?;
 
-    if !unit.state.is_ui_editable() {
-        return Err(format!(
-            "unit {id} is {state:?} — vanished/obsolete units are not editable",
-            state = unit.state,
-        ));
-    }
-    match (&mut unit.target, edit) {
-        (Target::Singular { text }, TargetEdit::Singular { text: new }) => *text = new,
-        (Target::Plural { forms }, TargetEdit::Plural { form_index, text }) => {
-            let i = form_index as usize;
-            if i >= forms.len() {
-                return Err(format!(
-                    "plural form index {i} out of range (have {})",
-                    forms.len()
-                ));
-            }
-            forms[i] = text;
-        }
-        (Target::Singular { .. }, TargetEdit::Plural { .. }) => {
-            return Err("cannot apply plural edit to singular unit".into());
-        }
-        (Target::Plural { .. }, TargetEdit::Singular { .. }) => {
-            return Err("cannot apply singular edit to plural unit".into());
-        }
-    }
-    match unit.state {
-        UnitState::Untranslated if !unit.target.is_empty() => {
-            unit.state = UnitState::Proposed;
-        }
-        UnitState::Proposed | UnitState::Finished if unit.target.is_empty() => {
-            unit.state = UnitState::Untranslated;
-            unit.flags = Default::default();
-        }
-        UnitState::Finished if !unit.target.is_empty() => {
-            // M4.3a.1: editing a Finished unit reverts it to Proposed — the
-            // human is actively reconsidering the finalized translation, so
-            // it should re-enter the review loop.
-            unit.state = UnitState::Proposed;
-        }
-        _ => {}
-    }
+    crate::services::unit_edit::apply_target_edit(unit, edit)?;
     let result = unit.clone();
     entry.dirty = true;
     Ok(result)
