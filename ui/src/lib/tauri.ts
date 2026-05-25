@@ -14,6 +14,8 @@ import type {
   Correction,
   CuratedExample,
   DraftManifest,
+  EvaluationRun,
+  EvaluationStarted,
   GlossaryConfig,
   GlossaryLoadResponse,
   GlossaryPayload,
@@ -403,6 +405,33 @@ export async function cancelTranslation(jobId: string): Promise<boolean> {
 }
 
 // ── M4.7 — Project-wide review queue ─────────────────────────────────────────
+
+// ── M4.9 — Quality eval wrappers ─────────────────────────────────────────────
+
+/// Start a background evaluation run over all curated examples in the project.
+///
+/// Returns the job id + total example count synchronously. The worker emits:
+/// - `eval-progress-<job_id>` after each example (EvaluationProgressPayload).
+/// - `eval-completed-<job_id>` on clean exit (EvaluationTerminalPayload, run set).
+/// - `eval-failed-<job_id>` on hard failure (EvaluationTerminalPayload, run null).
+///
+/// Only available when the ollama feature is compiled in. Errors with
+/// "evaluation already running" if a prior run has not finished.
+export async function runEvaluationInProject(): Promise<EvaluationStarted> {
+  return await invoke<EvaluationStarted>("run_evaluation_in_project");
+}
+
+/// Returns all past evaluation runs for the open project, newest-first.
+/// Always available (reads the store; does not require the ollama feature).
+export async function listEvaluationRunsInProject(): Promise<EvaluationRun[]> {
+  return await invoke<EvaluationRun[]>("list_evaluation_runs_in_project");
+}
+
+/// Signal cancellation for an in-flight evaluation job.
+/// Returns true if the job existed, false otherwise.
+export async function cancelEvaluation(jobId: string): Promise<boolean> {
+  return await invoke<boolean>("cancel_translation", { jobId });
+}
 
 /// Scan every catalog in the open project for units that need human review.
 ///

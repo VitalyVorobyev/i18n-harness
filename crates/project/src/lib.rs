@@ -28,6 +28,7 @@
 
 pub mod discovery;
 pub mod error;
+pub mod evaluation;
 pub mod fs;
 pub mod locale;
 pub mod manifest;
@@ -56,6 +57,10 @@ pub use manifest::{
 pub use manifest::FormatGuess;
 
 pub use discovery::{ClassificationConfidence, DraftAlternative, DraftCatalog, DraftManifest};
+
+pub use evaluation::{
+    EvaluationRun, EvaluationStore, FlagScore, LocaleScore, ScoreAccumulator, flags_to_strings,
+};
 
 pub use memory::{
     Correction, CorrectionFilter, CorrectionId, CorrectionProvenance, CorrectionStore,

@@ -18,6 +18,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::error::{ProjectError, ProjectWarning};
+use crate::evaluation::EvaluationStore;
 use crate::fs::{ProjectFs, RealFs};
 use crate::locale::ResolvedLocale;
 use crate::manifest::{
@@ -124,6 +125,8 @@ pub struct Project {
     curated: CuratedSet,
     /// Lazy review store — the file is not opened until first use.
     review_store: ReviewStore,
+    /// Lazy evaluation store — the file is not opened until first use.
+    evaluation_store: EvaluationStore,
     /// Cached folded review map. Populated on first `review_map()` call;
     /// cleared (set to `None`) after each successful `set_review_status` so
     /// the next read re-folds the file.
@@ -282,6 +285,10 @@ impl Project {
         // Build the review store (lazy — the file is not opened here).
         let review_store = ReviewStore::new(paths.review().to_path_buf(), Arc::clone(&fs));
 
+        // Build the evaluation store (lazy — the file is not opened here).
+        let evaluation_store =
+            EvaluationStore::new(paths.evaluations().to_path_buf(), Arc::clone(&fs));
+
         let project = Self {
             root: root.to_path_buf(),
             fs,
@@ -293,6 +300,7 @@ impl Project {
             correction_store,
             curated,
             review_store,
+            evaluation_store,
             review_map_cache: RefCell::new(None),
         };
 
@@ -796,6 +804,13 @@ impl Project {
     /// Cheap — the store opens lazily on first append or read.
     pub fn reviews(&self) -> &ReviewStore {
         &self.review_store
+    }
+
+    /// Borrow the project's evaluation store.
+    ///
+    /// Cheap — the store opens lazily on first append or read.
+    pub fn evaluations(&self) -> &EvaluationStore {
+        &self.evaluation_store
     }
 
     /// Record a review-status change.

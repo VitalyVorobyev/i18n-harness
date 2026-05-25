@@ -467,6 +467,53 @@ export interface CuratedExample {
   correction: Correction | null;
 }
 
+// ── M4.9 — Quality eval types ────────────────────────────────────────────────
+
+// LocaleScore mirrors crates/project/src/evaluation.rs.
+export interface LocaleScore {
+  score: number;
+  count: number;
+}
+
+// FlagScore mirrors crates/project/src/evaluation.rs.
+export interface FlagScore {
+  score: number;
+  count: number;
+}
+
+// EvaluationRun mirrors crates/project/src/evaluation.rs.
+export interface EvaluationRun {
+  schema: number;
+  ts: string;
+  prompt_template_version: string;
+  overall_score: number;
+  per_locale: Record<string, LocaleScore>;
+  per_flag_kind: Record<string, FlagScore>;
+  example_count: number;
+}
+
+// EvaluationStarted mirrors ui/src-tauri/src/lib.rs.
+export interface EvaluationStarted {
+  job_id: string;
+  total: number;
+}
+
+// EvaluationProgressPayload mirrors ui/src-tauri/src/lib.rs.
+export interface EvaluationProgressPayload {
+  job_id: string;
+  completed: number;
+  total: number;
+  last_example_locale: string;
+}
+
+// EvaluationTerminalPayload mirrors ui/src-tauri/src/lib.rs.
+export interface EvaluationTerminalPayload {
+  job_id: string;
+  cancelled: boolean;
+  failed_reason: string | null;
+  run: EvaluationRun | null;
+}
+
 // ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
 
 // BatchScope mirrors ui/src-tauri/src/lib.rs. Kebab-case enum on the wire.

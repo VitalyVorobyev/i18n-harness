@@ -1,22 +1,33 @@
-// Quality view — translation memory (corrections) + curated set.
+// Quality view — headline numbers, translation memory, curated set,
+// and prompt evaluation. (M4.9)
 //
-// M4.3d: corrections table with filter bar, curated-set table, and a
-// value-proposition banner explaining what M4.9 will add. Headline
-// numbers, time-series charts, "Run evaluation", and "Export tuning
-// bundle" are all deferred to M4.9 / M4.10.
+// Part 1: Per-locale headline cards + 30-day acceptance-rate sparkline.
+// Part 2: Translation memory (corrections table) + curated set — carried
+//         forward from M4.3d.
+// Part 3: Prompt evaluation — Run evaluation button, progress widget,
+//         latest run summary, run history.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  cancelEvaluation,
   type ListCorrectionsFilter,
   listCorrectionsInProject,
   listCuratedInProject,
+  listEvaluationRunsInProject,
+  listLocales,
   promoteCorrectionToCurated,
+  runEvaluationInProject,
   unCurateCorrection,
 } from "../../lib/tauri";
+import { listenEvalProgress } from "../../lib/tauri-events";
 import type {
   Correction,
   CorrectionId,
   CuratedExample,
+  EvaluationProgressPayload,
+  EvaluationRun,
+  EvaluationTerminalPayload,
+  LocaleInfo,
   ProjectSummary,
 } from "../../lib/types";
 
@@ -64,6 +75,26 @@ function relativeTime(isoTs: string): string {
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
 
+/** Format an ISO timestamp to a short locale string. */
+function formatTs(isoTs: string): string {
+  try {
+    return new Date(isoTs).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return isoTs;
+  }
+}
+
+/** Format a score (0–1) as a percentage string with one decimal. */
+function pct(score: number): string {
+  return `${(score * 100).toFixed(1)}%`;
+}
+
 /** Shorten a catalog path to its last two segments. */
 function shortenCatalog(p: string): string {
   const parts = p.replace(/\\/g, "/").split("/");
@@ -82,6 +113,279 @@ function Spinner() {
       aria-hidden="true"
       className="inline-block w-3 h-3 border border-fg-tertiary border-t-fg-secondary rounded-full animate-spin"
     />
+  );
+}
+
+// ── Part 1: Per-locale headline stats ─────────────────────────────────────────
+
+interface LocaleStat {
+  localeId: string;
+  script: string;
+  total: number;
+  acceptedAsIs: number;
+  edited: number;
+  fromScratch: number;
+  // Ordered daily acceptance rates for last 30 days (index 0 = oldest).
+  // Each entry is the rate for that day (NaN = no data that day).
+  sparkDays: number[];
+}
+
+function computeStats(
+  localeId: string,
+  script: string,
+  corrections: Correction[],
+): LocaleStat {
+  const now = Date.now();
+  const MS_PER_DAY = 86_400_000;
+  // Bucket corrections by day index (0 = 29 days ago, 29 = today).
+  const dayBuckets: { accepted: number; total: number }[] = Array.from(
+    { length: 30 },
+    () => ({ accepted: 0, total: 0 }),
+  );
+
+  let total = 0;
+  let acceptedAsIs = 0;
+  let edited = 0;
+  let fromScratch = 0;
+
+  for (const c of corrections) {
+    total++;
+    const isFromScratch = !c.mt_proposal || c.mt_proposal.trim().length === 0;
+    const isAccepted =
+      !isFromScratch && c.mt_proposal.trim() === c.human_target.trim();
+    const isEdited = !isFromScratch && !isAccepted;
+
+    if (isAccepted) acceptedAsIs++;
+    else if (isFromScratch) fromScratch++;
+    else if (isEdited) edited++;
+
+    // Assign to the 30-day sparkline bucket.
+    const ts = new Date(c.ts).getTime();
+    if (!Number.isNaN(ts)) {
+      const daysAgo = Math.floor((now - ts) / MS_PER_DAY);
+      if (daysAgo >= 0 && daysAgo < 30) {
+        const bucket = dayBuckets[29 - daysAgo];
+        if (bucket) {
+          bucket.total++;
+          if (isAccepted) bucket.accepted++;
+        }
+      }
+    }
+  }
+
+  const sparkDays = dayBuckets.map((b) =>
+    b.total === 0 ? Number.NaN : b.accepted / b.total,
+  );
+
+  return {
+    localeId,
+    script,
+    total,
+    acceptedAsIs,
+    edited,
+    fromScratch,
+    sparkDays,
+  };
+}
+
+/** Inline SVG sparkline for 30-day acceptance rate. */
+function Sparkline({ days }: { days: number[] }) {
+  const W = 120;
+  const H = 28;
+  const PAD = 2;
+  const innerW = W - PAD * 2;
+  const innerH = H - PAD * 2;
+
+  // Filter out NaN for min/max, but keep positions for x-axis alignment.
+  const valid = days.filter((d) => !Number.isNaN(d));
+  const hasData = valid.length > 0;
+
+  // Build polyline points. Days with NaN are skipped (gap in line).
+  const segments: { x: number; y: number }[][] = [];
+  let current: { x: number; y: number }[] = [];
+
+  for (let i = 0; i < days.length; i++) {
+    const v = days[i];
+    if (v === undefined) continue;
+    const x = PAD + (i / (days.length - 1)) * innerW;
+    if (Number.isNaN(v)) {
+      if (current.length > 0) {
+        segments.push(current);
+        current = [];
+      }
+    } else {
+      // Y is inverted: top = 100%, bottom = 0%.
+      const y = PAD + (1 - v) * innerH;
+      current.push({ x, y });
+    }
+  }
+  if (current.length > 0) segments.push(current);
+
+  if (!hasData) {
+    return (
+      <svg
+        width={W}
+        height={H}
+        aria-label="No data for the last 30 days"
+        className="text-fg-disabled"
+      >
+        <line
+          x1={PAD}
+          y1={H / 2}
+          x2={W - PAD}
+          y2={H / 2}
+          stroke="currentColor"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />
+      </svg>
+    );
+  }
+
+  const toPoints = (pts: { x: number; y: number }[]) =>
+    pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+
+  return (
+    <svg
+      width={W}
+      height={H}
+      aria-label="30-day acceptance rate trend"
+      role="img"
+    >
+      <title>30-day acceptance rate trend</title>
+      {/* Zero line */}
+      <line
+        x1={PAD}
+        y1={H - PAD}
+        x2={W - PAD}
+        y2={H - PAD}
+        stroke="var(--color-border-subtle)"
+        strokeWidth={0.5}
+      />
+      {/* 50% guide */}
+      <line
+        x1={PAD}
+        y1={PAD + innerH / 2}
+        x2={W - PAD}
+        y2={PAD + innerH / 2}
+        stroke="var(--color-border-subtle)"
+        strokeWidth={0.5}
+        strokeDasharray="2 2"
+      />
+      {segments.map((seg, si) => (
+        <polyline
+          key={`seg-${si}`}
+          points={toPoints(seg)}
+          fill="none"
+          stroke="var(--color-accent)"
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** Acceptance-rate colour class: green >70%, yellow 40–70%, red <40%. */
+function acceptColor(rate: number): string {
+  if (rate >= 0.7) return "text-severity-pass";
+  if (rate >= 0.4) return "text-severity-warn";
+  return "text-severity-fail";
+}
+
+interface HeadlineCardsProps {
+  stats: LocaleStat[];
+  loading: boolean;
+}
+
+function HeadlineCards({ stats, loading }: HeadlineCardsProps) {
+  if (loading && stats.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-fg-tertiary py-3">
+        <Spinner /> Computing headline numbers…
+      </div>
+    );
+  }
+
+  if (!loading && stats.length === 0) {
+    return (
+      <p className="py-4 text-sm text-fg-tertiary">
+        No corrections recorded yet — edit translated units to populate headline
+        numbers.
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className="grid gap-3"
+      style={{
+        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+      }}
+    >
+      {stats.map((s) => {
+        const acceptRate = s.total > 0 ? s.acceptedAsIs / s.total : 0;
+        const editRate = s.total > 0 ? s.edited / s.total : 0;
+        const scratchRate = s.total > 0 ? s.fromScratch / s.total : 0;
+
+        return (
+          <article
+            key={s.localeId}
+            className="rounded-md border border-border-subtle bg-bg-surface px-4 py-3 flex flex-col gap-2"
+            aria-label={`Locale ${s.localeId} statistics`}
+          >
+            <header className="flex items-baseline justify-between gap-2">
+              <div>
+                <span className="text-sm font-semibold text-fg-primary font-mono">
+                  {s.localeId}
+                </span>
+                {s.script && (
+                  <span className="ml-2 text-xs text-fg-tertiary">
+                    {s.script}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-fg-tertiary tabular-nums">
+                {s.total} correction{s.total === 1 ? "" : "s"}
+              </span>
+            </header>
+
+            {/* Sparkline */}
+            <figure title="Acceptance rate over the last 30 days">
+              <Sparkline days={s.sparkDays} />
+            </figure>
+
+            {/* Rates row */}
+            <div className="flex items-center gap-4 text-xs">
+              <span
+                className={`font-semibold tabular-nums ${acceptColor(acceptRate)}`}
+                title="Accepted as-is"
+              >
+                {pct(acceptRate)}
+                <span className="ml-1 font-normal text-fg-tertiary">
+                  accepted
+                </span>
+              </span>
+              <span
+                className="tabular-nums text-fg-secondary"
+                title="Edited before accepting"
+              >
+                {pct(editRate)}
+                <span className="ml-1 text-fg-tertiary">edited</span>
+              </span>
+              <span
+                className="tabular-nums text-fg-tertiary"
+                title="Written from scratch (no MT proposal)"
+              >
+                {pct(scratchRate)}
+                <span className="ml-1">scratch</span>
+              </span>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 
@@ -488,8 +792,7 @@ function FilterBar({
           Note: the underlying CorrectionFilter.unit_id is an exact match
           against the UnitId value in corrections.jsonl. This input sends
           the value verbatim — partial matches will return no results unless
-          the user types the full unit id. A future improvement could add a
-          server-side LIKE filter, but that requires a library-layer change. */}
+          the user types the full unit id. */}
       <label className="flex items-center gap-1.5 text-xs text-fg-secondary">
         <span>Unit ID</span>
         <input
@@ -518,9 +821,337 @@ function FilterBar({
   );
 }
 
+// ── Part 3: Evaluation section ────────────────────────────────────────────────
+
+/** Progress bar for an in-flight evaluation run. */
+interface EvalProgressProps {
+  completed: number;
+  total: number;
+  lastLocale: string;
+  jobId: string;
+  onCancel: () => void;
+}
+
+function EvalProgressBar({
+  completed,
+  total,
+  lastLocale,
+  jobId,
+  onCancel,
+}: EvalProgressProps) {
+  const pctDone = total > 0 ? (completed / total) * 100 : 0;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={`Evaluation progress: ${completed} of ${total}`}
+      className="flex flex-col gap-2"
+    >
+      <div className="flex items-center justify-between text-xs text-fg-secondary">
+        <span>
+          Running evaluation — {completed} / {total} examples
+          {lastLocale ? ` (last: ${lastLocale})` : ""}
+        </span>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-6 px-3 rounded border border-border-default bg-bg-surface text-xs text-fg-secondary hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          aria-label={`Cancel evaluation job ${jobId}`}
+        >
+          Cancel
+        </button>
+      </div>
+      <div
+        className="w-full h-1.5 rounded-full bg-bg-surface border border-border-subtle overflow-hidden"
+        role="progressbar"
+        aria-valuenow={completed}
+        aria-valuemin={0}
+        aria-valuemax={total}
+      >
+        <div
+          className="h-full bg-accent rounded-full transition-all duration-300"
+          style={{ width: `${pctDone.toFixed(1)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Per-locale score table in the latest-run summary. */
+function PerLocaleTable({
+  perLocale,
+}: {
+  perLocale: Record<string, { score: number; count: number }>;
+}) {
+  const entries = Object.entries(perLocale).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) {
+    return (
+      <p className="text-xs text-fg-tertiary">
+        No per-locale data in this run.
+      </p>
+    );
+  }
+  return (
+    <table
+      className="text-xs border-collapse w-full"
+      aria-label="Per-locale scores"
+    >
+      <thead>
+        <tr className="border-b border-border-subtle text-fg-tertiary uppercase tracking-wider">
+          <th scope="col" className="py-1.5 pr-4 text-left font-medium">
+            Locale
+          </th>
+          <th scope="col" className="py-1.5 pr-4 text-right font-medium">
+            Score
+          </th>
+          <th scope="col" className="py-1.5 text-right font-medium">
+            Examples
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map(([locale, s]) => (
+          <tr
+            key={locale}
+            className="border-b border-border-subtle last:border-0"
+          >
+            <td className="py-1.5 pr-4 text-fg-primary font-mono">{locale}</td>
+            <td
+              className={`py-1.5 pr-4 text-right tabular-nums font-semibold ${acceptColor(s.score)}`}
+            >
+              {pct(s.score)}
+            </td>
+            <td className="py-1.5 text-right text-fg-tertiary tabular-nums">
+              {s.count}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** Per-flag-kind score table. */
+function PerFlagTable({
+  perFlag,
+}: {
+  perFlag: Record<string, { score: number; count: number }>;
+}) {
+  const entries = Object.entries(perFlag).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entries.length === 0) return null;
+  return (
+    <table
+      className="text-xs border-collapse w-full"
+      aria-label="Per-flag-kind scores"
+    >
+      <thead>
+        <tr className="border-b border-border-subtle text-fg-tertiary uppercase tracking-wider">
+          <th scope="col" className="py-1.5 pr-4 text-left font-medium">
+            Flag kind
+          </th>
+          <th scope="col" className="py-1.5 pr-4 text-right font-medium">
+            Score
+          </th>
+          <th scope="col" className="py-1.5 text-right font-medium">
+            Examples
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map(([flag, s]) => (
+          <tr
+            key={flag}
+            className="border-b border-border-subtle last:border-0"
+          >
+            <td className="py-1.5 pr-4 text-fg-primary font-mono">{flag}</td>
+            <td
+              className={`py-1.5 pr-4 text-right tabular-nums font-semibold ${acceptColor(s.score)}`}
+            >
+              {pct(s.score)}
+            </td>
+            <td className="py-1.5 text-right text-fg-tertiary tabular-nums">
+              {s.count}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** Delta badge: +3.2 pp or -1.5 pp vs the prior run. */
+function DeltaBadge({ current, prior }: { current: number; prior: number }) {
+  const delta = (current - prior) * 100;
+  if (Math.abs(delta) < 0.05) {
+    return (
+      <span className="text-xs text-fg-tertiary tabular-nums">no change</span>
+    );
+  }
+  const positive = delta > 0;
+  return (
+    <span
+      className={`text-xs font-semibold tabular-nums ${positive ? "text-severity-pass" : "text-severity-fail"}`}
+      title={`${positive ? "+" : ""}${delta.toFixed(1)} pp vs previous run`}
+    >
+      {positive ? "+" : ""}
+      {delta.toFixed(1)} pp
+    </span>
+  );
+}
+
+/** Latest run summary card. */
+function LatestRunCard({
+  run,
+  prevRun,
+}: {
+  run: EvaluationRun;
+  prevRun: EvaluationRun | null;
+}) {
+  const [showPerFlag, setShowPerFlag] = useState(false);
+  const hasFlagData = Object.keys(run.per_flag_kind).length > 0;
+
+  return (
+    <article
+      className="rounded-md border border-border-subtle bg-bg-surface px-4 py-3 flex flex-col gap-3"
+      aria-label="Latest evaluation run"
+    >
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-3">
+          <span
+            className={`text-2xl font-semibold tabular-nums ${acceptColor(run.overall_score)}`}
+          >
+            {pct(run.overall_score)}
+          </span>
+          {prevRun && (
+            <DeltaBadge
+              current={run.overall_score}
+              prior={prevRun.overall_score}
+            />
+          )}
+          <span className="text-xs text-fg-tertiary">overall exact-match</span>
+        </div>
+        <div className="text-right text-xs text-fg-tertiary">
+          <div title={run.ts}>{relativeTime(run.ts)}</div>
+          <div className="font-mono">{run.prompt_template_version}</div>
+          <div>
+            {run.example_count} example{run.example_count === 1 ? "" : "s"}
+          </div>
+        </div>
+      </div>
+
+      <PerLocaleTable perLocale={run.per_locale} />
+
+      {hasFlagData && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPerFlag((v) => !v)}
+            className="text-xs text-fg-secondary underline decoration-dotted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            aria-expanded={showPerFlag}
+          >
+            {showPerFlag ? "Hide" : "Show"} per-flag-kind breakdown
+          </button>
+          {showPerFlag && (
+            <div className="mt-2">
+              <PerFlagTable perFlag={run.per_flag_kind} />
+            </div>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+/** Collapsible run history table. */
+function RunHistoryTable({ runs }: { runs: EvaluationRun[] }) {
+  const [open, setOpen] = useState(false);
+
+  if (runs.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-fg-secondary underline decoration-dotted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        aria-expanded={open}
+        aria-controls="eval-history-table"
+      >
+        {open ? "Hide" : "Show"} run history ({runs.length} run
+        {runs.length === 1 ? "" : "s"})
+      </button>
+
+      {open && (
+        <div
+          id="eval-history-table"
+          className="mt-2 overflow-auto rounded-md border border-border-subtle"
+          style={{ maxHeight: "16rem" }}
+        >
+          <table
+            className="w-full text-xs border-collapse"
+            aria-label="Evaluation run history"
+          >
+            <thead>
+              <tr className="bg-bg-surface border-b border-border-subtle text-fg-tertiary uppercase tracking-wider">
+                <th scope="col" className="py-2 px-3 text-left font-medium">
+                  Timestamp
+                </th>
+                <th scope="col" className="py-2 px-3 text-left font-medium">
+                  Prompt version
+                </th>
+                <th scope="col" className="py-2 px-3 text-right font-medium">
+                  Score
+                </th>
+                <th scope="col" className="py-2 px-3 text-right font-medium">
+                  Examples
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr
+                  key={r.ts}
+                  className="border-b border-border-subtle last:border-0 hover:bg-bg-hover transition-colors duration-75"
+                >
+                  <td
+                    className="py-1.5 px-3 text-fg-secondary whitespace-nowrap"
+                    title={r.ts}
+                  >
+                    {formatTs(r.ts)}
+                  </td>
+                  <td className="py-1.5 px-3 text-fg-secondary font-mono">
+                    {r.prompt_template_version}
+                  </td>
+                  <td
+                    className={`py-1.5 px-3 text-right tabular-nums font-semibold ${acceptColor(r.overall_score)}`}
+                  >
+                    {pct(r.overall_score)}
+                  </td>
+                  <td className="py-1.5 px-3 text-right text-fg-tertiary tabular-nums">
+                    {r.example_count}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function QualityPanel({ summary, flashError, flashInfo }: Props) {
+  // ── Part 1: Headline stats state ──────────────────────────────────────────
+
+  const [localeStats, setLocaleStats] = useState<LocaleStat[]>([]);
+  const [statsLoading, setStatsLoading] = useState(false);
+
   // ── Corrections state ─────────────────────────────────────────────────────
 
   const [corrections, setCorrections] = useState<Correction[]>([]);
@@ -539,6 +1170,17 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
 
   // Derived set of curated ids for O(1) lookup in the corrections table.
   const curatedIds: Set<CorrectionId> = new Set(curated.map((e) => e.id));
+
+  // ── Part 3: Evaluation state ──────────────────────────────────────────────
+
+  const [evalRuns, setEvalRuns] = useState<EvaluationRun[]>([]);
+  const [evalRunsLoading, setEvalRunsLoading] = useState(false);
+
+  // In-flight job state.
+  const [evalJobId, setEvalJobId] = useState<string | null>(null);
+  const [evalProgress, setEvalProgress] =
+    useState<EvaluationProgressPayload | null>(null);
+  const evalUnlistenRef = useRef<(() => void) | null>(null);
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
@@ -580,21 +1222,66 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
     [flashError],
   );
 
-  // Debounce for the unit-id text field (200 ms as specified).
+  const fetchEvalRuns = useCallback(async () => {
+    setEvalRunsLoading(true);
+    try {
+      const data = await listEvaluationRunsInProject();
+      setEvalRuns(data);
+    } catch (e) {
+      flashError(`Failed to load evaluation runs: ${formatError(e)}`);
+    } finally {
+      setEvalRunsLoading(false);
+    }
+  }, [flashError]);
+
+  /** Fetch per-locale correction stats for all project locales in parallel. */
+  const fetchHeadlineStats = useCallback(async () => {
+    const localeIds = summary.locales;
+    if (localeIds.length === 0) return;
+
+    setStatsLoading(true);
+    try {
+      // Fetch locale metadata (script field) and per-locale corrections in parallel.
+      const [localeInfos, ...perLocaleCorrs] = await Promise.all([
+        listLocales(),
+        ...localeIds.map((id) =>
+          listCorrectionsInProject({ locale: id }).catch(
+            () => [] as Correction[],
+          ),
+        ),
+      ]);
+
+      const infoMap = new Map<string, LocaleInfo>(
+        (localeInfos as LocaleInfo[]).map((li) => [li.id, li]),
+      );
+
+      const stats: LocaleStat[] = localeIds.map((id, idx) => {
+        const info = infoMap.get(id);
+        const corrs = perLocaleCorrs[idx] as Correction[];
+        return computeStats(id, info?.script ?? "", corrs);
+      });
+
+      setLocaleStats(stats);
+    } catch (e) {
+      flashError(`Failed to compute headline numbers: ${formatError(e)}`);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [summary.locales, flashError]);
+
+  // Debounce for the unit-id text field (200 ms).
   const unitIdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch on mount. fetchCurated and fetchCorrections are stable (useCallback
-  // deps are [flashError] only) so including them here does not cause a loop.
+  // Fetch on mount.
   useEffect(() => {
     void fetchCurated();
     void fetchCorrections("", "", "", false);
-  }, [fetchCurated, fetchCorrections]);
+    void fetchEvalRuns();
+    void fetchHeadlineStats();
+  }, [fetchCurated, fetchCorrections, fetchEvalRuns, fetchHeadlineStats]);
 
   // Refetch corrections when dropdown/checkbox filters change.
-  // filterUnitId is intentionally excluded here: unit-id changes go through
-  // the debounced handleUnitIdChange path instead to avoid a fetch per keystroke.
-  // Cancel any pending debounce timer so stale unit-id requests cannot race
-  // a freshly-triggered filter-change fetch.
+  // filterUnitId is intentionally excluded: handled via debounce below.
   // biome-ignore lint/correctness/useExhaustiveDependencies: filterUnitId handled via debounce
   useEffect(() => {
     if (unitIdTimerRef.current !== null) {
@@ -630,6 +1317,14 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
   useEffect(
     () => () => {
       if (unitIdTimerRef.current !== null) clearTimeout(unitIdTimerRef.current);
+    },
+    [],
+  );
+
+  // Clean up eval listener on unmount.
+  useEffect(
+    () => () => {
+      evalUnlistenRef.current?.();
     },
     [],
   );
@@ -694,11 +1389,90 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
     [flashError, fetchCurated],
   );
 
+  // ── Evaluation actions ────────────────────────────────────────────────────
+
+  const handleRunEvaluation = useCallback(async () => {
+    if (evalJobId !== null) return; // guard: already running
+
+    try {
+      // Subscribe before firing the command to avoid missing fast first-example.
+      const unlisten = await listenEvalProgress(
+        // Job id is not yet known; we use a placeholder and re-register once
+        // the command returns. Because listenEvalProgress returns a combined
+        // function, we teardown immediately after the real jobId is wired.
+        // Alternative pattern: listen to a wildcard. Instead we do two-phase:
+        // 1. Get the jobId from the command.
+        // 2. Register listeners with the real jobId.
+        // The window between command return and listener registration is
+        // acceptable for evaluation (units take ~2 s each; the first emit
+        // arrives well after registration).
+        "__placeholder__",
+        () => {},
+        () => {},
+      );
+      // Tear down the placeholder immediately.
+      unlisten();
+
+      const started = await runEvaluationInProject();
+      const { job_id: jobId, total } = started;
+
+      setEvalJobId(jobId);
+      setEvalProgress({
+        job_id: jobId,
+        completed: 0,
+        total,
+        last_example_locale: "",
+      });
+
+      const realUnlisten = await listenEvalProgress(
+        jobId,
+        (p: EvaluationProgressPayload) => {
+          setEvalProgress(p);
+        },
+        (p: EvaluationTerminalPayload, status: "completed" | "failed") => {
+          setEvalJobId(null);
+          setEvalProgress(null);
+          realUnlisten();
+          evalUnlistenRef.current = null;
+
+          if (status === "completed" && p.run) {
+            flashInfo(
+              `Evaluation complete — overall score: ${pct(p.run.overall_score)}`,
+            );
+            void fetchEvalRuns();
+          } else if (status === "failed" && p.failed_reason) {
+            flashError(`Evaluation failed: ${p.failed_reason}`);
+          } else if (p.cancelled) {
+            flashInfo("Evaluation cancelled.");
+          }
+        },
+      );
+      evalUnlistenRef.current = realUnlisten;
+    } catch (e) {
+      flashError(`Failed to start evaluation: ${formatError(e)}`);
+      setEvalJobId(null);
+      setEvalProgress(null);
+    }
+  }, [evalJobId, flashInfo, flashError, fetchEvalRuns]);
+
+  const handleCancelEval = useCallback(async () => {
+    if (!evalJobId) return;
+    try {
+      await cancelEvaluation(evalJobId);
+    } catch (e) {
+      flashError(`Cancel failed: ${formatError(e)}`);
+    }
+  }, [evalJobId, flashError]);
+
   // ── Catalog list for filter dropdown ─────────────────────────────────────
 
   const catalogPaths = summary.catalogs.map(
     (c) => c.manifest_path || c.absolute_path,
   );
+
+  const isEvalRunning = evalJobId !== null;
+  const latestRun = evalRuns.length > 0 ? evalRuns[0] : null;
+  const prevRun = evalRuns.length > 1 ? evalRuns[1] : null;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -708,21 +1482,15 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
       className="flex-1 overflow-auto bg-bg-base p-6"
     >
       <div className="max-w-7xl mx-auto flex flex-col gap-8">
-        {/* Value-proposition banner */}
-        <section aria-labelledby="quality-intro-heading">
+        {/* Part 1: Headline numbers per locale */}
+        <section aria-labelledby="headline-heading">
           <h2
-            id="quality-intro-heading"
-            className="text-xs font-semibold uppercase tracking-wider text-fg-tertiary mb-2"
+            id="headline-heading"
+            className="text-xs font-semibold uppercase tracking-wider text-fg-tertiary mb-3"
           >
-            About this view
+            Headline numbers by locale
           </h2>
-          <div className="rounded-md border border-border-subtle bg-bg-surface px-4 py-3 text-xs text-fg-secondary leading-relaxed max-w-3xl">
-            Every human edit accepted in the editor is recorded as a correction.
-            Curate the ones that represent the right per-locale translation
-            style — they become the prompt-tuning corpus. The full Quality
-            dashboard (acceptance rate, edit rate, run-evaluation, export tuning
-            bundle) ships in M4.9 / M4.10.
-          </div>
+          <HeadlineCards stats={localeStats} loading={statsLoading} />
         </section>
 
         {/* Translation memory section */}
@@ -794,6 +1562,89 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
             onUncurate={(id) => void handleUncurate(id)}
             onNoteBlur={(id, note) => void handleNoteBlur(id, note)}
           />
+        </section>
+
+        {/* Part 3: Prompt evaluation */}
+        <section aria-labelledby="eval-heading">
+          <div className="flex items-center justify-between mb-3">
+            <h2
+              id="eval-heading"
+              className="text-sm font-semibold text-fg-primary"
+            >
+              Prompt evaluation
+            </h2>
+            <button
+              type="button"
+              onClick={() => void handleRunEvaluation()}
+              disabled={isEvalRunning || curated.length === 0}
+              aria-label={
+                curated.length === 0
+                  ? "Run evaluation — requires at least one curated example"
+                  : isEvalRunning
+                    ? "Evaluation in progress…"
+                    : "Run evaluation over curated examples"
+              }
+              title={
+                curated.length === 0
+                  ? "Curate at least one correction before running an evaluation."
+                  : undefined
+              }
+              className="h-7 px-3 rounded border border-border-default bg-bg-surface text-xs text-fg-secondary hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              {isEvalRunning ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Spinner /> Running…
+                </span>
+              ) : (
+                "Run evaluation"
+              )}
+            </button>
+          </div>
+
+          {/* In-flight progress */}
+          {isEvalRunning && evalProgress && (
+            <div className="mb-4">
+              <EvalProgressBar
+                completed={evalProgress.completed}
+                total={evalProgress.total}
+                lastLocale={evalProgress.last_example_locale}
+                jobId={evalJobId ?? ""}
+                onCancel={() => void handleCancelEval()}
+              />
+            </div>
+          )}
+
+          {/* No curated examples banner */}
+          {!isEvalRunning && curated.length === 0 && (
+            <p className="py-3 text-sm text-fg-tertiary">
+              Curate at least one correction above to enable evaluation.
+            </p>
+          )}
+
+          {/* Latest run summary */}
+          {!isEvalRunning && latestRun && (
+            <div className="flex flex-col gap-3">
+              <LatestRunCard run={latestRun} prevRun={prevRun ?? null} />
+              <RunHistoryTable runs={evalRuns.slice(1)} />
+            </div>
+          )}
+
+          {/* No runs yet */}
+          {!isEvalRunning &&
+            !evalRunsLoading &&
+            curated.length > 0 &&
+            evalRuns.length === 0 && (
+              <p className="py-3 text-sm text-fg-tertiary">
+                No evaluation runs yet. Press "Run evaluation" to score the
+                current prompt over your curated set.
+              </p>
+            )}
+
+          {evalRunsLoading && evalRuns.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-fg-tertiary py-3">
+              <Spinner /> Loading evaluation history…
+            </div>
+          )}
         </section>
       </div>
     </section>
