@@ -44,6 +44,11 @@ interface Props {
   onJumpToLocale?: (locale: string) => void;
   /** Override width (default 320px / w-80). FocusView passes 260. */
   width?: number | string;
+  /** When true, render only a thin 36px vertical strip with an "Inspector"
+   *  label + expand button. Hosting view owns the state. */
+  collapsed?: boolean;
+  /** Toggle the collapsed state. Required when `collapsed` is wired. */
+  onToggleCollapsed?: () => void;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -81,7 +86,66 @@ export function Inspector({
   peerLocales,
   onJumpToLocale,
   width = 320,
+  collapsed = false,
+  onToggleCollapsed,
 }: Props) {
+  // All hooks must be called unconditionally, BEFORE any early return — the
+  // collapsed-strip branch below would otherwise change the hook call order
+  // between renders and break React's reconciliation.
+  const [gateOpen, setGateOpen] = useState(true);
+  const [glossOpen, setGlossOpen] = useState(true);
+  const [metaOpen, setMetaOpen] = useState(true);
+  const [histOpen, setHistOpen] = useState(false);
+
+  // ── Collapsed strip ──────────────────────────────────────────────────
+  if (collapsed) {
+    return (
+      <aside
+        className="app-chrome shrink-0 flex flex-col items-center bg-bg-surface border-l border-border-subtle"
+        style={{ width: 36 }}
+        aria-label="Unit inspector (collapsed)"
+      >
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label="Expand inspector"
+          title="Expand inspector"
+          className={cn(
+            "w-full flex items-center justify-center py-3",
+            "text-fg-tertiary hover:bg-bg-hover hover:text-fg-secondary",
+            "transition-colors duration-100",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent",
+          )}
+        >
+          <ChevronLeftIcon />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label="Expand inspector"
+          title="Expand inspector"
+          className={cn(
+            "flex-1 w-full flex items-start justify-center pt-2",
+            "text-fg-tertiary hover:bg-bg-hover hover:text-fg-secondary",
+            "transition-colors duration-100",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent",
+          )}
+        >
+          <span
+            className="text-xs font-semibold uppercase tracking-loose"
+            style={{
+              writingMode: "vertical-rl",
+              transform: "rotate(180deg)",
+              letterSpacing: "0.12em",
+            }}
+          >
+            Inspector
+          </span>
+        </button>
+      </aside>
+    );
+  }
+
   const isPlural = unit.plural_arity != null;
   const placeholders = Array.isArray(unit.placeholders)
     ? unit.placeholders.length
@@ -95,12 +159,6 @@ export function Inspector({
     ? unit.flags.map(asModelFlag).filter((f): f is ModelFlag => f !== null)
     : [];
   const flagNotes: Record<string, string> = unit.flag_notes ?? {};
-
-  // Section collapse state. History defaults closed; others default open.
-  const [gateOpen, setGateOpen] = useState(true);
-  const [glossOpen, setGlossOpen] = useState(true);
-  const [metaOpen, setMetaOpen] = useState(true);
-  const [histOpen, setHistOpen] = useState(false);
 
   const hasPeerLocales = peerLocales && peerLocales.length > 0;
 
@@ -121,6 +179,22 @@ export function Inspector({
           )}
           {unit.review_status === "reviewed" && (
             <ReviewStatusChip label="Reviewed" tone="finished" />
+          )}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              aria-label="Collapse inspector"
+              title="Collapse inspector"
+              className={cn(
+                "inline-flex items-center justify-center w-6 h-6 rounded-sm",
+                "text-fg-tertiary hover:bg-bg-hover hover:text-fg-secondary",
+                "transition-colors duration-100",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+            >
+              <ChevronRightIcon />
+            </button>
           )}
         </div>
       </header>
@@ -705,4 +779,40 @@ function formatMissingExtra(
 
 function q(s: string): string {
   return `"${s}"`;
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
 }

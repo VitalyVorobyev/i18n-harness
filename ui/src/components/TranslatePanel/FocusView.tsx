@@ -41,6 +41,30 @@ interface Props {
   onTranslateAll: (catalogPath: string, scope: BatchScope) => void;
 }
 
+// ── Inspector collapse persistence ────────────────────────────────────────
+//
+// Shared with MatrixView via the same localStorage key so the user's
+// preference is consistent across modes. View-only preference; does not
+// belong in the project manifest.
+
+const INSPECTOR_COLLAPSED_KEY = "inspector-collapsed";
+
+function readInspectorCollapsed(): boolean {
+  try {
+    return localStorage.getItem(INSPECTOR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInspectorCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(INSPECTOR_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    // localStorage unavailable; skip persistence silently.
+  }
+}
+
 // ── Per-locale stat helpers (shared with MatrixView) ──────────────────────
 
 interface LocaleStat {
@@ -177,6 +201,19 @@ export function FocusView({
   const [search, setSearch] = useState("");
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Inspector collapse state — shared localStorage key with MatrixView so
+  // the user's preference is consistent across modes.
+  const [inspectorCollapsed, setInspectorCollapsed] = useState<boolean>(() =>
+    readInspectorCollapsed(),
+  );
+  const toggleInspector = useCallback(() => {
+    setInspectorCollapsed((prev) => {
+      const next = !prev;
+      writeInspectorCollapsed(next);
+      return next;
+    });
+  }, []);
 
   const filteredEntries = useMemo(() => {
     const lower = search.trim().toLowerCase();
@@ -367,28 +404,31 @@ export function FocusView({
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {/* Header */}
         <header className="shrink-0 px-6 pt-4 pb-3.5 border-b border-border-subtle bg-bg-base">
-          <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+          <div className="flex items-start gap-3 mb-2 flex-wrap">
             <div className="flex flex-col gap-1 flex-1 min-w-0">
               <Eyebrow>Translate</Eyebrow>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <h1 className="m-0 text-[18px] font-semibold text-fg-primary tracking-tight">
-                  Focused on
-                </h1>
-                {/* Accent locale tag — larger than standard */}
+              {/* Title row — never wraps. The accent locale chip speaks for
+                  itself, so we omit a "Focused on" label that would push
+                  the locale onto its own line at narrow widths. */}
+              <div className="flex items-center gap-2 min-w-0">
+                {/* Accent locale tag — larger than standard, shrink-0 */}
                 <span
+                  className="shrink-0"
                   style={{
                     display: "inline-block",
                     fontFamily: "var(--font-mono)",
-                    fontSize: "13px",
+                    fontSize: "14px",
+                    fontWeight: 600,
                     letterSpacing: "0.04em",
                     lineHeight: 1,
-                    padding: "3px 10px",
+                    padding: "4px 10px",
                     borderRadius: 4,
                     whiteSpace: "nowrap",
                     background: "var(--color-accent-subtle)",
                     border: "1px solid var(--color-accent-subtle-border)",
                     color: "var(--color-accent)",
                   }}
+                  title={`Focused on ${focusLocale}`}
                 >
                   {focusLocale}
                 </span>
@@ -399,7 +439,7 @@ export function FocusView({
                   aria-label="Clear focus locale, return to matrix view"
                   title="Clear focus"
                   className={cn(
-                    "inline-flex items-center justify-center w-5 h-5 rounded-full border",
+                    "shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full border",
                     "text-xs text-fg-tertiary border-border-default bg-bg-elevated",
                     "hover:bg-bg-hover hover:text-fg-primary transition-colors duration-100",
                     "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
@@ -407,7 +447,10 @@ export function FocusView({
                 >
                   <XIcon size={10} />
                 </button>
-                <span className="font-mono text-xs text-fg-tertiary truncate">
+                <span
+                  className="font-mono text-xs text-fg-tertiary truncate min-w-0"
+                  title={manifestPath}
+                >
                   {manifestPath}
                 </span>
               </div>
@@ -419,7 +462,7 @@ export function FocusView({
             </div>
 
             {/* Right controls: filter, Single/Matrix toggle, action */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <div className="relative">
                 <input
                   type="search"
@@ -566,6 +609,7 @@ export function FocusView({
               <FocusRow
                 key={`${entry.catalogPath}::${entry.unit.id}`}
                 entry={entry}
+                focusLocale={focusLocale}
                 selected={idx === selectedIdx}
                 busy={busyIds.has(entry.unit.id)}
                 dirty={dirtyIds.has(entry.unit.id)}
@@ -577,9 +621,21 @@ export function FocusView({
                   onEditUnit(entry.catalogPath, entry.unit, edit)
                 }
                 onAccept={() => onAcceptUnit(entry.catalogPath, entry.unit)}
-                onSkip={() =>
-                  setSelectedIdx(Math.min(filteredEntries.length - 1, idx + 1))
-                }
+                onReopen={() => {
+                  // Finished → Proposed: write current target back via the
+                  // edit IPC, which downgrades state per the existing
+                  // contract (matches MatrixCard's onReopen wiring).
+                  const u = entry.unit;
+                  const cur =
+                    u.target.kind === "singular"
+                      ? u.target.text
+                      : (u.target.forms[0] ?? null);
+                  const edit: TargetEdit =
+                    u.target.kind === "plural"
+                      ? { kind: "plural", form_index: 0, text: cur }
+                      : { kind: "singular", text: cur };
+                  onEditUnit(entry.catalogPath, u, edit);
+                }}
               />
             ))
           )}
@@ -611,6 +667,8 @@ export function FocusView({
           peerLocales={peerLocales}
           onJumpToLocale={(locale) => setFocusLocale(locale)}
           width={260}
+          collapsed={inspectorCollapsed}
+          onToggleCollapsed={toggleInspector}
         />
       )}
     </div>
@@ -733,6 +791,7 @@ function LocaleRowButton({
 
 interface FocusRowProps {
   entry: FocusEntry;
+  focusLocale: string;
   selected: boolean;
   busy: boolean;
   dirty: boolean;
@@ -740,11 +799,14 @@ interface FocusRowProps {
   onTranslate: () => void;
   onEdit: (edit: TargetEdit) => void;
   onAccept: () => void;
-  onSkip: () => void;
+  /** Finished → Proposed downgrade for the selected row. Wired by the
+   *  parent to the same edit IPC the matrix Reopen flow uses. */
+  onReopen: () => void;
 }
 
 function FocusRow({
   entry,
+  focusLocale,
   selected,
   busy,
   dirty,
@@ -752,7 +814,7 @@ function FocusRow({
   onTranslate,
   onEdit,
   onAccept,
-  onSkip,
+  onReopen,
 }: FocusRowProps) {
   const { unit } = entry;
   const state = unit.state;
@@ -836,12 +898,13 @@ function FocusRow({
         {selected ? (
           <SelectedTarget
             unit={unit}
+            focusLocale={focusLocale}
             busy={busy}
             hardFlag={hardFlag}
             onEdit={onEdit}
             onTranslate={onTranslate}
             onAccept={onAccept}
-            onSkip={onSkip}
+            onReopen={onReopen}
           />
         ) : (
           <ReadOnlyTarget unit={unit} />
@@ -903,27 +966,95 @@ function ReadOnlyTarget({ unit }: { unit: Unit }) {
   );
 }
 
-// ── Selected target: editable area + action bar ────────────────────────────
+// ── Selected target: state-branching action surface ───────────────────────
+//
+// untranslated → single "Translate to <locale>" primary action (no editor;
+//                the gate writes nothing useful from an empty draft).
+// finished     → read-only target + "Edit" button (downgrades to Proposed).
+// proposed     → editable textarea + Translate/Accept actions.
 
 function SelectedTarget({
   unit,
+  focusLocale,
   busy,
   hardFlag,
   onEdit,
   onTranslate,
   onAccept,
-  onSkip,
+  onReopen,
 }: {
   unit: Unit;
+  focusLocale: string;
   busy: boolean;
   hardFlag: boolean;
   onEdit: (edit: TargetEdit) => void;
   onTranslate: () => void;
   onAccept: () => void;
-  onSkip: () => void;
+  onReopen: () => void;
 }) {
-  const isPlural = unit.plural_arity != null;
+  if (unit.state === "untranslated") {
+    return (
+      <div className="flex flex-col gap-2">
+        <div
+          className="px-3 py-3 rounded-md text-[12.5px] italic text-fg-tertiary"
+          style={{
+            border: "1px dashed var(--color-border-default)",
+            background: "var(--color-bg-input)",
+          }}
+        >
+          no translation yet
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onTranslate}
+            disabled={busy}
+            className={cn(
+              "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium",
+              "transition-colors duration-100",
+              "text-accent-fg bg-accent",
+              "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
+              "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
+            )}
+            title={`Translate this unit to ${focusLocale}`}
+          >
+            <SparklesIcon size={11} />
+            {busy ? "Translating…" : `Translate to ${focusLocale}`}
+            <KbdChip>⌘T</KbdChip>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
+  if (unit.state === "finished") {
+    return (
+      <div className="flex flex-col gap-2">
+        <ReadOnlyTarget unit={unit} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onReopen}
+            disabled={busy}
+            className={cn(
+              "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium border",
+              "transition-colors duration-100",
+              busy
+                ? "opacity-40 cursor-not-allowed border-border-subtle text-fg-tertiary bg-transparent"
+                : "border-border-default text-fg-primary bg-bg-elevated hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected",
+            )}
+            title="Reopen this unit for editing (downgrades to Proposed)"
+          >
+            <PencilIcon size={11} />
+            Edit
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // proposed (or any other editable state)
+  const isPlural = unit.plural_arity != null;
   if (isPlural) {
     return (
       <PluralEditor
@@ -933,7 +1064,6 @@ function SelectedTarget({
         onEdit={onEdit}
         onTranslate={onTranslate}
         onAccept={onAccept}
-        onSkip={onSkip}
       />
     );
   }
@@ -946,7 +1076,6 @@ function SelectedTarget({
       onEdit={onEdit}
       onTranslate={onTranslate}
       onAccept={onAccept}
-      onSkip={onSkip}
     />
   );
 }
@@ -960,7 +1089,6 @@ function SingularEditor({
   onEdit,
   onTranslate,
   onAccept,
-  onSkip,
 }: {
   unit: Unit;
   busy: boolean;
@@ -968,7 +1096,6 @@ function SingularEditor({
   onEdit: (edit: TargetEdit) => void;
   onTranslate: () => void;
   onAccept: () => void;
-  onSkip: () => void;
 }) {
   const initial =
     unit.target.kind === "singular" ? (unit.target.text ?? "") : "";
@@ -1027,7 +1154,6 @@ function SingularEditor({
         hardFlag={hardFlag}
         onTranslate={onTranslate}
         onAccept={onAccept}
-        onSkip={onSkip}
       />
     </>
   );
@@ -1042,7 +1168,6 @@ function PluralEditor({
   onEdit,
   onTranslate,
   onAccept,
-  onSkip,
 }: {
   unit: Unit;
   busy: boolean;
@@ -1050,7 +1175,6 @@ function PluralEditor({
   onEdit: (edit: TargetEdit) => void;
   onTranslate: () => void;
   onAccept: () => void;
-  onSkip: () => void;
 }) {
   const arity = unit.plural_arity ?? 2;
   const forms =
@@ -1106,7 +1230,6 @@ function PluralEditor({
         hardFlag={hardFlag}
         onTranslate={onTranslate}
         onAccept={onAccept}
-        onSkip={onSkip}
       />
     </>
   );
@@ -1164,20 +1287,22 @@ function PluralFormEditor({
   );
 }
 
-// ── Action bar (Translate / Accept / Skip) ──────────────────────────────────
+// ── Action bar (Translate / Accept) ─────────────────────────────────────────
+//
+// Skip is reachable via ⌘→ (footer legend documents the binding); a visible
+// "Skip" button added clutter without earning its weight in user research,
+// so it lives only on the keyboard.
 
 function ActionBar({
   busy,
   hardFlag,
   onTranslate,
   onAccept,
-  onSkip,
 }: {
   busy: boolean;
   hardFlag: boolean;
   onTranslate: () => void;
   onAccept: () => void;
-  onSkip: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 mt-1">
@@ -1219,18 +1344,6 @@ function ActionBar({
         <CheckIcon size={11} />
         Accept
         <KbdChip>⌘↵</KbdChip>
-      </button>
-      <button
-        type="button"
-        onClick={onSkip}
-        className={cn(
-          "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium",
-          "text-fg-secondary hover:bg-bg-hover hover:text-fg-primary transition-colors duration-100",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-        )}
-      >
-        Skip
-        <KbdChip>⌘→</KbdChip>
       </button>
     </div>
   );
@@ -1436,6 +1549,25 @@ function ListIcon({ size = 11 }: { size?: number }) {
       <line x1={3} x2={3.01} y1={6} y2={6} />
       <line x1={3} x2={3.01} y1={12} y2={12} />
       <line x1={3} x2={3.01} y1={18} y2={18} />
+    </svg>
+  );
+}
+
+function PencilIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
     </svg>
   );
 }

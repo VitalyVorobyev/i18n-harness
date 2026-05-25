@@ -1075,11 +1075,10 @@ export function App() {
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Workspace sidebar — rendered only for views without their own
             left rail. Translate (Matrix/Focus), Glossary (master-detail
-            rail), and Review (sub-tab + side-nav) provide their own
-            navigation and would render two stacked rails otherwise. */}
-        {(projectView === "overview" ||
-          projectView === "settings" ||
-          projectView === "quality") && (
+            rail), Settings (long-form), and Review (sub-tab + side-nav)
+            provide their own navigation and would render two stacked
+            rails otherwise. */}
+        {(projectView === "overview" || projectView === "quality") && (
           <ProjectSidebar
             summary={summary}
             activeCatalogPath={activeCatalogPath}

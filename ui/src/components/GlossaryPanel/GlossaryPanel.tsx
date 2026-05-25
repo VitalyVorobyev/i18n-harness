@@ -199,8 +199,8 @@ function GlossaryEditor({
   );
 
   const filteredTerms = useMemo(
-    () => buildFilteredTerms(payload.terms, search, viewFilter),
-    [payload.terms, search, viewFilter],
+    () => buildFilteredTerms(payload.terms, search, viewFilter, allLocaleIds),
+    [payload.terms, search, viewFilter, allLocaleIds],
   );
 
   // Clamp selectedIndex when filter shrinks the list
@@ -1998,6 +1998,7 @@ function buildFilteredTerms(
   terms: TermEntry[],
   search: string,
   view: ViewFilter,
+  allLocaleIds: string[],
 ): FilteredTerm[] {
   const lower = search.trim().toLowerCase();
 
@@ -2008,11 +2009,12 @@ function buildFilteredTerms(
       if (view === "dnt" && !entry.do_not_translate) return false;
       if (view === "missing") {
         if (entry.do_not_translate) return false;
-        const hasEmptyTranslation = Object.values(entry.translations).some(
-          (v) => !v,
-        );
-        const hasNoTranslations = Object.keys(entry.translations).length === 0;
-        if (!hasEmptyTranslation && !hasNoTranslations) return false;
+        // Match the count predicate exactly: a term is "missing" when any
+        // project locale lacks a translation. Iterating over project
+        // locales (rather than the term's own translation keys) catches
+        // the "key never set" case the count includes.
+        const missingAny = allLocaleIds.some((id) => !entry.translations[id]);
+        if (!missingAny) return false;
       }
       // Text search
       if (lower) {

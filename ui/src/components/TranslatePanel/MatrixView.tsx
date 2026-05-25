@@ -3,17 +3,16 @@
 // 3-pane (CatalogList + UnitEditor + Inspector) inline layout — the 3-pane
 // components live on as Focus-mode fallback in TranslatePanel.
 //
-// Data shape: the project carries N per-locale catalogs sharing a stem
-// (e.g. app_de.ts, app_es.ts share stem "app"). We auto-load every catalog
-// into the openCatalogs cache on mount, then group units by
-// (catalog_stem, unit_id) so one card stitches together its per-locale
-// cells.
+// Data shape: we auto-load every per-locale catalog into the openCatalogs
+// cache on mount, then pivot units by `unit.id` so one card stitches
+// together its per-locale cells. Cross-catalog grouping is keyed purely on
+// the unit id — see deriveMatrix below for why that's the only honest
+// model.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import type {
   BatchScope,
-  CatalogRef,
   CatalogResponse,
   GateReport,
   ProjectSummary,
@@ -40,6 +39,30 @@ export type MatrixFilter =
   | "all-open"
   | "has-hard-flag"
   | "proposed-by-model";
+
+// ── Inspector collapse persistence ────────────────────────────────────────
+//
+// Shared with FocusView via the same localStorage key so the user's
+// preference is consistent across modes. View-only preference; does not
+// belong in the project manifest.
+
+const INSPECTOR_COLLAPSED_KEY = "inspector-collapsed";
+
+function readInspectorCollapsed(): boolean {
+  try {
+    return localStorage.getItem(INSPECTOR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeInspectorCollapsed(value: boolean): void {
+  try {
+    localStorage.setItem(INSPECTOR_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    // localStorage unavailable; skip persistence silently.
+  }
+}
 
 interface Props {
   summary: ProjectSummary;
@@ -72,13 +95,19 @@ interface Props {
 
 // ── Matrix-row data model ────────────────────────────────────────────────
 //
-// One row keys on (stem, unit_id). `unitByLocale` maps a project locale to
-// its Unit when the locale's catalog is loaded; missing entries render as
-// the "loading…" cell.
+// One row keys on `unit.id` across every loaded catalog in the project.
+// `byLocale` maps a project locale to its Unit when the locale's catalog
+// is loaded; missing entries render as the "loading…" cell.
+//
+// Earlier iterations stripped a `_<locale>` filename suffix to compute a
+// per-module stem; that broke immediately when filenames used short codes
+// (`app_de.ts`) while locale ids were full (`de_DE`). Pivoting purely by
+// unit id is correct for the typical single-module project and right-by-
+// construction for multi-module ones too (different modules don't share
+// unit ids).
 
 interface MatrixRow {
   rowKey: string;
-  stem: string;
   unitId: UnitId;
   /** Source string — taken from the first loaded locale (all per-locale
    *  catalogs share the same source for a given unit). */
@@ -89,32 +118,17 @@ interface MatrixRow {
   byLocale: Map<string, { unit: Unit; catalogPath: string }>;
 }
 
-// Strip the trailing `_<locale>` segment from a basename to compute the
-// stem. Mirrors the App.tsx helper but kept local: that helper is private.
-function stemOf(ref: CatalogRef): string {
-  const basename =
-    (ref.manifest_path || ref.absolute_path)
-      .replace(/\\/g, "/")
-      .split("/")
-      .pop() ?? "";
-  const noExt = basename.replace(/\.[^.]+$/, "");
-  const escaped = ref.locale.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return noExt.replace(new RegExp(`_${escaped}$`, "i"), "");
-}
-
-function deriveMatrix(
+export function deriveMatrix(
   summary: ProjectSummary,
   openCatalogs: Map<string, CatalogResponse>,
 ): MatrixRow[] {
-  const groups = new Map<string, MatrixRow>();
+  const rows = new Map<UnitId, MatrixRow>();
 
   for (const ref of summary.catalogs) {
-    const stem = stemOf(ref);
     const cached = openCatalogs.get(ref.absolute_path);
     if (!cached) continue;
     for (const unit of cached.units) {
-      const rowKey = `${stem}::${unit.id}`;
-      const existing = groups.get(rowKey);
+      const existing = rows.get(unit.id);
       if (existing) {
         existing.byLocale.set(ref.locale, {
           unit,
@@ -125,9 +139,8 @@ function deriveMatrix(
       const placeholders = Array.isArray(unit.placeholders)
         ? unit.placeholders.length
         : 0;
-      const row: MatrixRow = {
-        rowKey,
-        stem,
+      rows.set(unit.id, {
+        rowKey: unit.id,
         unitId: unit.id,
         source: unit.source,
         isPlural: unit.plural_arity != null,
@@ -135,16 +148,13 @@ function deriveMatrix(
         byLocale: new Map([
           [ref.locale, { unit, catalogPath: ref.absolute_path }],
         ]),
-      };
-      groups.set(rowKey, row);
+      });
     }
   }
 
-  return Array.from(groups.values()).sort((a, b) => {
-    const stemCmp = a.stem.localeCompare(b.stem);
-    if (stemCmp !== 0) return stemCmp;
-    return a.unitId.localeCompare(b.unitId);
-  });
+  return Array.from(rows.values()).sort((a, b) =>
+    a.unitId.localeCompare(b.unitId),
+  );
 }
 
 // Filter predicate over a materialised MatrixRow.
@@ -338,6 +348,20 @@ export function MatrixView({
     rowKey: string;
     locale: string;
   } | null>(null);
+
+  // Inspector collapse state — persisted to localStorage so the user's
+  // choice survives sub-tab switches and reloads (view preference only,
+  // does not belong in the project manifest).
+  const [inspectorCollapsed, setInspectorCollapsed] = useState<boolean>(() =>
+    readInspectorCollapsed(),
+  );
+  const toggleInspector = useCallback(() => {
+    setInspectorCollapsed((prev) => {
+      const next = !prev;
+      writeInspectorCollapsed(next);
+      return next;
+    });
+  }, []);
 
   // ── Derived matrix + filtered rows ──────────────────────────────────────
 
@@ -761,6 +785,8 @@ export function MatrixView({
               activeCatalogPath={focusedEntry.catalogPath}
               busyIds={busyIds}
               onAccept={onInspectorAccept}
+              collapsed={inspectorCollapsed}
+              onToggleCollapsed={toggleInspector}
             />
           )}
         </div>
