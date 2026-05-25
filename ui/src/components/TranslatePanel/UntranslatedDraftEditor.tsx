@@ -11,7 +11,7 @@
 //     ProposedBody's behaviour in MatrixCell; full plural editing lives
 //     in Focus mode's PluralEditor).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { usePendingCommits } from "../../lib/pending-commits";
 import type { TargetEdit, Unit } from "../../lib/types";
@@ -80,7 +80,7 @@ export function UntranslatedDraftEditor({
   // draft so multi-line translations stay visible without manual resize.
   // The minimum (~2/4 rows) is enforced by `rows`; we only ever grow.
   // biome-ignore lint/correctness/useExhaustiveDependencies: dom resize needs to fire after each draft change
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";

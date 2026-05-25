@@ -6,7 +6,7 @@
 // purely controlled — it dispatches IPC callbacks the container provides
 // and re-renders when the unit shape on disk changes.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { usePendingCommits } from "../../lib/pending-commits";
 import type { TargetEdit, Unit } from "../../lib/types";
@@ -232,7 +232,7 @@ function ProposedBody({
   // Auto-grow on content: keep the textarea tall enough for the current
   // draft so multi-line translations stay visible without manual resize.
   // biome-ignore lint/correctness/useExhaustiveDependencies: dom resize needs to fire after each draft change
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
