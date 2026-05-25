@@ -11,9 +11,14 @@ mod backing;
 mod cancellation;
 mod error;
 mod jobs;
+mod state;
+
+pub use state::AppState;
+pub(crate) use state::{OpenCatalog, OpenCatalogEntry};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "ollama")]
 use std::sync::Mutex;
 
 use i18n_harness_adapter_qt::Catalog;
@@ -30,67 +35,6 @@ use i18n_harness_project::{
     PromptsConfig,
 };
 use serde::{Deserialize, Serialize};
-
-/// Process-wide state shared across Tauri commands.
-///
-/// One catalog is open at a time — opening a new one replaces the
-/// previous, so memory does not grow unbounded across opens. The
-/// catalog carries the preserved source bytes needed for byte-stable
-/// round-trip on save, so it lives here rather than crossing the IPC
-/// bridge on every command.
-///
-/// The glossary slot is populated by `load_glossary` or, in M4.2a, as a
-/// side effect of `open_project` when the project declares one. Once set,
-/// it is threaded into every `translate_unit` call so MT proposals respect
-/// project glossary terms.
-///
-/// The project slot (M4.2a) holds the currently-open project. It coexists
-/// with the file-centric catalog slot: opening a project doesn't auto-open
-/// any catalog, and opening a stand-alone catalog leaves the project slot
-/// untouched.
-///
-/// The `project_catalogs` slot (M4.2b) is the multi-catalog dirty store
-/// used when working in project mode. It is keyed by absolute path and
-/// populated by `open_catalog_in_project`. The two stores — `catalog`
-/// (singular, file-centric) and `project_catalogs` (multi, project-scoped)
-/// — are independent. Closing a project clears both.
-#[derive(Default)]
-pub struct AppState {
-    catalog: Mutex<Option<OpenCatalog>>,
-    glossary: Mutex<Option<Glossary>>,
-    project: Mutex<Option<Project>>,
-    project_catalogs: Mutex<std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
-    /// In-process registry of cancellable background jobs (M4.2c.2).
-    /// Each `translate_batch_in_project` call registers a new entry; the
-    /// worker thread deregisters on exit. Per-catalog/per-locale
-    /// exclusion is enforced at the command level via `active_batches`.
-    jobs: jobs::JobRegistry,
-    /// `(absolute catalog path, locale id)` pairs that have a bulk
-    /// translate in flight (M4.2c.2). Inserted by
-    /// `translate_batch_in_project` before spawning the worker, removed
-    /// by the worker's exit path. The pair is the granularity we refuse
-    /// concurrent runs on — two workers writing to the same catalog
-    /// would race on the merge step.
-    active_batches: Mutex<std::collections::BTreeSet<(PathBuf, String)>>,
-}
-
-/// An entry in the project-scoped multi-catalog store.
-///
-/// The `catalog` is the format-erased [`BackingCatalog`] enum so the store
-/// can hold Qt and PO (and eventually ICU-JSON) catalogs uniformly. Every
-/// command that reads units, finds a unit by id, or saves back to disk
-/// goes through the enum's delegating helpers.
-struct OpenCatalogEntry {
-    catalog: BackingCatalog,
-    dirty: bool,
-}
-
-/// The currently-open catalog plus the absolute path it was loaded
-/// from. The path is the frontend's handle.
-struct OpenCatalog {
-    path: PathBuf,
-    catalog: Catalog,
-}
 
 /// Wire-format response from the `open_catalog` Tauri command.
 #[derive(Debug, Serialize)]
