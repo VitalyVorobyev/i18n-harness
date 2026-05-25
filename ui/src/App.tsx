@@ -8,7 +8,7 @@ import { OverviewPanel } from "./components/OverviewPanel/OverviewPanel";
 import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
 import { QualityPanel } from "./components/QualityPanel/QualityPanel";
-import { ReviewQueue } from "./components/ReviewQueue/ReviewQueue";
+import { ReviewPanel } from "./components/ReviewPanel";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
 import type { MatrixFilter } from "./components/TranslatePanel";
@@ -1190,22 +1190,28 @@ export function App() {
             />
           </div>
 
-          {/* Review queue view — M4.7 */}
+          {/* Review panel — Queue + Proofread sub-tabs */}
           <div
             className={
               projectView === "review" ? "flex-1 flex min-h-0" : "hidden"
             }
           >
-            {reviewQueue ? (
-              <ReviewQueue
-                reviewQueue={reviewQueue}
-                onOpenItem={onOpenReviewQueueItem}
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary">
-                <p>Loading review queue…</p>
-              </div>
-            )}
+            <ReviewPanel
+              summary={summary}
+              openCatalogs={openCatalogs}
+              reports={reports}
+              reviewQueue={reviewQueue}
+              onOpenItem={onOpenReviewQueueItem}
+              onNavigateToUnit={async (catalogPath, unitId, locale) => {
+                await handleCatalogSelect(catalogPath);
+                setSelectedId(unitId);
+                if (locale) {
+                  setFocusLocale(locale);
+                }
+                setProjectView("translate");
+              }}
+              onOpenHardFlags={() => setProjectView("review")}
+            />
           </div>
         </div>
       </div>

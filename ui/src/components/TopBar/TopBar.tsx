@@ -351,8 +351,8 @@ export function ProjectTopBar({
           onClick={() => onViewChange("review")}
           aria-label={
             reviewQueueCount > 0
-              ? `Review queue — ${reviewQueueCount} units need review`
-              : "Review queue"
+              ? `Review — ${reviewQueueCount} units need review`
+              : "Review"
           }
           badge={reviewQueueCount > 0 ? reviewQueueCount : undefined}
         >
