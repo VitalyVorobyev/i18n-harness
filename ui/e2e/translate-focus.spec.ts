@@ -233,17 +233,21 @@ test.describe("Translate — Focus mode", () => {
     await enterFocusMode(page, "de_DE");
     await page.waitForTimeout(500);
 
-    // Press J to move to the next row.
+    // Press J to move to the next row, then K to move back up. After fix 4
+    // the active row should scroll into view; we assert on the
+    // data-focus-row-idx attribute that the scroll-into-view effect uses,
+    // which is also our signal that the keyboard handler is wired.
     await page.keyboard.press("j");
     await page.waitForTimeout(200);
-    // K to move back up.
     await page.keyboard.press("k");
     await page.waitForTimeout(200);
 
-    // If the focus list exists, the selected row should change.
-    // We cannot assert exact row IDs without querying the DOM deeply,
-    // so we just verify no crash occurred and the panel is still visible.
-    await expect(page.getByText(/focused on/i)).toBeVisible();
+    // The focus rows must still be in the DOM after keyboard nav.
+    const firstRow = page.locator('[data-focus-row-idx="0"]');
+    await expect(firstRow).toBeVisible();
+    // And the selected row's aria-selected should be true on row 0 after
+    // J then K returns to the starting position.
+    await expect(firstRow).toHaveAttribute("aria-selected", "true");
   });
 
   // Regression: the catalog must be loaded before focus mode is usable.
@@ -251,8 +255,13 @@ test.describe("Translate — Focus mode", () => {
     await enterFocusMode(page, "de_DE");
     await page.waitForTimeout(500);
 
-    // The de_DE catalog has "Speichern" as the finished translation for "Save".
-    await expect(page.getByText("Speichern")).toBeVisible({ timeout: 5000 });
+    // The de_DE catalog has "Speichern" as the finished translation for
+    // "Save". Multiple copies of the string exist in the DOM; anchor to
+    // a FocusRow (data-focus-row-idx) so the hidden-matrix/sidebar
+    // copies don't satisfy the assertion.
+    await expect(
+      page.locator("[data-focus-row-idx]").getByText("Speichern").first(),
+    ).toBeVisible({ timeout: 5000 });
   });
 
   // Regression for the catalog path association bug.

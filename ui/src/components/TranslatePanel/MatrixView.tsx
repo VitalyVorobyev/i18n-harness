@@ -866,6 +866,7 @@ function LocaleRowButton({
       type="button"
       onClick={onSelect}
       title={`Focus on ${stat.locale}`}
+      aria-label={`Focus on ${stat.locale}`}
       className={cn(
         "w-full flex flex-col gap-1.5 px-2.5 py-1.5 rounded-md",
         "transition-colors duration-100 ease-out",

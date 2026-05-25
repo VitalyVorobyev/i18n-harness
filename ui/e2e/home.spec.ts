@@ -6,8 +6,10 @@ test.describe("Home screen", () => {
   test("renders the identity block and action buttons", async ({ page }) => {
     await page.goto("/");
 
-    // The app name appears in the header/identity block.
-    await expect(page.getByText("i18n-harness")).toBeVisible();
+    // The app name appears in the header/identity block (h1).
+    await expect(
+      page.getByRole("heading", { name: "i18n-harness", level: 1 }),
+    ).toBeVisible();
 
     // At least one "Open" button is visible.
     await expect(
@@ -40,6 +42,10 @@ test.describe("Home screen", () => {
     await page.goto("/");
     await openSampleProject(page);
 
-    await expect(page.getByText("sample-project")).toBeVisible();
+    // The project name shows up in many places after opening; assert on the
+    // banner copy specifically (visible in every tab as the top-bar label).
+    await expect(
+      page.getByRole("banner").getByText("sample-project"),
+    ).toBeVisible();
   });
 });

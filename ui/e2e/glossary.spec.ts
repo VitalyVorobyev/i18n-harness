@@ -25,10 +25,15 @@ test.describe("Glossary editor", () => {
   test("the glossary panel loads and shows 3 terms", async ({ page }) => {
     await openGlossary(page);
 
-    // The term list should show all 3 terms.
-    await expect(page.getByText("Save").first()).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText("Cancel").first()).toBeVisible();
-    await expect(page.getByText("Theme").first()).toBeVisible();
+    // Anchor to the glossary's listbox (aria-label="Terms") so the
+    // matrix panel's hidden-but-DOM-present "Save"/"Cancel"/"Theme"
+    // source-text rows don't satisfy the assertion.
+    const terms = page.getByRole("listbox", { name: /terms/i });
+    await expect(terms.getByText("Save", { exact: true })).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(terms.getByText("Cancel", { exact: true })).toBeVisible();
+    await expect(terms.getByText("Theme", { exact: true })).toBeVisible();
   });
 
   test("the 'Missing translation' filter chip shows count 3", async ({

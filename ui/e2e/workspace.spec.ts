@@ -108,10 +108,9 @@ test.describe("Workspace sidebar visibility", () => {
   // It should be absent in translate, glossary, review views.
 
   test("sidebar is visible in Overview", async ({ page }) => {
-    // Overview is the default tab — sidebar should be present.
-    // The sidebar has a known element — the "Review queue" or catalog list.
-    // We'll check for a nav/aside landmark that the sidebar renders.
-    const sidebar = page.locator("nav, aside").first();
+    // Overview is the default tab — sidebar should be present. Multiple
+    // tabpanels stay mounted (display: none), so filter to the visible aside.
+    const sidebar = page.locator("nav:visible, aside:visible").first();
     await expect(sidebar).toBeVisible();
   });
 
@@ -149,15 +148,18 @@ test.describe("Workspace sidebar visibility", () => {
     await expect(sidebarCatalogHeading).not.toBeVisible();
   });
 
-  test("sidebar is visible in Settings", async ({ page }) => {
+  test("sidebar is hidden in Settings", async ({ page }) => {
     await page
       .getByRole("tablist", { name: /project view/i })
       .getByRole("tab", { name: /settings/i })
       .click();
 
-    // Settings keeps the sidebar, so a nav/aside should be present.
-    const sidebar = page.locator("nav, aside").first();
-    await expect(sidebar).toBeVisible();
+    // Per App.tsx — the global ProjectSidebar is intentionally rendered
+    // only for Overview and Quality views. Settings has long-form content
+    // and a Catalogs *card* (different element). Anchor on the
+    // sidebar's aria-label so the in-page "Catalogs" card doesn't
+    // accidentally satisfy the assertion.
+    await expect(page.getByLabel("Project sidebar")).not.toBeVisible();
   });
 
   test("sidebar is visible in Quality", async ({ page }) => {
@@ -166,7 +168,7 @@ test.describe("Workspace sidebar visibility", () => {
       .getByRole("tab", { name: /quality/i })
       .click();
 
-    const sidebar = page.locator("nav, aside").first();
+    const sidebar = page.locator("nav:visible, aside:visible").first();
     await expect(sidebar).toBeVisible();
   });
 });
