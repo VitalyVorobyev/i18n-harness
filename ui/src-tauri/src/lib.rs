@@ -7,8 +7,11 @@
 //! JavaScript layer. No business logic that does not fit on a single
 //! screen of glue belongs here.
 
+mod cancellation;
+mod jobs;
+
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use i18n_harness_adapter_qt::Catalog;
@@ -53,6 +56,18 @@ pub struct AppState {
     glossary: Mutex<Option<Glossary>>,
     project: Mutex<Option<Project>>,
     project_catalogs: Mutex<std::collections::BTreeMap<PathBuf, OpenCatalogEntry>>,
+    /// In-process registry of cancellable background jobs (M4.2c.2).
+    /// Each `translate_batch_in_project` call registers a new entry; the
+    /// worker thread deregisters on exit. Per-catalog/per-locale
+    /// exclusion is enforced at the command level via `active_batches`.
+    jobs: jobs::JobRegistry,
+    /// `(absolute catalog path, locale id)` pairs that have a bulk
+    /// translate in flight (M4.2c.2). Inserted by
+    /// `translate_batch_in_project` before spawning the worker, removed
+    /// by the worker's exit path. The pair is the granularity we refuse
+    /// concurrent runs on — two workers writing to the same catalog
+    /// would race on the merge step.
+    active_batches: Mutex<std::collections::BTreeSet<(PathBuf, String)>>,
 }
 
 /// An entry in the project-scoped multi-catalog store.
@@ -1274,73 +1289,156 @@ fn translate_unit_in_project(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<TranslateResult, String> {
-    use i18n_harness_backend::{
-        FailureKind, OllamaBackend, TranslationBackend, TranslationOutcome,
-    };
-    use i18n_harness_core::{Batch, BatchKey, FlagSet, ReviewStatus};
-    use i18n_harness_project::BackendKind;
+    use i18n_harness_backend::{OllamaBackend, TranslationBackend};
 
     let abs = PathBuf::from(&catalog_path);
-
-    // Resolve locale and backend config from the project slot first.
-    let (locale, glossary) = {
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
-        let project = project_guard.as_ref().ok_or_else(no_project)?;
-
-        // Find the catalog in the project to determine the locale id.
-        let catalog_ref = project
-            .catalog(&abs)
-            .ok_or_else(|| "catalog not open in project".to_string())?;
-        let locale_id = &catalog_ref.locale;
-
-        // Three-layer locale merge; fall back to workspace-only if the
-        // project doesn't declare this locale id (defensive, not the common path).
-        let locale = project
-            .locale(locale_id)
-            .map(|r| r.workspace_locale())
-            .or_else(|| Locale::by_id(locale_id))
-            .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
-
-        // Validate the backend config: if the project declares a non-Ollama
-        // backend, we refuse rather than silently falling back.
-        if let Some(backend_cfg) = &project.manifest().backends.default {
-            if backend_cfg.kind != BackendKind::Ollama {
-                return Err(format!(
-                    "backend kind {:?} not supported yet",
-                    backend_cfg.kind,
-                ));
-            }
-        }
-
-        let glossary = project.glossary().cloned();
-        (locale, glossary)
-    };
-
-    let mut store = state
-        .project_catalogs
-        .lock()
-        .map_err(project_catalogs_lock_poisoned)?;
-    let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
-
     let id = UnitId::from(unit_id);
-    let original = entry
-        .catalog
-        .find_unit_mut(&id)
-        .ok_or_else(|| format!("unit not found: {id}"))?
-        .clone();
-    if !original.state.is_writable() {
-        return Err(format!(
-            "unit {id} is {state:?} — not translatable",
-            state = original.state,
-        ));
-    }
 
-    let batch = Batch::new(BatchKey::new("ui", 0), vec![original.clone()]);
+    let (locale, glossary) = resolve_project_translate_context(&state, &abs)?;
     let backend =
         OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
     let backend_name = backend.name().to_string();
+
+    translate_one(
+        &state.project_catalogs,
+        &state.project,
+        &abs,
+        &id,
+        &backend,
+        &backend_name,
+        locale,
+        glossary.as_ref(),
+    )
+}
+
+/// Resolve `(locale, glossary)` for a project-routed translate command.
+///
+/// Holds the project lock for as short a window as possible: enough to look up
+/// the catalog's declared locale, merge it with the project's locale config,
+/// validate the declared backend kind, and clone the glossary. Drops the lock
+/// before returning. The result is used both by the single-unit translate
+/// command and by the bulk-translate worker (M4.2c.2), so the locale/glossary
+/// view stays consistent across the two paths.
+///
+/// Returns the workspace-resolved [`Locale`] (a `&'static` reference held by
+/// the `locales` crate, so it crosses the lock boundary trivially) and an
+/// owned [`Glossary`] clone.
+///
+/// # Errors
+///
+/// - `"no project open"` if the project slot is empty.
+/// - `"catalog not open in project"` if `abs` is not declared in the project
+///   manifest.
+/// - `"unknown locale ..."` if neither the project nor the workspace knows the
+///   locale id.
+/// - `"backend kind ... not supported yet"` if the project declares a non-Ollama
+///   backend (we refuse rather than silently falling back).
+#[cfg(feature = "ollama")]
+fn resolve_project_translate_context(
+    state: &tauri::State<'_, AppState>,
+    abs: &Path,
+) -> Result<(&'static Locale, Option<Glossary>), String> {
+    use i18n_harness_project::BackendKind;
+
+    let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+    let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+    let catalog_ref = project
+        .catalog(abs)
+        .ok_or_else(|| "catalog not open in project".to_string())?;
+    let locale_id = &catalog_ref.locale;
+
+    // Three-layer locale merge; fall back to workspace-only if the project
+    // doesn't declare this locale id (defensive, not the common path).
+    let locale = project
+        .locale(locale_id)
+        .map(|r| r.workspace_locale())
+        .or_else(|| Locale::by_id(locale_id))
+        .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
+
+    if let Some(backend_cfg) = &project.manifest().backends.default {
+        if backend_cfg.kind != BackendKind::Ollama {
+            return Err(format!(
+                "backend kind {:?} not supported yet",
+                backend_cfg.kind,
+            ));
+        }
+    }
+
+    let glossary = project.glossary().cloned();
+    Ok((locale, glossary))
+}
+
+/// Translate one project-stored unit: read it from the catalog store, call the
+/// backend (releasing the catalog lock for the network round-trip), merge the
+/// outcome back, optionally mark the unit `NeedsReview` and append a durable
+/// review event.
+///
+/// This is the shared body of both `translate_unit_in_project` (single click)
+/// and the per-iteration step of `translate_batch_in_project` (M4.2c.2); the
+/// two paths must agree on flag merging, state transitions, review-status
+/// side effects, and lock ordering, so they live in one place.
+///
+/// # Lock ordering
+///
+/// 1. Acquire `project_catalogs` briefly to clone the source unit; drop.
+/// 2. Run the backend call with **no locks held** (network latency must not
+///    serialise other Tauri commands).
+/// 3. Re-acquire `project_catalogs` to merge the outcome and set `dirty`; drop.
+/// 4. If the LLM attached at least one semantic flag, acquire `project` to
+///    append a `NeedsReview` event via `set_review_status`.
+///
+/// # Failure routing
+///
+/// - `TranslationOutcome::Translated` → merge text, flags, confidence, notes;
+///   set `UnitState::Proposed`; optionally set `ReviewStatus::NeedsReview`.
+/// - `TranslationOutcome::Skipped` → propagate as `Err("backend skipped: ...")`.
+/// - `TranslationOutcome::Failed { MalformedResponse, .. }` → return `Ok` with
+///   the original unit and a synthesized `GateReport::backend_malformed_response`.
+///   The Inspector renders this inline; no catalog state changes.
+/// - `TranslationOutcome::Failed { .. }` → propagate as `Err("backend failed: ...")`.
+#[cfg(feature = "ollama")]
+#[allow(clippy::too_many_arguments)]
+fn translate_one(
+    project_catalogs: &Mutex<BTreeMap<PathBuf, OpenCatalogEntry>>,
+    project: &Mutex<Option<Project>>,
+    abs: &Path,
+    id: &UnitId,
+    backend: &i18n_harness_backend::OllamaBackend,
+    backend_name: &str,
+    locale: &Locale,
+    glossary: Option<&Glossary>,
+) -> Result<TranslateResult, String> {
+    use i18n_harness_backend::{FailureKind, TranslationBackend, TranslationOutcome};
+    use i18n_harness_core::{Batch, BatchKey, FlagSet, ReviewStatus};
+
+    // 1. Snapshot the source unit under a brief lock, then drop the lock so
+    //    the network call does not hold up other commands.
+    let original = {
+        let store = project_catalogs
+            .lock()
+            .map_err(project_catalogs_lock_poisoned)?;
+        let entry = store.get(abs).ok_or_else(no_catalog_in_project)?;
+        let unit = entry
+            .catalog
+            .units()
+            .iter()
+            .find(|u| u.id == *id)
+            .ok_or_else(|| format!("unit not found: {id}"))?
+            .clone();
+        if !unit.state.is_writable() {
+            return Err(format!(
+                "unit {id} is {state:?} — not translatable",
+                state = unit.state,
+            ));
+        }
+        unit
+    };
+
+    // 2. Network round-trip with no locks held.
+    let batch = Batch::new(BatchKey::new("ui", 0), vec![original.clone()]);
     let outcomes = backend
-        .translate_batch(&batch, locale, glossary.as_ref())
+        .translate_batch(&batch, locale, glossary)
         .map_err(|e| format!("backend `{backend_name}` failed: {e}"))?;
     let outcome = outcomes
         .into_iter()
@@ -1364,9 +1462,7 @@ fn translate_unit_in_project(
                 },
             };
             // M4.3a.1: translate always lands as Proposed; the human
-            // explicitly promotes to Finished via save/accept. Auto-
-            // promoting hid model output behind a "done" badge before
-            // the translator could review.
+            // explicitly promotes to Finished via save/accept.
             merged.state = UnitState::Proposed;
             let mut flagset = FlagSet::new();
             for f in flags {
@@ -1384,11 +1480,9 @@ fn translate_unit_in_project(
             failure_kind: FailureKind::MalformedResponse,
             ..
         } => {
-            // Surface as an inline hard gate finding rather than an Err
-            // so the Inspector renders it next to the unit and the user
-            // can investigate the prompt. We leave the unit unchanged
-            // (no target write, no flag merge, no review-status update)
-            // and the catalog stays clean for this slot.
+            // Surface as an inline hard gate finding so the Inspector renders
+            // it next to the unit and the user can investigate the prompt.
+            // No catalog state changes, no review event.
             let report = GateReport::backend_malformed_response(original.id.clone(), reason);
             return Ok(TranslateResult {
                 unit: original,
@@ -1405,36 +1499,32 @@ fn translate_unit_in_project(
     // M4.6.1: flagged units land in the review queue automatically. Set
     // `merged.review_status` on the in-memory unit BEFORE writing to the
     // catalog slot and BEFORE returning, so the UI sees the queued state
-    // immediately rather than only after the next review-map fold. The
-    // durable `review.jsonl` append happens after we drop the
-    // project_catalogs lock, to keep the lock-ordering convention
-    // (project before project_catalogs is the convention; we already
-    // released project before acquiring project_catalogs and the durable
-    // write re-takes project after dropping project_catalogs).
+    // immediately rather than only after the next review-map fold.
     let needs_review = !merged.flags.is_empty();
     if needs_review {
         merged.review_status = Some(ReviewStatus::NeedsReview);
     }
 
-    if let Some(slot) = entry.catalog.find_unit_mut(&id) {
-        *slot = merged.clone();
+    // 3. Merge under the catalog lock, then drop.
+    {
+        let mut store = project_catalogs
+            .lock()
+            .map_err(project_catalogs_lock_poisoned)?;
+        let entry = store.get_mut(abs).ok_or_else(no_catalog_in_project)?;
+        if let Some(slot) = entry.catalog.find_unit_mut(id) {
+            *slot = merged.clone();
+        }
+        entry.dirty = true;
     }
-    entry.dirty = true;
 
+    // 4. Durable review-event write (with project lock only).
     if needs_review {
         let source_hash = merged.source_hash.clone().unwrap_or_default();
-        drop(store);
-        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project_guard = project.lock().map_err(project_lock_poisoned)?;
         if let Some(project) = project_guard.as_ref() {
-            // A failure here would leave the in-memory unit reporting
-            // NeedsReview while review.jsonl is unaware of the change.
-            // We surface the error to the caller; the next translate will
-            // recompute and re-attempt. Empty-flag units never reach this
-            // branch (see `needs_review` above), so the No-op-Save-All
-            // path is unchanged.
             project
                 .set_review_status(
-                    &abs,
+                    abs,
                     &merged.id,
                     Some(ReviewStatus::NeedsReview),
                     source_hash,
@@ -1448,6 +1538,369 @@ fn translate_unit_in_project(
         unit: merged,
         report,
     })
+}
+
+// ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
+
+/// Selection of units to operate on in a bulk-translate run.
+///
+/// Vanished/Obsolete units are always excluded regardless of scope — the
+/// harness must never overwrite catalog entries the source no longer
+/// references. `Finished` units are also always excluded; a "re-translate
+/// everything including human-accepted" variant is a meaningful policy
+/// decision that belongs to the M4.8 UI design, not this primitive, and
+/// would require pre-demoting Finished → Proposed to honour
+/// [`UnitState::is_writable`]. Adding a new scope variant later is
+/// backward-compatible.
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub enum BatchScope {
+    /// Only units whose state is `Untranslated` — fill in the gaps.
+    Untranslated,
+    /// `Untranslated` plus `Proposed` — re-translate everything not yet
+    /// human-confirmed.
+    UntranslatedAndProposed,
+}
+
+/// Started-bulk-translate response, returned immediately after the worker
+/// thread is spawned. The frontend uses `job_id` for the follow-up
+/// `cancel_translation` call and to subscribe to `batch-progress-<id>` /
+/// `batch-completed-<id>` / `batch-failed-<id>` Tauri events.
+#[derive(Debug, Serialize, Clone)]
+pub struct TranslateBatchStarted {
+    /// Opaque process-unique job id (UUID v4 hex, no hyphens).
+    pub job_id: String,
+    /// Number of units the worker will attempt at start time. The catalog
+    /// state could change while the worker runs (a human edit promoting a
+    /// unit out of scope, say), but the total in the progress events is
+    /// pinned to this number — partial completion is reported as
+    /// `completed / total`.
+    pub total: usize,
+}
+
+/// Per-unit progress event payload, emitted as `batch-progress-<job_id>` after
+/// each completed network round-trip.
+#[derive(Debug, Serialize, Clone)]
+pub struct BatchProgressPayload {
+    /// Units processed so far (1-indexed: the first emit has `completed = 1`).
+    pub completed: usize,
+    /// Total units the worker started with.
+    pub total: usize,
+    /// The just-translated unit (post-merge). The UI patches this into its
+    /// in-memory cache without an extra round trip.
+    pub unit: Unit,
+    /// Shortcut for the UI: `true` if the gate or LLM attached one or more
+    /// flags. Equivalent to `!unit.flags.is_empty()`; pre-computed so the UI
+    /// doesn't need to inspect the FlagSet.
+    pub flagged: bool,
+}
+
+/// Terminal event payload, emitted exactly once on `batch-completed-<job_id>`
+/// (clean exit or cancelled) or `batch-failed-<job_id>` (hard failure).
+#[derive(Debug, Serialize, Clone)]
+pub struct BatchTerminalPayload {
+    /// Units processed when the worker stopped. For success: equals `total`.
+    /// For cancellation: count of fully-merged units before the cancel was
+    /// observed. For failure: count before the failing unit.
+    pub completed: usize,
+    /// Total units the worker started with.
+    pub total: usize,
+    /// `true` if the worker stopped because cancellation was observed.
+    /// Mutually exclusive with `failed_reason.is_some()`.
+    pub cancelled: bool,
+    /// Hard-failure reason. `None` on clean completion or cancellation;
+    /// `Some` only when a mid-batch backend error stopped the run.
+    pub failed_reason: Option<String>,
+}
+
+/// Start a bulk translation of every in-scope unit in a project-stored catalog.
+///
+/// Resolves locale, glossary, and backend kind exactly like
+/// `translate_unit_in_project`, refuses to start when another bulk run is
+/// already operating on the same `(catalog, locale)` pair, then spawns a
+/// background thread that processes units sequentially and streams progress
+/// via Tauri events. Returns immediately; the worker emits the terminal event
+/// when it exits.
+///
+/// Events emitted (subscribe before the response lands; the worker only starts
+/// once this function returns):
+/// - `batch-progress-<job_id>` after each successful unit, carrying
+///   [`BatchProgressPayload`].
+/// - `batch-completed-<job_id>` once on clean exit OR cancellation, carrying
+///   [`BatchTerminalPayload`] with `cancelled = false` or `cancelled = true`.
+/// - `batch-failed-<job_id>` once on hard mid-batch failure, carrying
+///   [`BatchTerminalPayload`] with `failed_reason = Some(...)`.
+///
+/// # Errors
+///
+/// - `"catalog not open in project"` — call `open_catalog_in_project` first.
+/// - `"unknown locale ..."` / `"backend kind ... not supported yet"` — see
+///   `translate_unit_in_project`.
+/// - `"a translation is already running for this catalog/locale"` — another
+///   `translate_batch_in_project` call is in flight for the same pair. Wait
+///   for it or cancel it first.
+///
+/// Available only when the crate is built with the `ollama` feature.
+#[cfg(feature = "ollama")]
+#[tauri::command]
+fn translate_batch_in_project(
+    catalog_path: String,
+    scope: BatchScope,
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<TranslateBatchStarted, String> {
+    use i18n_harness_backend::{OllamaBackend, TranslationBackend};
+
+    let abs = PathBuf::from(&catalog_path);
+
+    // 1. Resolve locale / glossary / backend kind via the shared helper.
+    let (locale, glossary) = resolve_project_translate_context(&state, &abs)?;
+    let locale_id = locale.id.to_string();
+
+    // 2. Collect the units that match `scope` (and exist in the open catalog
+    //    store). Vanished/Obsolete are always excluded.
+    let unit_ids: Vec<UnitId> = {
+        let store = state
+            .project_catalogs
+            .lock()
+            .map_err(project_catalogs_lock_poisoned)?;
+        let entry = store.get(&abs).ok_or_else(no_catalog_in_project)?;
+        entry
+            .catalog
+            .units()
+            .iter()
+            .filter(|u| unit_matches_scope(u, scope))
+            .map(|u| u.id.clone())
+            .collect()
+    };
+    let total = unit_ids.len();
+
+    // 3. Refuse concurrent bulk runs on the same (catalog, locale) pair.
+    let active_key = (abs.clone(), locale_id.clone());
+    {
+        let mut active = state
+            .active_batches
+            .lock()
+            .map_err(active_batches_lock_poisoned)?;
+        if active.contains(&active_key) {
+            return Err("a translation is already running for this catalog/locale".to_string());
+        }
+        active.insert(active_key.clone());
+    }
+
+    // 4. Construct the backend on the calling thread so config errors surface
+    //    synchronously; if this fails we release the active-key slot before
+    //    returning.
+    let backend = match OllamaBackend::new() {
+        Ok(b) => b,
+        Err(e) => {
+            // Release the active slot we just claimed.
+            if let Ok(mut active) = state.active_batches.lock() {
+                active.remove(&active_key);
+            }
+            return Err(format!("ollama backend construction failed: {e}"));
+        }
+    };
+    let backend_name = backend.name().to_string();
+
+    // 5. Register the job in the cancellation registry.
+    let (job_id, token) = state.jobs.register();
+
+    // 6. Spawn the worker. The worker re-fetches the AppState from the
+    //    AppHandle each time it needs a lock; this keeps the thread free of
+    //    any borrow from `state` (which is bound to the command lifetime).
+    let worker_app = app.clone();
+    let worker_glossary = glossary.clone();
+    let worker_job_id = job_id.clone();
+    let worker_abs = abs.clone();
+    let worker_unit_ids = unit_ids;
+    let worker_active_key = active_key;
+
+    std::thread::Builder::new()
+        .name(format!("translate-batch-{job_id}"))
+        .spawn(move || {
+            run_batch_worker(
+                worker_app,
+                worker_job_id,
+                worker_abs,
+                worker_unit_ids,
+                total,
+                backend,
+                backend_name,
+                locale,
+                worker_glossary,
+                token,
+                worker_active_key,
+            );
+        })
+        .map_err(|e| {
+            // Failed to spawn — undo the registry + active-batches inserts.
+            state.jobs.deregister(&job_id);
+            if let Ok(mut active) = state.active_batches.lock() {
+                active.remove(&(abs.clone(), locale_id.clone()));
+            }
+            format!("failed to spawn translate-batch worker: {e}")
+        })?;
+
+    Ok(TranslateBatchStarted { job_id, total })
+}
+
+/// Predicate for `BatchScope` selection. Vanished/Obsolete and Finished are
+/// always excluded — see `BatchScope` docs.
+#[cfg(feature = "ollama")]
+fn unit_matches_scope(unit: &Unit, scope: BatchScope) -> bool {
+    match (unit.state, scope) {
+        (UnitState::Untranslated, _) => true,
+        (UnitState::Proposed, BatchScope::Untranslated) => false,
+        (UnitState::Proposed, BatchScope::UntranslatedAndProposed) => true,
+        // Vanished / Obsolete / Finished: never.
+        _ => false,
+    }
+}
+
+#[cfg(all(test, feature = "ollama"))]
+mod batch_scope_tests {
+    use super::{BatchScope, unit_matches_scope};
+    use i18n_harness_core::{Unit, UnitState};
+
+    fn unit_in(state: UnitState) -> Unit {
+        let mut u = Unit::untranslated_singular("u1", "source");
+        u.state = state;
+        u
+    }
+
+    #[test]
+    fn vanished_obsolete_and_finished_are_excluded_from_every_scope() {
+        for &state in &[
+            UnitState::Vanished,
+            UnitState::Obsolete,
+            UnitState::Finished,
+        ] {
+            let u = unit_in(state);
+            assert!(!unit_matches_scope(&u, BatchScope::Untranslated));
+            assert!(!unit_matches_scope(&u, BatchScope::UntranslatedAndProposed));
+        }
+    }
+
+    #[test]
+    fn untranslated_matches_every_scope() {
+        let u = unit_in(UnitState::Untranslated);
+        assert!(unit_matches_scope(&u, BatchScope::Untranslated));
+        assert!(unit_matches_scope(&u, BatchScope::UntranslatedAndProposed));
+    }
+
+    #[test]
+    fn proposed_matches_only_proposed_scope() {
+        let u = unit_in(UnitState::Proposed);
+        assert!(!unit_matches_scope(&u, BatchScope::Untranslated));
+        assert!(unit_matches_scope(&u, BatchScope::UntranslatedAndProposed));
+    }
+}
+
+/// Run the per-unit translate loop on a worker thread, emitting Tauri events
+/// for each completed unit and a single terminal event before exiting.
+///
+/// Always deregisters the job and clears the `active_batches` slot before
+/// returning, regardless of outcome. The terminal event is emitted exactly
+/// once.
+#[cfg(feature = "ollama")]
+#[allow(clippy::too_many_arguments)]
+fn run_batch_worker(
+    app: tauri::AppHandle,
+    job_id: String,
+    abs: PathBuf,
+    unit_ids: Vec<UnitId>,
+    total: usize,
+    backend: i18n_harness_backend::OllamaBackend,
+    backend_name: String,
+    locale: &'static Locale,
+    glossary: Option<Glossary>,
+    token: cancellation::CancellationToken,
+    active_key: (PathBuf, String),
+) {
+    use tauri::{Emitter, Manager};
+
+    let state = app.state::<AppState>();
+    let mut completed: usize = 0;
+    let mut terminal: BatchTerminalPayload = BatchTerminalPayload {
+        completed: 0,
+        total,
+        cancelled: false,
+        failed_reason: None,
+    };
+
+    for unit_id in &unit_ids {
+        // Cooperative cancellation check between units. The currently-running
+        // network call (if any) is not interruptible — it runs to completion.
+        if token.is_cancelled() {
+            terminal.cancelled = true;
+            break;
+        }
+
+        match translate_one(
+            &state.project_catalogs,
+            &state.project,
+            &abs,
+            unit_id,
+            &backend,
+            &backend_name,
+            locale,
+            glossary.as_ref(),
+        ) {
+            Ok(result) => {
+                completed += 1;
+                let payload = BatchProgressPayload {
+                    completed,
+                    total,
+                    flagged: !result.unit.flags.is_empty(),
+                    unit: result.unit,
+                };
+                // Event emission can fail if all webviews are gone (app shutting
+                // down); log and keep going. The terminal event will also be a
+                // best-effort send.
+                if let Err(e) = app.emit(&format!("batch-progress-{job_id}"), &payload) {
+                    tracing::warn!(job_id = %job_id, error = %e, "batch-progress emit failed");
+                }
+            }
+            Err(reason) => {
+                terminal.failed_reason = Some(reason);
+                break;
+            }
+        }
+    }
+
+    terminal.completed = completed;
+
+    let event_name = if terminal.failed_reason.is_some() {
+        format!("batch-failed-{job_id}")
+    } else {
+        format!("batch-completed-{job_id}")
+    };
+    if let Err(e) = app.emit(&event_name, &terminal) {
+        tracing::warn!(job_id = %job_id, error = %e, "batch terminal emit failed");
+    }
+
+    // Cleanup: deregister the job and clear the active-batches slot. Always
+    // executed on every exit path.
+    state.jobs.deregister(&job_id);
+    if let Ok(mut active) = state.active_batches.lock() {
+        active.remove(&active_key);
+    }
+}
+
+/// Signal cancellation for an in-flight `translate_batch_in_project` job.
+///
+/// Returns `true` if a job with that id was found (the cancellation flag
+/// is now set; the worker will observe it before its next unit), `false`
+/// if no such job is running. Idempotent: double-cancel is a no-op.
+/// Callers should still wait for the terminal Tauri event — cancellation
+/// is cooperative, so the currently-running unit will complete before the
+/// worker exits.
+///
+/// Available regardless of the `ollama` feature so the UI can always cancel.
+#[tauri::command]
+fn cancel_translation(job_id: String, state: tauri::State<'_, AppState>) -> bool {
+    state.jobs.cancel(&job_id)
 }
 
 /// Record an accepted human edit in the project's `corrections.jsonl`.
@@ -2217,6 +2670,14 @@ fn project_catalogs_lock_poisoned(
     "project_catalogs state lock poisoned".to_string()
 }
 
+fn active_batches_lock_poisoned(
+    _: std::sync::PoisonError<
+        std::sync::MutexGuard<'_, std::collections::BTreeSet<(PathBuf, String)>>,
+    >,
+) -> String {
+    "active_batches state lock poisoned".to_string()
+}
+
 fn no_catalog() -> String {
     "no catalog open".to_string()
 }
@@ -2296,6 +2757,8 @@ pub fn run() {
         list_open_catalogs,
         is_catalog_dirty,
         translate_unit_in_project,
+        translate_batch_in_project,
+        cancel_translation,
         record_correction_in_project,
         list_corrections_in_project,
         promote_correction_to_curated,
@@ -2338,6 +2801,7 @@ pub fn run() {
         discard_changes_in_project,
         list_open_catalogs,
         is_catalog_dirty,
+        cancel_translation,
         record_correction_in_project,
         list_corrections_in_project,
         promote_correction_to_curated,

@@ -243,11 +243,32 @@ Single-shot project-scoped commands over the IPC bridge:
 - `set_review_status_in_project(catalog_path, unit_id, input)` — appends
   a review event to `review.jsonl` and updates the in-memory unit.
 
-#### M4.2c.2 — Bulk translate with cancellation (planned; depends on M4.8 cancellation primitive)
+#### M4.2c.2 — Bulk translate with cancellation ✓ shipped
 
-- `translate_batch(catalog_path, scope, cancel_token)` — streams
-  progress via Tauri events. Deferred until the cancellation primitive
-  design is settled by rust-architect.
+Cancellation primitive + job registry in the Tauri shell. The primitive
+is a sticky one-shot `CancellationToken` (cloneable across threads,
+polled cooperatively between units); the registry is a UUID-keyed map
+of active jobs. Two new Tauri commands wrap them:
+
+- `translate_batch_in_project(catalog_path, scope) -> { job_id, total }` —
+  resolves locale/glossary/backend, claims a per-`(catalog, locale)`
+  exclusion slot, registers a job, and spawns an OS worker thread.
+  Returns synchronously. The worker translates unit-by-unit via the
+  shared `translate_one` helper (released `project_catalogs` lock
+  across the network call), emits `batch-progress-<job_id>` after each
+  unit, and emits exactly one terminal event:
+  `batch-completed-<job_id>` on clean exit OR observed cancellation, or
+  `batch-failed-<job_id>` on mid-batch backend error.
+- `cancel_translation(job_id) -> bool` — sets the cancellation flag for
+  the named job; the worker observes it before its next unit and exits.
+  Feature-agnostic (always available; the no-`ollama` build of the UI
+  cannot start jobs but can cancel them).
+
+Out of scope (deferred to later slices): the bulk-translate UI surface
+(M4.8 will subscribe to these events), `BatchScope::All` re-translating
+Finished units (needs a policy decision on Finished→Proposed demotion),
+parallel network calls (no rate-limiting design yet), and on-disk
+resumability (the registry is in-process only — restart drops the job).
 
 #### M4.2d — Evaluation + tuning bundle (planned, depends on M4.9)
 

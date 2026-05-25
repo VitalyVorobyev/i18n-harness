@@ -70,6 +70,9 @@ time = { version = "0.3", features = ["formatting", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# UUIDs (background-job ids in the Tauri shell).
+uuid = { version = "1", features = ["v4"] }
+
 # Testing
 insta = { version = "1", features = ["json"] }
 proptest = "1"

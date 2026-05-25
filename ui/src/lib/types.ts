@@ -466,3 +466,46 @@ export interface CuratedExample {
   note: string | null;
   correction: Correction | null;
 }
+
+// ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
+
+// BatchScope mirrors ui/src-tauri/src/lib.rs. Kebab-case enum on the wire.
+export type BatchScope = "untranslated" | "untranslated-and-proposed";
+
+// TranslateBatchStarted mirrors ui/src-tauri/src/lib.rs.
+// Returned synchronously from translate_batch_in_project; the worker runs in
+// the background and emits batch-progress / batch-completed / batch-failed
+// events keyed by job_id.
+export interface TranslateBatchStarted {
+  /** Opaque process-unique job id (UUID v4 hex, no hyphens). */
+  job_id: string;
+  /** Number of units the worker will attempt at start time. */
+  total: number;
+}
+
+// BatchProgressPayload mirrors ui/src-tauri/src/lib.rs.
+// Emitted on `batch-progress-<job_id>` after each completed network round-trip.
+export interface BatchProgressPayload {
+  /** Units processed so far (1-indexed). */
+  completed: number;
+  /** Total units the worker started with. */
+  total: number;
+  /** The just-translated unit (post-merge). */
+  unit: Unit;
+  /** True if the gate or LLM attached one or more flags. */
+  flagged: boolean;
+}
+
+// BatchTerminalPayload mirrors ui/src-tauri/src/lib.rs.
+// Emitted exactly once on `batch-completed-<job_id>` (clean or cancelled) or
+// `batch-failed-<job_id>` (mid-batch hard failure).
+export interface BatchTerminalPayload {
+  /** Units processed when the worker stopped. */
+  completed: number;
+  /** Total units the worker started with. */
+  total: number;
+  /** True if the worker observed cancellation. Mutually exclusive with `failed_reason`. */
+  cancelled: boolean;
+  /** Hard-failure reason; null on success / cancellation. */
+  failed_reason: string | null;
+}
