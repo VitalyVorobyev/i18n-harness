@@ -5,7 +5,12 @@
 // function so callers only need to call one function to tear down.
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { BatchProgressPayload, BatchTerminalPayload } from "./types";
+import type {
+  BatchProgressPayload,
+  BatchTerminalPayload,
+  EvaluationProgressPayload,
+  EvaluationTerminalPayload,
+} from "./types";
 
 /**
  * Subscribe to all three batch-event channels for a given job.
@@ -34,6 +39,41 @@ export async function listenBatchProgress(
   );
   const u3 = await listen<BatchTerminalPayload>(`batch-failed-${jobId}`, (e) =>
     onTerminal(e.payload, "failed"),
+  );
+
+  return () => {
+    u1();
+    u2();
+    u3();
+  };
+}
+
+/**
+ * Subscribe to all three evaluation-event channels for a given job.
+ *
+ * Returns a combined unlisten function. Mirrors `listenBatchProgress` in
+ * structure — subscribe BEFORE firing `runEvaluationInProject` to avoid
+ * missing a fast first-example emit.
+ */
+export async function listenEvalProgress(
+  jobId: string,
+  onProgress: (p: EvaluationProgressPayload) => void,
+  onTerminal: (
+    p: EvaluationTerminalPayload,
+    status: "completed" | "failed",
+  ) => void,
+): Promise<UnlistenFn> {
+  const u1 = await listen<EvaluationProgressPayload>(
+    `eval-progress-${jobId}`,
+    (e) => onProgress(e.payload),
+  );
+  const u2 = await listen<EvaluationTerminalPayload>(
+    `eval-completed-${jobId}`,
+    (e) => onTerminal(e.payload, "completed"),
+  );
+  const u3 = await listen<EvaluationTerminalPayload>(
+    `eval-failed-${jobId}`,
+    (e) => onTerminal(e.payload, "failed"),
   );
 
   return () => {

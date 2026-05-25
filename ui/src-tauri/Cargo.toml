@@ -41,6 +41,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+time = { workspace = true }
 
 [lints]
 workspace = true

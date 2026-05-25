@@ -481,36 +481,40 @@ progress, cancel mid-run, and flagged units routed to the review queue.
 Backend job system in Rust (channel + cancellation token); Tauri events
 stream progress to the UI. No cross-catalog runs in v1.
 
-### M4.9 — Quality tab + in-app prompt evaluation
+### M4.9 — Quality tab + in-app prompt evaluation ✓ shipped
 
-Replaces today's Metrics tab. Per-project, per-locale only.
+Replaces today's value-proposition banner with a full quality dashboard.
+Per-project, per-locale.
 
-Sections:
+Sections shipped:
 
-1. **Headline numbers per locale** — % accepted-as-is / % edited / %
-   rejected / % flagged; 30-day acceptance-rate sparkline.
-2. **Translation memory** — searchable `(source, mt_proposal,
-   human_target, provenance)` table; each row exposes which prompt
-   version + model + glossary version produced its proposal (from
-   `CorrectionProvenance`, captured at correction time per M4.1d).
-   "Promote to golden" per row; bulk promote from a filter.
-3. **Curated set** — the project's tuning examples. Editable notes;
-   size counter; "Export tuning bundle" button.
-4. **Prompt evaluation** — current prompt template + version + last
-   evaluated score. "Run evaluation" re-runs the current prompt over
-   the curated set using the local Ollama backend and computes
-   per-locale acceptance rate. Because every correction carries its
-   provenance, evaluations can compare "current prompt vs prompt that
-   produced this golden example" honestly. Honest about cost (shows
-   estimated runtime before starting).
-5. **Tuning bundle export** — writes
-   `.i18n-harness/tuning/<ISO-timestamp>/`:
-   - `examples.jsonl` — every curated pair
-   - `prompt.txt` — current template, verbatim
-   - `score.json` — latest per-locale score
-   - `locales.toml` — locale records from the project
-   - `README.md` — bundle schema spec for the consuming Claude Code
-     skill
+1. **Headline numbers per locale** — per-locale cards showing % accepted-as-is /
+   % edited / % from-scratch; 30-day acceptance-rate inline SVG sparkline
+   (green >70%, yellow 40–70%, red <40%); computed client-side from
+   `corrections.jsonl` via parallel `listCorrectionsInProject` calls.
+2. **Translation memory** — searchable corrections table (carried from M4.3d).
+3. **Curated set** — editable notes; size counter; promote/un-curate actions
+   (carried from M4.3d).
+4. **Prompt evaluation** — "Run evaluation" button (disabled when no curated
+   examples); live progress bar with completed/total/current locale and Cancel;
+   latest-run summary (headline score, per-locale table, per-flag-kind
+   breakdown, delta vs prior run); collapsible run history table.
+
+Rust additions:
+- `crates/project/src/evaluation.rs` — `EvaluationRun`, `LocaleScore`,
+  `FlagScore`, `ScoreAccumulator`, `EvaluationStore`.
+- `ProjectPaths::evaluations()` — `.i18n-harness/evaluations.jsonl`.
+- `Project::evaluations() -> &EvaluationStore`.
+- Tauri commands: `run_evaluation_in_project` (ollama feature only) and
+  `list_evaluation_runs_in_project`.
+- Events: `eval-progress-<job_id>`, `eval-completed-<job_id>`,
+  `eval-failed-<job_id>`.
+- Scoring v1: exact-match (`trim()` both sides; 1.0 match, 0.0 mismatch).
+
+Deferred to M4.10:
+- Tuning bundle export (`.i18n-harness/tuning/<ts>/examples.jsonl` + prompt +
+  score).
+- "Estimated runtime before starting" cost hint.
 
 ### M4.10 — Tuning-skill contract
 

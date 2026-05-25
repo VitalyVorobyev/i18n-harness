@@ -35,6 +35,7 @@ pub struct ProjectPaths {
     review: PathBuf,
     batches: PathBuf,
     tuning_root: PathBuf,
+    evaluations: PathBuf,
     prompts_template_dir: Option<PathBuf>,
 }
 
@@ -73,6 +74,7 @@ impl ProjectPaths {
         let review = state_dir.join("review.jsonl");
         let batches = state_dir.join("state").join("batches.jsonl");
         let tuning_root = state_dir.join("tuning");
+        let evaluations = state_dir.join("evaluations.jsonl");
         let prompts_template_dir = prompts_config.map(|pc| root.join(&pc.template_dir));
 
         Self {
@@ -86,6 +88,7 @@ impl ProjectPaths {
             review,
             batches,
             tuning_root,
+            evaluations,
             prompts_template_dir,
         }
     }
@@ -139,6 +142,11 @@ impl ProjectPaths {
     /// Absolute path to the `<state_dir>/tuning/` root.
     pub fn tuning_root(&self) -> &Path {
         &self.tuning_root
+    }
+
+    /// Absolute path to `<state_dir>/evaluations.jsonl`.
+    pub fn evaluations(&self) -> &Path {
+        &self.evaluations
     }
 
     /// Generate a fresh timestamped directory for a tuning bundle export.
