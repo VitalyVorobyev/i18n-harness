@@ -206,6 +206,9 @@ export interface UnitRow {
   flagCount: number;
   // Names of the flags for the tooltip (kebab-case).
   flagNames: AnyFlag[];
+  // True when unit.review_status === "needs-review" OR unit.flags is non-empty.
+  // Drives the "needs-review" filter in the CatalogList.
+  needsReview: boolean;
 }
 
 export function unitRow(unit: Unit): UnitRow {
@@ -218,6 +221,8 @@ export function unitRow(unit: Unit): UnitRow {
         ? 1
         : 0;
   const flagNames: AnyFlag[] = Array.isArray(unit.flags) ? unit.flags : [];
+  const needsReview =
+    unit.review_status === "needs-review" || flagNames.length > 0;
   return {
     id: unit.id,
     source: unit.source,
@@ -229,6 +234,7 @@ export function unitRow(unit: Unit): UnitRow {
     fileHint: unit.provenance.file || "",
     flagCount: flagNames.length,
     flagNames,
+    needsReview,
   };
 }
 
@@ -383,6 +389,40 @@ export interface DraftManifest {
   catalogs: DraftCatalog[];
   glossary: GlossaryConfig | null;
   backend: BackendConfig | null;
+}
+
+// ── M4.7 — Project-wide review queue types ───────────────────────────────────
+
+// ReviewQueueItem mirrors the Rust struct of the same name in ui/src-tauri/src/lib.rs.
+export interface ReviewQueueItem {
+  /** Absolute path to the catalog file on disk. */
+  catalog_path: string;
+  /** Manifest-relative path for display in the table. */
+  catalog_manifest_path: string;
+  /** Target locale id (e.g. "de_DE"). */
+  locale: string;
+  /** The unit's id string. */
+  unit_id: string;
+  /** Source text, truncated to 120 chars at a word boundary. */
+  source_preview: string;
+  /** Target text, truncated to 120 chars; empty string when untranslated. */
+  target_preview: string;
+  /** Kebab-case flag names; empty when only NeedsReview triggered inclusion. */
+  flags: AnyFlag[];
+  /** Kebab-case ReviewStatus variant, or null when not set. */
+  review_status: ReviewStatus | null;
+  /** Kebab-case unit state. */
+  state: UnitState;
+}
+
+// ReviewQueueResponse mirrors the Rust struct of the same name.
+export interface ReviewQueueResponse {
+  /** Total units that need review across all catalogs. */
+  total_count: number;
+  /** Per-catalog unit count, keyed by absolute catalog path. */
+  by_catalog: Record<string, number>;
+  /** All items, sorted by catalog path then unit id. */
+  items: ReviewQueueItem[];
 }
 
 // SaveAllDirtyResponse mirrors ui/src-tauri/src/lib.rs.

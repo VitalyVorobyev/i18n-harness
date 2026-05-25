@@ -12,6 +12,12 @@ interface Props {
   // Empty set = show all; non-empty = show only catalogs whose locale is in the set.
   activeLocaleFilter: Set<string>;
   onCatalogSelect: (absolutePath: string) => void;
+  /** Total review-queue count across the project (drives the sidebar badge). */
+  reviewQueueTotal?: number;
+  /** Per-catalog review counts keyed by absolute path. */
+  reviewQueueByCatalog?: Record<string, number>;
+  /** Called when the user clicks the project-wide review badge. */
+  onOpenReviewQueue?: () => void;
 }
 
 export function ProjectSidebar({
@@ -20,6 +26,9 @@ export function ProjectSidebar({
   dirtyCatalogPaths,
   activeLocaleFilter,
   onCatalogSelect,
+  reviewQueueTotal = 0,
+  reviewQueueByCatalog = {},
+  onOpenReviewQueue,
 }: Props) {
   const totalCatalogs = summary.catalogs.length;
 
@@ -38,12 +47,31 @@ export function ProjectSidebar({
     >
       {/* Header */}
       <div className="px-3 pt-3 pb-2 border-b border-border-subtle">
-        <p
-          className="text-sm font-semibold text-fg-primary truncate"
-          title={summary.name}
-        >
-          {summary.name}
-        </p>
+        <div className="flex items-center gap-2">
+          <p
+            className="text-sm font-semibold text-fg-primary truncate flex-1 min-w-0"
+            title={summary.name}
+          >
+            {summary.name}
+          </p>
+          {reviewQueueTotal > 0 && (
+            <button
+              type="button"
+              onClick={onOpenReviewQueue}
+              className={cn(
+                "shrink-0 inline-flex items-center h-5 px-1.5 rounded-pill border",
+                "text-[10px] font-semibold tabular-nums leading-none",
+                "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
+                "hover:opacity-80 transition-opacity duration-75",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+              title={`${reviewQueueTotal} ${reviewQueueTotal === 1 ? "unit needs" : "units need"} review — click to open review queue`}
+              aria-label={`${reviewQueueTotal} units need review. Open review queue.`}
+            >
+              ⚑{reviewQueueTotal}
+            </button>
+          )}
+        </div>
         <p className="text-xs text-fg-tertiary mt-0.5">
           {activeLocaleFilter.size > 0
             ? `${visibleCatalogs.length} of ${totalCatalogs} ${totalCatalogs === 1 ? "catalog" : "catalogs"}`
@@ -72,6 +100,7 @@ export function ProjectSidebar({
                 catalogRef={ref}
                 isActive={activeCatalogPath === ref.absolute_path}
                 isDirty={dirtyCatalogPaths.has(ref.absolute_path)}
+                reviewCount={reviewQueueByCatalog[ref.absolute_path] ?? 0}
                 onClick={() => onCatalogSelect(ref.absolute_path)}
               />
             ))}
@@ -88,11 +117,13 @@ function CatalogItem({
   catalogRef,
   isActive,
   isDirty,
+  reviewCount,
   onClick,
 }: {
   catalogRef: CatalogRef;
   isActive: boolean;
   isDirty: boolean;
+  reviewCount: number;
   onClick: () => void;
 }) {
   // Display the manifest-relative path; fall back to the absolute path's
@@ -140,15 +171,30 @@ function CatalogItem({
               {dir}
             </p>
           )}
-          {/* Filename + dirty indicator */}
+          {/* Filename + dirty indicator + review count */}
           <div className="flex items-center gap-1">
-            <p className="font-mono text-xs truncate">{filename}</p>
+            <p className="font-mono text-xs truncate flex-1 min-w-0">
+              {filename}
+            </p>
             {isDirty && (
               <span
-                className="text-state-proposed text-xs leading-none"
+                className="text-state-proposed text-xs leading-none shrink-0"
                 title="Unsaved changes"
               >
                 •<span className="sr-only"> (unsaved)</span>
+              </span>
+            )}
+            {reviewCount > 0 && (
+              <span
+                className={cn(
+                  "shrink-0 inline-flex items-center h-4 px-1 rounded-sm border",
+                  "text-[10px] font-semibold tabular-nums leading-none",
+                  "bg-severity-soft-bg border-severity-soft-border text-severity-soft",
+                )}
+                title={`${reviewCount} ${reviewCount === 1 ? "unit needs" : "units need"} review`}
+              >
+                <span className="sr-only">{reviewCount} units need review</span>
+                <span aria-hidden="true">{reviewCount}</span>
               </span>
             )}
           </div>

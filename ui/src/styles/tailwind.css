@@ -93,6 +93,7 @@
   --color-severity-hard-border: hsl(0 86% 70% / 0.22);
   --color-severity-soft:        hsl(38 92% 65%);
   --color-severity-soft-bg:     hsl(38 92% 65% / 0.10);
+  --color-severity-soft-border: hsl(38 92% 65% / 0.30);
   --color-severity-info:        hsl(207 80% 66%);
   --color-severity-info-bg:     hsl(207 80% 66% / 0.10);
 
@@ -197,6 +198,7 @@
   --color-severity-hard-border: hsl(0 72% 42% / 0.20);
   --color-severity-soft:        hsl(32 95% 38%);
   --color-severity-soft-bg:     hsl(32 95% 38% / 0.08);
+  --color-severity-soft-border: hsl(32 95% 38% / 0.28);
   /* blue-700 on white: contrast ~5.9 : 1 */
   --color-severity-info:        hsl(213 75% 40%);
   --color-severity-info-bg:     hsl(213 75% 40% / 0.07);

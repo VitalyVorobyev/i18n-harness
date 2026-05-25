@@ -23,6 +23,7 @@ import type {
   ProjectOpenResponse,
   ProjectSummary,
   PromptsConfig,
+  ReviewQueueResponse,
   SaveAllDirtyResponse,
   SaveSummary,
   TargetEdit,
@@ -357,4 +358,15 @@ export async function acceptUnitInProject(
   unitId: UnitId,
 ): Promise<Unit> {
   return await invoke<Unit>("accept_unit_in_project", { catalogPath, unitId });
+}
+
+// ── M4.7 — Project-wide review queue ─────────────────────────────────────────
+
+/// Scan every catalog in the open project for units that need human review.
+///
+/// A unit qualifies if `review_status === "needs-review"` OR `flags.length > 0`.
+/// Catalogs not yet open in the project store are extracted and cached as a
+/// side effect (same as `openCatalogInProject`, but without returning the catalog).
+export async function scanProjectReviewState(): Promise<ReviewQueueResponse> {
+  return await invoke<ReviewQueueResponse>("scan_project_review_state");
 }

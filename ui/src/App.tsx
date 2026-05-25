@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Filter } from "./components/CatalogList/CatalogList";
 import { CatalogList } from "./components/CatalogList/CatalogList";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
 import { HomeScreen, pushRecent } from "./components/HomeScreen/HomeScreen";
@@ -6,6 +7,7 @@ import { Inspector } from "./components/Inspector/Inspector";
 import { ProjectSettings } from "./components/ProjectSettings/ProjectSettings";
 import { ProjectSidebar } from "./components/ProjectSidebar/ProjectSidebar";
 import { QualityPanel } from "./components/QualityPanel/QualityPanel";
+import { ReviewQueue } from "./components/ReviewQueue/ReviewQueue";
 import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
 import {
@@ -20,6 +22,7 @@ import {
   openCatalogInProject,
   saveAllDirty,
   saveCatalogInProject,
+  scanProjectReviewState,
   translateUnitInProject,
   updateUnitTargetInProject,
 } from "./lib/tauri";
@@ -29,12 +32,11 @@ import type {
   GateReport,
   ProjectOpenResponse,
   ProjectSummary,
+  ReviewQueueResponse,
   TargetEdit,
   Unit,
   UnitId,
 } from "./lib/types";
-
-type Filter = "all" | "untranslated" | "proposed" | "finished";
 
 interface Toast {
   kind: "info" | "error";
@@ -85,6 +87,40 @@ export function App() {
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
+
+  // ── Review queue (M4.7) ───────────────────────────────────────────────────
+  // null = not yet scanned; populated eagerly when a project is open and
+  // refreshed after every significant mutation (translate / accept / save /
+  // discard). Debounced 200ms to avoid hammering the IPC bridge during
+  // rapid edits.
+  const [reviewQueue, setReviewQueue] = useState<ReviewQueueResponse | null>(
+    null,
+  );
+  const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Schedule a debounced review-queue rescan (200ms).
+  const scheduleRescan = useCallback(() => {
+    if (rescanTimerRef.current !== null) {
+      clearTimeout(rescanTimerRef.current);
+    }
+    rescanTimerRef.current = setTimeout(() => {
+      rescanTimerRef.current = null;
+      scanProjectReviewState()
+        .then((resp) => setReviewQueue(resp))
+        .catch(() => {
+          // Rescan failure is non-fatal — the badge simply stays stale.
+        });
+    }, 200);
+  }, []);
+
+  // Clear the debounce timer when the app unmounts (unlikely but clean).
+  useEffect(() => {
+    return () => {
+      if (rescanTimerRef.current !== null) {
+        clearTimeout(rescanTimerRef.current);
+      }
+    };
+  }, []);
 
   // Inline close-project confirmation state (P1 #2 guard).
   const [closeConfirm, setCloseConfirm] = useState<CloseConfirmPending>({
@@ -166,23 +202,29 @@ export function App() {
 
   // ── Project mode transitions ──────────────────────────────────────────────
 
-  const handleProjectOpened = useCallback((summary: ProjectSummary) => {
-    setMode({ kind: "project", summary });
-    // Clear the catalog cache so stale data from a previous project is gone.
-    setOpenCatalogs(new Map());
-    setActiveCatalogPath(null);
-    setSelectedId(null);
-    setFilter("all");
-    setSearch("");
-    setDirtyIds(new Set());
-    setDirtyCatalogPaths(new Set());
-    setReports({});
-    setBusyIds(new Set());
-    setProjectView("translate");
-    setActiveLocaleFilter(new Set());
-    setError(null);
-    setCloseConfirm({ kind: "none" });
-  }, []);
+  const handleProjectOpened = useCallback(
+    (summary: ProjectSummary) => {
+      setMode({ kind: "project", summary });
+      // Clear the catalog cache so stale data from a previous project is gone.
+      setOpenCatalogs(new Map());
+      setActiveCatalogPath(null);
+      setSelectedId(null);
+      setFilter("all");
+      setSearch("");
+      setDirtyIds(new Set());
+      setDirtyCatalogPaths(new Set());
+      setReports({});
+      setBusyIds(new Set());
+      setProjectView("translate");
+      setActiveLocaleFilter(new Set());
+      setError(null);
+      setCloseConfirm({ kind: "none" });
+      // Reset and immediately kick off a review-queue scan for the new project.
+      setReviewQueue(null);
+      scheduleRescan();
+    },
+    [scheduleRescan],
+  );
 
   // Called after every Settings-view mutation. Updates the in-memory summary so
   // all views reflect the new manifest state without a round trip.
@@ -212,6 +254,7 @@ export function App() {
     setDirtyIds(new Set());
     setDirtyCatalogPaths(new Set());
     setReports({});
+    setReviewQueue(null);
     setError(null);
     setCloseConfirm({ kind: "none" });
   }, []);
@@ -321,11 +364,21 @@ export function App() {
         replaceUnit(updated);
         markDirty(id);
         markCatalogDirty(activeCatalogPath);
+        // M4.7: edits don't affect review status today, but rescan so the
+        // badge stays accurate if the gate is re-run in the future.
+        scheduleRescan();
       } catch (e) {
         flashError(`Edit failed: ${formatError(e)}`);
       }
     },
-    [activeCatalogPath, replaceUnit, markDirty, markCatalogDirty, flashError],
+    [
+      activeCatalogPath,
+      replaceUnit,
+      markDirty,
+      markCatalogDirty,
+      scheduleRescan,
+      flashError,
+    ],
   );
 
   const onTranslate = useCallback(
@@ -338,6 +391,8 @@ export function App() {
         setReports((prev) => ({ ...prev, [id]: result.report }));
         markDirty(id);
         markCatalogDirty(activeCatalogPath);
+        // M4.7: translation may add flags → rescan the review queue.
+        scheduleRescan();
         const findings = result.report.findings.length;
         flashInfo(
           findings === 0
@@ -359,6 +414,7 @@ export function App() {
       replaceUnit,
       markDirty,
       markCatalogDirty,
+      scheduleRescan,
       flashInfo,
       flashError,
     ],
@@ -381,13 +437,22 @@ export function App() {
         next.delete(activeCatalogPath);
         return next;
       });
+      // M4.7: state transitions on save may change the review queue.
+      scheduleRescan();
       flashInfo(
         `Saved ${summary.unit_count} units to ${shortenPath(summary.path)}`,
       );
     } catch (e) {
       flashError(`Save failed: ${formatError(e)}`);
     }
-  }, [catalog, activeCatalogPath, dirtyIds, flashInfo, flashError]);
+  }, [
+    catalog,
+    activeCatalogPath,
+    dirtyIds,
+    scheduleRescan,
+    flashInfo,
+    flashError,
+  ]);
 
   const onSaveAll = useCallback(async () => {
     if (dirtyCatalogPaths.size === 0) return;
@@ -405,6 +470,8 @@ export function App() {
           for (const s of resp.saved) next.delete(s.path);
           return next;
         });
+        // M4.7: state transitions on save may change the review queue.
+        scheduleRescan();
         flashInfo(
           `Saved ${savedCount} ${savedCount === 1 ? "catalog" : "catalogs"}.`,
         );
@@ -424,7 +491,13 @@ export function App() {
     } catch (e) {
       flashError(`Save all failed: ${formatError(e)}`);
     }
-  }, [dirtyCatalogPaths, activeCatalogPath, flashInfo, flashError]);
+  }, [
+    dirtyCatalogPaths,
+    activeCatalogPath,
+    scheduleRescan,
+    flashInfo,
+    flashError,
+  ]);
 
   const onDiscard = useCallback(async () => {
     if (!catalog || !activeCatalogPath) return;
@@ -448,11 +521,21 @@ export function App() {
       if (!stillThere) {
         setSelectedId(response.units[0]?.id ?? null);
       }
+      // M4.7: discard resets state from disk; review queue may change.
+      scheduleRescan();
       flashInfo("Reverted to disk state.");
     } catch (e) {
       flashError(`Discard failed: ${formatError(e)}`);
     }
-  }, [catalog, activeCatalogPath, dirtyIds, selectedId, flashInfo, flashError]);
+  }, [
+    catalog,
+    activeCatalogPath,
+    dirtyIds,
+    selectedId,
+    scheduleRescan,
+    flashInfo,
+    flashError,
+  ]);
 
   // ── Accept (M4.6.2) ─────────────────────────────────────────────────────────
 
@@ -472,6 +555,8 @@ export function App() {
           next.add(id);
           return next;
         });
+        // M4.7: Accept clears flags → unit leaves the review queue.
+        scheduleRescan();
         flashInfo(`Marked unit ${id} as reviewed`);
       } catch (e) {
         flashError(`Accept failed: ${formatError(e)}`);
@@ -483,7 +568,14 @@ export function App() {
         });
       }
     },
-    [activeCatalogPath, replaceUnit, markCatalogDirty, flashInfo, flashError],
+    [
+      activeCatalogPath,
+      replaceUnit,
+      markCatalogDirty,
+      scheduleRescan,
+      flashInfo,
+      flashError,
+    ],
   );
 
   // ── Locale filter + sibling quick-switch ────────────────────────────────────
@@ -551,6 +643,20 @@ export function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [mode, onSave, onSaveAll]);
 
+  // ── Review queue navigation ───────────────────────────────────────────────
+
+  // Called from the ReviewQueue table's "Open" button.
+  // Switches to the target catalog, selects the unit, and navigates to the
+  // Translate view so the editor is visible.
+  const onOpenReviewQueueItem = useCallback(
+    async (catalogPath: string, unitId: UnitId) => {
+      await handleCatalogSelect(catalogPath);
+      setSelectedId(unitId);
+      setProjectView("translate");
+    },
+    [handleCatalogSelect],
+  );
+
   const selectedUnit = useMemo(() => {
     if (!catalog || !selectedId) return null;
     return catalog.units.find((u) => u.id === selectedId) ?? null;
@@ -588,6 +694,8 @@ export function App() {
   const { summary } = mode;
   const unsavedCatalogCount = dirtyCatalogPaths.size;
   const glossaryPath = summary.glossary_path;
+  const reviewQueueTotal = reviewQueue?.total_count ?? 0;
+  const reviewQueueByCatalog = reviewQueue?.by_catalog ?? {};
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
@@ -601,6 +709,7 @@ export function App() {
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         onCloseProject={handleCloseProject}
+        reviewQueueCount={reviewQueueTotal}
       />
 
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -611,6 +720,9 @@ export function App() {
           dirtyCatalogPaths={dirtyCatalogPaths}
           activeLocaleFilter={activeLocaleFilter}
           onCatalogSelect={handleCatalogSelect}
+          reviewQueueTotal={reviewQueueTotal}
+          reviewQueueByCatalog={reviewQueueByCatalog}
+          onOpenReviewQueue={() => setProjectView("review")}
         />
 
         {/* Main content area */}
@@ -723,6 +835,24 @@ export function App() {
               flashError={flashError}
               flashInfo={flashInfo}
             />
+          </div>
+
+          {/* Review queue view — M4.7 */}
+          <div
+            className={
+              projectView === "review" ? "flex-1 flex min-h-0" : "hidden"
+            }
+          >
+            {reviewQueue ? (
+              <ReviewQueue
+                reviewQueue={reviewQueue}
+                onOpenItem={onOpenReviewQueueItem}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary">
+                <p>Loading review queue…</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
