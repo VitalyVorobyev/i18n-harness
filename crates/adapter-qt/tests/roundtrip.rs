@@ -765,6 +765,130 @@ fn in_place_mutation_then_render_emits_the_edit() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// State-only Proposed → Finished transition must strip `type="unfinished"`.
+///
+/// Exercises the path where the caller keeps the target text identical but
+/// explicitly sets `unit.state = Finished` (the Accept flow). Before the fix,
+/// the early-return on `candidate.target == original.target` fired before the
+/// state-strip block, so the attribute was never removed and the unit came
+/// back as Proposed on the next parse.
+#[test]
+fn state_only_proposed_to_finished_strips_unfinished_attr() {
+    use i18n_harness_adapter_qt::apply;
+    use i18n_harness_core::{Target, UnitState};
+
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-state-only-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("proposed.ts");
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>Dlg</name>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished">Speichern</translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&src_path, src).unwrap();
+
+    let catalog = extract(&src_path).expect("extract");
+
+    // Confirm the unit parses as Proposed (the bug's precondition).
+    let unit = &catalog.units()[0];
+    assert_eq!(unit.state, UnitState::Proposed, "precondition: Proposed");
+    let text_before = match &unit.target {
+        Target::Singular { text: Some(t) } => t.clone(),
+        other => panic!("unexpected target shape: {other:?}"),
+    };
+
+    // Mutate state only — leave target text unchanged (the Accept path).
+    let mut units = catalog.units().to_vec();
+    units[0].state = UnitState::Finished;
+    // Ensure text is identical to what was parsed.
+    units[0].target = Target::Singular {
+        text: Some(text_before.clone()),
+    };
+
+    let out_path = dir.join("out.ts");
+    apply(&catalog, &units, &out_path).expect("apply");
+
+    // Re-extract and assert state persisted.
+    let catalog2 = extract(&out_path).expect("re-extract");
+    let unit2 = &catalog2.units()[0];
+    assert_eq!(
+        unit2.state,
+        UnitState::Finished,
+        "after Accept + Save: state must round-trip as Finished; got {:?}",
+        unit2.state,
+    );
+    match &unit2.target {
+        Target::Singular { text: Some(t) } => {
+            assert_eq!(t, &text_before, "target text must be preserved");
+        }
+        other => panic!("expected Singular Some after reopen; got {other:?}"),
+    }
+
+    // The bytes on disk must not contain type="unfinished" for this unit.
+    let bytes = std::fs::read(&out_path).expect("read out");
+    let bytes_str = std::str::from_utf8(&bytes).expect("utf8");
+    assert!(
+        !bytes_str.contains("type=\"unfinished\">Speichern"),
+        "type=\"unfinished\" must be stripped after Proposed → Finished;\n{bytes_str}",
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Negative case: a Finished unit saved without modification must produce
+/// byte-identical output — no spurious attribute edits.
+#[test]
+fn finished_unit_saved_unmodified_is_byte_identical() {
+    let dir = std::env::temp_dir().join(format!(
+        "i18n-finished-noop-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("finished.ts");
+    // A Finished unit has no `type` attribute on the `<translation>` tag.
+    let src = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE TS>
+<TS version="2.1" language="de_DE" sourcelanguage="en">
+<context>
+    <name>Dlg</name>
+    <message>
+        <source>Save</source>
+        <translation>Speichern</translation>
+    </message>
+</context>
+</TS>
+"#;
+    std::fs::write(&path, src).unwrap();
+    let catalog = extract(&path).expect("extract");
+
+    // Re-render with no overrides at all — empty slice.
+    let rendered = render(&catalog, &[]).expect("render");
+    let original = std::fs::read(&path).expect("re-read");
+    assert_eq!(
+        rendered, original,
+        "Finished unit round-trip with no changes must be byte-identical",
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 fn byte_diff_summary(a: &[u8], b: &[u8]) -> String {
     let common = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let line = a[..common].iter().filter(|&&b| b == b'\n').count() + 1;

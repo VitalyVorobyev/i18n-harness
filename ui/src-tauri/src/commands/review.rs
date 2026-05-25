@@ -74,11 +74,22 @@ pub(crate) fn accept_unit_in_project(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Unit, String> {
+    accept_unit_in_project_impl(&catalog_path, &unit_id, &state)
+}
+
+/// Integration-test surface — same logic as [`accept_unit_in_project`] but
+/// takes `&AppState` directly so tests can call it without a Tauri runtime.
+#[doc(hidden)]
+pub fn accept_unit_in_project_impl(
+    catalog_path: &str,
+    unit_id: &str,
+    state: &AppState,
+) -> Result<Unit, String> {
     use i18n_harness_core::{FlagSet, ReviewStatus};
     use std::collections::BTreeMap;
 
-    let abs = PathBuf::from(&catalog_path);
-    let uid = UnitId::from(unit_id.clone());
+    let abs = PathBuf::from(catalog_path);
+    let uid = UnitId::from(unit_id);
 
     // Read the unit's source_hash without mutating, so we can do the durable
     // write first. Codex P2: clearing flags before the fallible review.jsonl

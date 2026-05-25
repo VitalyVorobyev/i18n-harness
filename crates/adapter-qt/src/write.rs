@@ -147,15 +147,6 @@ fn plan_edits_for_unit(
         return;
     }
 
-    // If the caller passed the unit through unchanged (target identical to
-    // what `extract` produced), emit no edits — period. This is what makes
-    // byte-stable round-trip on CDATA or anything else `extract` had to
-    // simplify into a plain string actually work: we compare *intent*, not
-    // *bytes*, for the "did the caller change this?" decision.
-    if candidate.target == original.target {
-        return;
-    }
-
     let mut singular_body: Option<Vec<u8>> = None;
     let mut numerus_bodies: Vec<Option<Vec<u8>>> = vec![None; ep.numerus_bodies.len()];
     let mut any_target_change = false;
@@ -193,6 +184,23 @@ fn plan_edits_for_unit(
         }
     }
 
+    // A state-only Proposed → Finished transition (target bytes unchanged)
+    // still needs the `type="unfinished"` attribute stripped. Detect that
+    // case before the early-return so we don't silently discard the edit.
+    let needs_state_strip = candidate.state != UnitState::Proposed
+        && ep.original_state.is_writable()
+        && promote_to_finished
+        && ep.type_attr.is_some();
+
+    // If the caller passed the unit through unchanged (target identical to
+    // what `extract` produced) AND there is no state-only strip to emit,
+    // bail out — no edits at all. This is what makes byte-stable round-trip
+    // on CDATA or anything else `extract` had to simplify into a plain
+    // string actually work: we compare *intent*, not *bytes*.
+    if candidate.target == original.target && !needs_state_strip {
+        return;
+    }
+
     // Emit body edits.
     if let Some(new_body) = singular_body {
         edits.push(Edit {
@@ -212,13 +220,15 @@ fn plan_edits_for_unit(
         }
     }
 
-    // State transition: only when we *actually* changed the target and the
-    // unit's current state allows write-back. If the caller explicitly set
-    // `candidate.state = Proposed`, keep `type="unfinished"` on disk so the
-    // file carries the "needs human review" signal the gate produced. This
-    // is the contract `harness translate` relies on: gate-clean units land
-    // as Finished, gate-flagged units stay Proposed.
-    if any_target_change
+    // State transition: strip `type="unfinished"` from the open tag when
+    // the unit is being promoted to Finished (either because the target
+    // body changed *and* qualifies, or because the caller explicitly set
+    // state = Finished on a unit whose text was already present).
+    // If the caller set `candidate.state = Proposed`, keep the attribute so
+    // the file carries the "needs human review" signal. This is the contract
+    // `harness translate` relies on: gate-clean units land as Finished,
+    // gate-flagged units stay Proposed.
+    if (any_target_change || needs_state_strip)
         && ep.original_state.is_writable()
         && promote_to_finished
         && candidate.state != UnitState::Proposed

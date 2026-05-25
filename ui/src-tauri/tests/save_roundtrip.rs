@@ -10,6 +10,7 @@ use i18n_harness_ui_lib::commands::project_catalog::{
     update_unit_target_in_project_impl,
 };
 use i18n_harness_ui_lib::commands::project_lifecycle::open_project_impl;
+use i18n_harness_ui_lib::commands::review::accept_unit_in_project_impl;
 use std::fs;
 use tempfile::TempDir;
 
@@ -160,6 +161,105 @@ fn edit_save_reopen_preserves_proposed_translation() {
             text.as_deref(),
             Some("Hallo Welt"),
             "after reopen: target text must round-trip intact"
+        ),
+        Target::Plural { .. } => panic!("expected singular target after reopen"),
+    }
+    assert!(
+        !is_catalog_dirty_impl(&abs_path, &state2).expect("dirty after reopen"),
+        "after reopen: catalog must be clean"
+    );
+}
+
+/// Full UI flow regression: edit → save → accept (Proposed → Finished) →
+/// save → reopen must yield state == Finished.
+///
+/// This covers the bug where `plan_edits_for_unit` early-returned before the
+/// state-strip block whenever the target text was unchanged, so Accept never
+/// reached disk and the unit reverted to Proposed on the next parse.
+#[test]
+fn accept_save_reopen_preserves_finished_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (root, ts_path) = write_project(&dir);
+
+    // Phase 1 — open project and catalog.
+    let state = AppState::default();
+    let open_resp = open_project_impl(&root, &state).expect("open project");
+    let abs_path = open_resp
+        .summary
+        .catalogs
+        .iter()
+        .find(|c| {
+            std::path::Path::new(&c.absolute_path).file_name() == Some(ts_path.file_name().unwrap())
+        })
+        .expect("project must know about the catalog")
+        .absolute_path
+        .clone();
+    let opened = open_catalog_in_project_impl(&abs_path, &state).expect("open catalog");
+    let unit_id = opened.units[0].id.to_string();
+    assert_eq!(
+        opened.units[0].state,
+        UnitState::Untranslated,
+        "precondition: unit starts Untranslated"
+    );
+
+    // Phase 2 — edit the unit; state promotes to Proposed.
+    let edited = update_unit_target_in_project_impl(
+        &abs_path,
+        &unit_id,
+        TargetEdit::Singular {
+            text: Some("Hallo Welt".to_owned()),
+        },
+        &state,
+    )
+    .expect("update edit");
+    assert_eq!(edited.state, UnitState::Proposed, "after edit: Proposed");
+
+    // Phase 3 — save (Proposed lands on disk with type="unfinished").
+    let save1 = save_all_dirty_impl(&state).expect("first save");
+    assert_eq!(save1.saved.len(), 1, "first save: one entry saved");
+    assert!(save1.failed_path.is_none(), "first save: no failure");
+
+    // Phase 4 — accept the unit (Proposed → Finished in memory).
+    let accepted = accept_unit_in_project_impl(&abs_path, &unit_id, &state).expect("accept");
+    assert_eq!(
+        accepted.state,
+        UnitState::Finished,
+        "after accept: state must be Finished in memory"
+    );
+    assert!(
+        is_catalog_dirty_impl(&abs_path, &state).expect("dirty after accept"),
+        "after accept: catalog must be dirty (state transition must be persisted)"
+    );
+
+    // Phase 5 — save again (Finished must strip type="unfinished" from disk).
+    let save2 = save_all_dirty_impl(&state).expect("second save");
+    assert_eq!(save2.saved.len(), 1, "second save: one entry saved");
+    assert!(save2.failed_path.is_none(), "second save: no failure");
+
+    // Phase 6 — verify bytes on disk no longer carry type="unfinished".
+    let bytes = fs::read_to_string(&ts_path).expect("read .ts after accept-save");
+    assert!(
+        !bytes.contains("type=\"unfinished\""),
+        "on-disk: type=\"unfinished\" must be stripped after Finished save\n----\n{bytes}\n----"
+    );
+
+    // Phase 7 — drop AppState, reopen (fresh parse), assert Finished persists.
+    drop(state);
+    let state2 = AppState::default();
+    open_project_impl(&root, &state2).expect("reopen project");
+    let reopened = open_catalog_in_project_impl(&abs_path, &state2).expect("reopen catalog");
+    let unit = &reopened.units[0];
+    assert_eq!(
+        unit.state,
+        UnitState::Finished,
+        "after reopen: state must round-trip as Finished; got {:?}",
+        unit.state,
+    );
+    match &unit.target {
+        Target::Singular { text } => assert_eq!(
+            text.as_deref(),
+            Some("Hallo Welt"),
+            "after reopen: target text must survive intact"
         ),
         Target::Plural { .. } => panic!("expected singular target after reopen"),
     }

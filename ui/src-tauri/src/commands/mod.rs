@@ -11,7 +11,7 @@ pub(crate) mod glossary;
 pub(crate) mod meta;
 pub mod project_catalog;
 pub mod project_lifecycle;
-pub(crate) mod review;
+pub mod review;
 pub(crate) mod settings;
 pub(crate) mod translate;
 pub(crate) mod tuning;
