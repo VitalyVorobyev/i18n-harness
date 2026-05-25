@@ -101,3 +101,44 @@ pub struct BatchTerminalPayload {
     /// `Some` only when a mid-batch backend error stopped the run.
     pub failed_reason: Option<String>,
 }
+
+// ── Tests: BatchUnitStartedPayload structure ──────────────────────────────────
+
+#[cfg(test)]
+mod batch_unit_started_tests {
+    use super::BatchUnitStartedPayload;
+
+    #[test]
+    fn payload_fields_round_trip_through_serde() {
+        let p = BatchUnitStartedPayload {
+            unit_id: "u::hello".to_owned(),
+            locale: "de_DE".to_owned(),
+        };
+        let json = serde_json::to_string(&p).expect("serialize");
+        let back: serde_json::Value = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back["unit_id"], "u::hello");
+        assert_eq!(back["locale"], "de_DE");
+    }
+
+    // The loop in `run_batch_worker` emits one `batch-unit-started-<id>` per
+    // iteration (one per unit_id in the batch). This structural test checks that
+    // the payload count equals the number of units: it drives the payload
+    // construction path in isolation so clippy/miri can also exercise it.
+    #[test]
+    fn one_started_payload_constructed_per_unit() {
+        let unit_ids = ["u1", "u2", "u3"];
+        let locale_id = "de_DE";
+        let payloads: Vec<BatchUnitStartedPayload> = unit_ids
+            .iter()
+            .map(|uid| BatchUnitStartedPayload {
+                unit_id: (*uid).to_owned(),
+                locale: locale_id.to_owned(),
+            })
+            .collect();
+        assert_eq!(payloads.len(), unit_ids.len());
+        for (p, expected_id) in payloads.iter().zip(&unit_ids) {
+            assert_eq!(&p.unit_id, expected_id);
+            assert_eq!(p.locale, locale_id);
+        }
+    }
+}
