@@ -114,13 +114,25 @@ mod tests {
 
     #[test]
     fn cancel_visible_across_threads() {
+        use std::sync::Barrier;
+        use std::time::{Duration, Instant};
+
         let producer = CancellationToken::new();
         let consumer = producer.clone();
+        // Two-stage handshake: the spawned thread waits at `barrier` until the
+        // main thread has called `cancel()`. Without this, on a slow CI the
+        // worker can finish its poll loop before the main thread fires
+        // `producer.cancel()`, which is a test race, not a primitive bug.
+        let barrier = std::sync::Arc::new(Barrier::new(2));
+        let worker_barrier = barrier.clone();
         let handle = thread::spawn(move || {
-            // Spin briefly. In production the worker calls is_cancelled
-            // between network round-trips, not in a tight loop; for the
-            // test we just confirm the flag eventually flips.
-            for _ in 0..10_000 {
+            worker_barrier.wait();
+            // After the barrier, the producer has definitely called cancel.
+            // We still poll with a deadline rather than asserting immediately —
+            // SeqCst guarantees happens-before so a single load is enough, but
+            // the bounded loop is harmless and documents the worker shape.
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
                 if consumer.is_cancelled() {
                     return true;
                 }
@@ -129,6 +141,7 @@ mod tests {
             false
         });
         producer.cancel();
+        barrier.wait();
         let observed = handle.join().expect("worker thread panicked");
         assert!(observed);
     }
