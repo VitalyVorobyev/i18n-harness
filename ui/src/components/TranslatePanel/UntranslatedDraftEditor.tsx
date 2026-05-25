@@ -112,7 +112,11 @@ export function UntranslatedDraftEditor({
           "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
           "placeholder:text-fg-tertiary placeholder:not-italic",
           "max-h-[12rem] overflow-y-auto",
-          isCompact ? "text-xs" : "text-[13px]",
+          // Declarative floor: matches rows={2|4} so the autosize
+          // useLayoutEffect (which would otherwise set height to scrollHeight
+          // ≈ one row for empty content) can never collapse the textarea
+          // below its rows minimum on first render.
+          isCompact ? "text-xs min-h-12" : "text-[13px] min-h-24",
           textareaClassName,
         )}
       />

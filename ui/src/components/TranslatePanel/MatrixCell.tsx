@@ -257,7 +257,11 @@ function ProposedBody({
           "bg-bg-input border-border-subtle whitespace-pre-wrap break-words",
           "focus:border-accent focus:outline-none focus-visible:outline-none",
           "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
-          "max-h-[12rem] overflow-y-auto",
+          // Declarative floor: matches rows={2} for text-xs leading-snug so the
+          // autosize useLayoutEffect (which would otherwise set height to
+          // scrollHeight ≈ one row for empty/single-line content) can never
+          // collapse the cell below 2 rows on first render.
+          "min-h-12 max-h-[12rem] overflow-y-auto",
         )}
       />
       <div className="flex items-center gap-1">
