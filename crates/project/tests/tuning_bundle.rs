@@ -284,4 +284,14 @@ fn multiple_exports_produce_distinct_directories() {
     for b in &bundles {
         assert!(b.examples_count > 0, "each bundle must have examples");
     }
+
+    // prompt_template_version must be the backend constant, not the
+    // unsubstituted placeholder "{template_version}" from the raw template.
+    for b in &bundles {
+        assert_eq!(
+            b.prompt_template_version,
+            i18n_harness_backend::OLLAMA_PROMPT_V2_VERSION,
+            "list_tuning_bundles must return the real version string, not a template placeholder"
+        );
+    }
 }

@@ -256,10 +256,12 @@ impl Project {
 
             let has_score = self.fs().is_file(&dir.join("score.json"));
 
-            // Extract the prompt template version from prompt.txt if present,
-            // otherwise fall back to the known constant.
-            let prompt_template_version = read_prompt_version(self, &dir.join("prompt.txt"))
-                .unwrap_or_else(|| i18n_harness_backend::OLLAMA_PROMPT_V2_VERSION.to_owned());
+            // The prompt template written into every bundle is the compile-time
+            // constant `OLLAMA_PROMPT_V2_VERSION`. The raw template file contains
+            // an unsubstituted `{template_version}` placeholder, so we cannot
+            // parse the version from `prompt.txt` reliably — use the constant
+            // directly.
+            let prompt_template_version = i18n_harness_backend::OLLAMA_PROMPT_V2_VERSION.to_owned();
 
             summaries.push(TuningBundleSummary {
                 path: dir.display().to_string(),
@@ -351,18 +353,4 @@ fn build_locales_toml(project: &Project) -> String {
     }
 
     out
-}
-
-/// Try to read the `[template=...]` header line from `prompt_path` and
-/// extract the version string. Returns `None` if the file is missing or
-/// the header is absent.
-fn read_prompt_version(project: &Project, prompt_path: &Path) -> Option<String> {
-    let text = project.fs().read_to_string(prompt_path).ok()?;
-    // First non-empty line looks like: [template=ollama-translate-v2]
-    let first_line = text.lines().find(|l| !l.trim().is_empty())?;
-    let inner = first_line
-        .trim()
-        .strip_prefix("[template=")?
-        .strip_suffix(']')?;
-    Some(inner.to_owned())
 }
