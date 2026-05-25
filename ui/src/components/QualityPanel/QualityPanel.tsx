@@ -10,11 +10,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelEvaluation,
+  exportTuningBundleInProject,
   type ListCorrectionsFilter,
   listCorrectionsInProject,
   listCuratedInProject,
   listEvaluationRunsInProject,
   listLocales,
+  listTuningBundlesInProject,
   promoteCorrectionToCurated,
   runEvaluationInProject,
   unCurateCorrection,
@@ -27,6 +29,7 @@ import type {
   EvaluationProgressPayload,
   EvaluationRun,
   EvaluationTerminalPayload,
+  ExportTuningBundleResponse,
   LocaleInfo,
   ProjectSummary,
 } from "../../lib/types";
@@ -1176,6 +1179,14 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
   const [evalRuns, setEvalRuns] = useState<EvaluationRun[]>([]);
   const [evalRunsLoading, setEvalRunsLoading] = useState(false);
 
+  // ── Part 4: Tuning bundle state ───────────────────────────────────────────
+
+  const [bundleExporting, setBundleExporting] = useState(false);
+  const [pastBundles, setPastBundles] = useState<ExportTuningBundleResponse[]>(
+    [],
+  );
+  const [bundlesLoading, setBundlesLoading] = useState(false);
+
   // In-flight job state.
   const [evalJobId, setEvalJobId] = useState<string | null>(null);
   const [evalProgress, setEvalProgress] =
@@ -1234,6 +1245,18 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
     }
   }, [flashError]);
 
+  const fetchPastBundles = useCallback(async () => {
+    setBundlesLoading(true);
+    try {
+      const data = await listTuningBundlesInProject();
+      setPastBundles(data);
+    } catch {
+      // Silently ignore — the tuning root may not exist yet.
+    } finally {
+      setBundlesLoading(false);
+    }
+  }, []);
+
   /** Fetch per-locale correction stats for all project locales in parallel. */
   const fetchHeadlineStats = useCallback(async () => {
     const localeIds = summary.locales;
@@ -1278,7 +1301,14 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
     void fetchCorrections("", "", "", false);
     void fetchEvalRuns();
     void fetchHeadlineStats();
-  }, [fetchCurated, fetchCorrections, fetchEvalRuns, fetchHeadlineStats]);
+    void fetchPastBundles();
+  }, [
+    fetchCurated,
+    fetchCorrections,
+    fetchEvalRuns,
+    fetchHeadlineStats,
+    fetchPastBundles,
+  ]);
 
   // Refetch corrections when dropdown/checkbox filters change.
   // filterUnitId is intentionally excluded: handled via debounce below.
@@ -1464,6 +1494,29 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
     }
   }, [evalJobId, flashError]);
 
+  // ── Tuning bundle action ──────────────────────────────────────────────────
+
+  const handleExportBundle = useCallback(async () => {
+    setBundleExporting(true);
+    try {
+      const result = await exportTuningBundleInProject();
+      flashInfo(
+        `Exported ${result.examples_count} example${result.examples_count === 1 ? "" : "s"} to ${result.path}`,
+      );
+      if (!result.has_score) {
+        // Non-blocking advisory: suggest running evaluation first.
+        flashInfo(
+          "Tip: run an evaluation first so the bundle includes a score baseline.",
+        );
+      }
+      await fetchPastBundles();
+    } catch (e) {
+      flashError(`Export failed: ${formatError(e)}`);
+    } finally {
+      setBundleExporting(false);
+    }
+  }, [flashInfo, flashError, fetchPastBundles]);
+
   // ── Catalog list for filter dropdown ─────────────────────────────────────
 
   const catalogPaths = summary.catalogs.map(
@@ -1643,6 +1696,120 @@ export function QualityPanel({ summary, flashError, flashInfo }: Props) {
           {evalRunsLoading && evalRuns.length === 0 && (
             <div className="flex items-center gap-2 text-xs text-fg-tertiary py-3">
               <Spinner /> Loading evaluation history…
+            </div>
+          )}
+        </section>
+
+        {/* Part 4: Tuning bundle */}
+        <section aria-labelledby="bundle-heading">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2
+                id="bundle-heading"
+                className="text-sm font-semibold text-fg-primary"
+              >
+                Tuning bundle
+              </h2>
+              <p className="text-xs text-fg-tertiary mt-0.5">
+                Export the curated set + current prompt + latest score as a
+                self-contained bundle for the Claude Code{" "}
+                <span className="font-mono">tune-i18n-prompt</span> skill.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleExportBundle()}
+              disabled={bundleExporting || curated.length === 0}
+              aria-label={
+                curated.length === 0
+                  ? "Export bundle — requires at least one curated example"
+                  : bundleExporting
+                    ? "Exporting bundle…"
+                    : "Export tuning bundle"
+              }
+              title={
+                curated.length === 0
+                  ? "Curate at least one correction before exporting a bundle."
+                  : undefined
+              }
+              className="flex-shrink-0 h-7 px-3 rounded border border-border-default bg-bg-surface text-xs text-fg-secondary hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+            >
+              {bundleExporting ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <Spinner /> Exporting…
+                </span>
+              ) : (
+                "Export bundle"
+              )}
+            </button>
+          </div>
+
+          {/* Past bundles list */}
+          {bundlesLoading && pastBundles.length === 0 && (
+            <div className="flex items-center gap-2 text-xs text-fg-tertiary py-2">
+              <Spinner /> Loading bundle history…
+            </div>
+          )}
+
+          {!bundlesLoading && pastBundles.length === 0 && (
+            <p className="py-2 text-xs text-fg-tertiary">
+              No bundles exported yet.
+            </p>
+          )}
+
+          {pastBundles.length > 0 && (
+            <div className="rounded border border-border-subtle overflow-hidden text-xs">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-bg-surface border-b border-border-subtle text-fg-tertiary text-left">
+                    <th scope="col" className="py-1.5 px-3 font-medium">
+                      Directory
+                    </th>
+                    <th scope="col" className="py-1.5 px-3 font-medium">
+                      Locales
+                    </th>
+                    <th
+                      scope="col"
+                      className="py-1.5 px-3 font-medium text-right"
+                    >
+                      Examples
+                    </th>
+                    <th
+                      scope="col"
+                      className="py-1.5 px-3 font-medium text-right"
+                    >
+                      Score
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pastBundles.map((b) => {
+                    const dirName = b.path.replace(/\\/g, "/").split("/").pop();
+                    return (
+                      <tr
+                        key={b.path}
+                        className="border-b border-border-subtle last:border-0 hover:bg-bg-hover transition-colors duration-75"
+                      >
+                        <td
+                          className="py-1.5 px-3 text-fg-secondary font-mono whitespace-nowrap"
+                          title={b.path}
+                        >
+                          {dirName ?? b.path}
+                        </td>
+                        <td className="py-1.5 px-3 text-fg-secondary">
+                          {b.locales.join(", ") || "—"}
+                        </td>
+                        <td className="py-1.5 px-3 text-right tabular-nums text-fg-secondary">
+                          {b.examples_count}
+                        </td>
+                        <td className="py-1.5 px-3 text-right text-fg-tertiary">
+                          {b.has_score ? "included" : "none"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

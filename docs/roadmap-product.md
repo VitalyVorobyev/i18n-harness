@@ -516,7 +516,7 @@ Deferred to M4.10:
   score).
 - "Estimated runtime before starting" cost hint.
 
-### M4.10 — Tuning-skill contract
+### M4.10 — Tuning-skill contract ✓ shipped
 
 Ship the bundle schema as a stable contract and a sibling
 [`skills/tune-i18n-prompt/`](../skills/tune-i18n-prompt/) Claude Code

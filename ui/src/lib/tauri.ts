@@ -16,6 +16,7 @@ import type {
   DraftManifest,
   EvaluationRun,
   EvaluationStarted,
+  ExportTuningBundleResponse,
   GlossaryConfig,
   GlossaryLoadResponse,
   GlossaryPayload,
@@ -431,6 +432,36 @@ export async function listEvaluationRunsInProject(): Promise<EvaluationRun[]> {
 /// Returns true if the job existed, false otherwise.
 export async function cancelEvaluation(jobId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_translation", { jobId });
+}
+
+// ── M4.10 — Tuning bundle wrappers ───────────────────────────────────────────
+
+/// Export a tuning bundle to `.i18n-harness/tuning/<timestamp>/`.
+///
+/// Calls `Project::export_tuning_bundle` under a brief project lock. The
+/// bundle contains the curated example set, the active prompt template,
+/// the latest evaluation run (if one exists), the locale config, and a copy
+/// of the skill README.
+///
+/// Errors with "no curated examples; promote some corrections first" when the
+/// curated set is empty.
+export async function exportTuningBundleInProject(): Promise<ExportTuningBundleResponse> {
+  return await invoke<ExportTuningBundleResponse>(
+    "export_tuning_bundle_in_project",
+  );
+}
+
+/// List previously-exported tuning bundles for the open project, newest-first.
+///
+/// Reads `.i18n-harness/tuning/` and returns one summary per bundle
+/// subdirectory that contains a valid `examples.jsonl`. Returns an empty
+/// array when no bundles have been exported yet.
+export async function listTuningBundlesInProject(): Promise<
+  ExportTuningBundleResponse[]
+> {
+  return await invoke<ExportTuningBundleResponse[]>(
+    "list_tuning_bundles_in_project",
+  );
 }
 
 /// Scan every catalog in the open project for units that need human review.

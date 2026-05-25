@@ -168,6 +168,12 @@ pub enum ProjectError {
         /// The backend kind string as it appeared in the manifest.
         kind: String,
     },
+
+    // ── Tuning bundle ─────────────────────────────────────────────────────
+    /// Tuning-bundle export was requested but the curated set is empty.
+    /// The user must promote at least one correction before exporting.
+    #[error("no curated examples; promote some corrections first")]
+    NoCuratedExamples,
 }
 
 /// Non-fatal diagnostic produced alongside a successful operation result.

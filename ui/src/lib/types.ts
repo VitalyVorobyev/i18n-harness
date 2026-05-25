@@ -514,6 +514,22 @@ export interface EvaluationTerminalPayload {
   run: EvaluationRun | null;
 }
 
+// ── M4.10 — Tuning bundle types ───────────────────────────────────────────────
+
+// ExportTuningBundleResponse mirrors ui/src-tauri/src/lib.rs ExportTuningBundleResponse.
+export interface ExportTuningBundleResponse {
+  /** Absolute path to the exported bundle directory. */
+  path: string;
+  /** Number of resolved examples written to examples.jsonl. */
+  examples_count: number;
+  /** Locale ids that appear in at least one example. */
+  locales: string[];
+  /** true if score.json was written (prior evaluation existed). */
+  has_score: boolean;
+  /** Prompt template version identifier baked into prompt.txt. */
+  prompt_template_version: string;
+}
+
 // ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
 
 // BatchScope mirrors ui/src-tauri/src/lib.rs. Kebab-case enum on the wire.
