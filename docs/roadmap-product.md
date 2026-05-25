@@ -581,9 +581,92 @@ The harness owns the bundle format and the in-app evaluation runner.
 
 ---
 
+# M5 — Agent translation flow (CLI + skill)
+
+**Status:** shipped (CLI-only). UI integration deferred to M6.
+
+The offline Copilot path from
+[`initial_design.md`](initial_design.md). The harness writes a
+batch + instructions to a known path; an external Claude Code /
+Copilot / Codex session — run by the user in a separate terminal —
+fills `targets.jsonl`; the harness ingests the result through the
+existing `ManualBackend` and runs the validation gate. No API key
+ever leaves the agent's session; the harness itself stays offline.
+
+The original docs M5 (structured-log adapter design) is **deferred
+indefinitely** in favour of this work.
+
+### M5.0 — On-disk format + serializer ✓ shipped
+
+`crates/backend/src/agent_batch.rs` — `ExportedUnit` curated view,
+`write_export` / `read_targets`, `AgentBatchError`. The batch
+directory layout (`README.md`, `prompt.md`, `units.jsonl`,
+`targets.jsonl`, `meta.json`) is the stable contract for M5.1,
+M5.2, and any external agent. Property test for identity round-trip;
+curated Qt `de_DE` fixture under `fixtures/agent-batch/`.
+
+### M5.1 — CLI `export-batch` + `import-batch` ✓ shipped
+
+Two new subcommands in `crates/cli/src/main.rs`:
+
+- `harness export-batch <catalog> --locale <id> --out <dir>
+  [--glossary <path>]` — extracts the catalog, filters writable
+  units, writes the batch folder. No model runs.
+- `harness import-batch <dir> --apply <catalog> [--out <path>]
+  [--metrics <path>]` — reads `targets.jsonl`, wraps it in a
+  `ManualBackend` closure, runs the gate, optionally writes back.
+  `--out` semantics mirror `harness translate`: dry-run without it,
+  atomic write with it, hard-finding write guard always.
+
+Qt-only at the CLI surface (matches existing `harness translate`).
+The format itself is format-agnostic.
+
+### M5.1.1 — Project-mode for export-batch / import-batch ✓ shipped
+
+Extended the M5.1 subcommands to accept `--project <dir>` and walk
+every Qt catalog matching `--locale` in the project manifest. The
+batch root holds one subfolder per catalog plus a project-level
+`README.md` and `meta.json` (`mode: "project"`). Non-Qt catalogs
+emit a `warning:` line and are skipped pending the multi-format
+CLI dispatch (separate milestone).
+
+### M5.2 — `translate-i18n-batch` skill ✓ shipped
+
+Two-file skill spec for external Claude Code sessions:
+
+- [`skills/translate-i18n-batch/README.md`](../skills/translate-i18n-batch/README.md)
+  — the procedural body: bundle layout, `units.jsonl` /
+  `targets.jsonl` schemas, ICU placeholder rules, plural CLDR forms,
+  glossary precedence, register handling, markup tag rules,
+  failure modes.
+- [`.claude/skills/translate-i18n-batch/SKILL.md`](../.claude/skills/translate-i18n-batch/SKILL.md)
+  — frontmatter + slash-command surface (`/translate-i18n-batch
+  <path>`); body delegates to the README.
+
+The skill is **external** — it runs in a Claude Code session the user
+opens separately; the harness never spawns it.
+
+---
+
+## Out of scope for M5
+
+- In-app UI integration (Settings backend picker, "Translate via
+  Claude Code" affordance, batch-folder reveal). **Deferred to M6.**
+- A real `agent` `TranslationBackend` impl that blocks on a
+  filesystem watcher. Deferred to M6.
+- Headless Claude Code / Copilot / Codex spawning from the harness.
+  Deferred to M6+.
+- PO + ICU-JSON CLI dispatch. The format spec is adapter-agnostic;
+  wiring the non-Qt adapters into the CLI is a separate axis.
+- Cloud / API-key backends.
+- The structured-log adapter (was the original docs M5; postponed
+  indefinitely).
+
+---
+
 ## Verification (rolling)
 
-After each M4.x:
+After each M4.x / M5.x:
 
 - `cargo test --workspace --all-targets` and
   `cargo clippy --workspace --all-targets -- -D warnings` and
@@ -594,3 +677,6 @@ After each M4.x:
   PO/ICU-JSON fixtures from M4.4/M4.5 onward) is byte-identical on
   every fixture.
 - Gate fixture matrix grows; no rule silently removed.
+- M5 adds the agent-flow round-trip: `export-batch → fill verbatim
+  → import-batch` produces a catalog that itself passes
+  `harness round-trip` byte-stably.

@@ -5,10 +5,13 @@
 [![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-red.svg)](#status)
 
-Local-first, offline translation harness for UI strings. Point it at your
-translation catalogs, let a local LLM fill in untranslated entries, and
-write back a byte-stable result — no API key, no cloud, no agent in the
-loop.
+Local-first, offline-by-default translation harness for UI strings.
+Point it at your translation catalogs, let a model fill in untranslated
+entries, and write back a byte-stable result. The default path is fully
+offline (Ollama running on your laptop, no API key, no cloud egress).
+Cloud LLM backends are supported as an opt-in via per-project config,
+and the two-phase CLI lets you delegate translation to an external
+agent (Claude Code / Copilot / Codex) when you want to.
 
 > **The two invariants this project rests on**
 >
@@ -21,35 +24,61 @@ loop.
 
 ## Why
 
-Most translation tools either (a) call a paid cloud API, or (b) demand
-you hand-edit catalogs in formats built for translators, not developers.
-`i18n-harness` does neither: a local model server (Ollama by default)
-runs on your laptop, a CLDR-driven validation gate guarantees the catalog
-round-trips byte-stably, and a per-`(backend, locale)` quality metric
-tells you empirically how well the local model is doing for each language
-pair.
+Most translation tools either (a) require a paid cloud API account to
+do anything at all, or (b) demand you hand-edit catalogs in formats
+built for translators, not developers. `i18n-harness` flips both.
+
+- The **default path** runs entirely on your laptop against a local
+  model server (Ollama). No API key needed, no cloud egress, free to
+  evaluate. Cloud LLMs are an opt-in per-project backend when you
+  want them, not a gate to clear before getting started.
+- A CLDR-driven validation gate guarantees the catalog round-trips
+  byte-stably regardless of which backend produced the translation,
+  so weak models can produce *worse text* but never *broken files*.
+- A per-`(backend, locale)` quality metric tells you empirically how
+  well each engine is doing for each language pair, so you can pick
+  your trade-off (local-and-free vs. cloud-and-strong vs.
+  external-agent) on evidence, not vendor pitch.
 
 ## Status
 
-**Pre-alpha.** The Cargo workspace is bootstrapped (Phase 0) and the
-architectural contracts are next (M0 — Qt `.ts` round-trip). See
-[`docs/implementation_plan.md`](docs/implementation_plan.md) for milestone
-scope and [`docs/initial_design.md`](docs/initial_design.md) for the full
-design.
+**Pre-alpha.** Core, multi-catalog project mode, all three target
+catalog formats (Qt `.ts`, PO, ICU-JSON), the validation gate, the
+local Ollama and `openai-compatible` backends, the Tauri desktop UI,
+quality evaluation, and the two-phase agent translation CLI are all
+in. UI integration of the agent flow is the next visible step. See
+[`docs/roadmap-product.md`](docs/roadmap-product.md) for the
+translator-facing milestone log and
+[`docs/initial_design.md`](docs/initial_design.md) for the full design.
 
-## Planned scope
+## Scope
 
-**Catalog formats:** Qt Linguist `.ts` (M0), gettext / Lingui PO (M4),
-ICU-JSON for react-intl / i18next (M4).
+**Catalog formats:** Qt Linguist `.ts`, gettext / Lingui PO, ICU-JSON
+for react-intl / i18next. Each is a `CatalogFormat` plugin behind a
+stable extension point — new formats land as serializers, not
+parser rewrites.
 
-**Translation engines:** `manual` — no model (M2); `ollama` — local
-Gemma 4 by default (M2); `openai-compatible` — covers vLLM, LM Studio,
-and cloud APIs (M4). Plus a two-phase CLI
-(`harness export-batch` / `harness import-batch`) for using Claude Code,
-Copilot, or any out-of-process agent as the translator.
+**Translation engines:**
 
-**Locales:** `en` source and `de_DE` target through M2; `es_ES` and
-`zh_Hans` arrive in M3 as a single config-row change — data, not code.
+- `manual` — closure-driven, no model. The trait substrate; also the
+  engine the agent-translation CLI routes through.
+- `ollama` — local Gemma 4 by default; the offline-by-default path.
+- `openai-compatible` — covers vLLM, LM Studio, and cloud APIs
+  (OpenAI, Anthropic, any provider speaking OpenAI Chat Completions).
+  Endpoint and API key per-project; the harness itself stores no
+  credentials.
+- **Two-phase agent CLI** (`harness export-batch` /
+  `harness import-batch` + the
+  [`translate-i18n-batch`](skills/translate-i18n-batch/) skill) for
+  delegating translation to an external Claude Code, Copilot, or
+  Codex session running on the user's machine. The harness writes a
+  self-contained batch folder; the agent fills `targets.jsonl`; the
+  harness ingests the result and runs the validation gate. No
+  in-process model dependency.
+
+**Locales:** `en` source plus `de_DE`, `es_ES`, `zh_Hans` targets out
+of the box. Adding a new locale is a single config-row change in
+`crates/locales` plus a CLDR plural-arity fixture — data, not code.
 
 ## Quick check
 

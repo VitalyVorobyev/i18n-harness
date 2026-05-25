@@ -35,9 +35,9 @@ The second invariant, equally firm:
 
 ## 2. What the product is
 
-A **local-first desktop app**: install a local model server (Ollama by default), point the app at your translation catalogs, and translate UI strings end-to-end — offline, free, no API key, no cloud, no agent required.
+A **local-first desktop app**: install a local model server (Ollama by default), point the app at your translation catalogs, and translate UI strings end-to-end. The default path is offline and free, with no API key required and no cloud egress; cloud LLMs (OpenAI, Anthropic, vLLM, LM Studio, anything OpenAI-Chat-compatible) are an opt-in per-project backend, and an external agent (Claude Code, Copilot, Codex) can drive the loop via the two-phase CLI when the translator chooses.
 
-A local model exposes a plain HTTP endpoint, so the app calls it directly. This is the shift that makes the app the product rather than a viewer: there is no agent in the core loop.
+A local model exposes a plain HTTP endpoint, so the app calls it directly: in the default configuration there is no agent in the core loop, just the deterministic harness talking to a local HTTP server. The agent flow is additive — opt in by exporting a batch and pointing an external agent at the folder.
 
 ```
 Tauri UI ─► Rust harness (in-process library)

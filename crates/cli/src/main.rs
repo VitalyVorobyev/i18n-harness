@@ -1,13 +1,19 @@
 //! `harness` — the headless CLI entry point for `i18n-harness`.
 //!
-//! See `docs/initial_design.md`. The CLI grows one subcommand per milestone:
-//! `round-trip` (M0) proves the byte-stability contract; `gate` (M1) runs
-//! the validation gate against a target locale and optionally writes JSONL
-//! metrics; `translate` (M2) runs the end-to-end loop (extract → batch →
-//! backend → gate → apply). Later milestones add `export-batch` /
-//! `import-batch` (M4) and `serve` (the Tauri shell, M3).
+//! See `docs/initial_design.md`. Subcommands:
+//! - `round-trip` — proves the byte-stability contract for a catalog.
+//! - `gate` — runs the validation gate against a target locale and
+//!   optionally writes JSONL metrics.
+//! - `translate` — runs the end-to-end loop (extract → batch → backend
+//!   → gate → apply).
+//! - `init` / `open` — discover and load i18n-harness projects.
+//! - `export-batch` / `import-batch` — the two-phase agent translation
+//!   flow; `export-batch` writes a batch folder an external agent
+//!   (Claude Code / Copilot / Codex) fills, `import-batch` ingests the
+//!   result through the manual backend.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
@@ -15,6 +21,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use i18n_harness_adapter_qt::{apply, extract, render};
 use i18n_harness_backend::{
     ManualBackend, ManualResponse, TranslatedText, TranslationBackend, TranslationOutcome,
+    agent_batch,
 };
 use i18n_harness_core::{
     Batch, BatchKey, DEFAULT_BATCH_SIZE, Flag, FlagSeverity, Target, Unit, UnitState,
@@ -27,6 +34,7 @@ use i18n_harness_gate::{
 };
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
+use i18n_harness_project::Project;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -68,6 +76,17 @@ enum Command {
     /// `<dir>/i18n-harness.toml`) and print its summary. Exits non-zero if
     /// the manifest is missing or invalid.
     Open(OpenArgs),
+
+    /// Phase 1 of the two-phase agent flow: extract writable units from a
+    /// catalog, build a prompt, and write the export folder an external agent
+    /// fills in. Prints the absolute path of the output directory on stdout.
+    /// Fully deterministic — no model, no network.
+    ExportBatch(ExportBatchArgs),
+
+    /// Phase 2 of the two-phase agent flow: read the agent-filled
+    /// `targets.jsonl` from an export folder, run the gate, and optionally
+    /// write the post-translation catalog. Without `--out`, runs as dry-run.
+    ImportBatch(ImportBatchArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -144,6 +163,72 @@ struct TranslateArgs {
     batch_size: usize,
 }
 
+#[derive(Parser, Debug)]
+struct ExportBatchArgs {
+    /// Single-catalog mode: path to the Qt `.ts` catalog to export.
+    ///
+    /// Mutually exclusive with `--project`. Only Qt catalogs are supported in
+    /// this release; non-Qt catalogs in a project are warned about and skipped.
+    #[arg(group = "source", required_unless_present = "project")]
+    path: Option<PathBuf>,
+
+    /// Project mode: project root directory containing `i18n-harness.toml`.
+    ///
+    /// Mutually exclusive with the positional `<PATH>` argument.
+    #[arg(long, group = "source")]
+    project: Option<PathBuf>,
+
+    /// Target locale id (e.g. `de_DE`).
+    #[arg(long)]
+    locale: String,
+
+    /// Directory to write the export folder into. Created if absent.
+    ///
+    /// In project mode, each matching catalog gets its own subfolder.
+    #[arg(long)]
+    out: PathBuf,
+
+    /// Single-catalog mode only: optional glossary TOML file. Terms are
+    /// inlined into `prompt.md`; load failures abort. Ignored in project
+    /// mode — the manifest glossary is used instead.
+    #[arg(long, conflicts_with = "project")]
+    glossary: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct ImportBatchArgs {
+    /// Export folder produced by `export-batch` (contains `units.jsonl`,
+    /// `targets.jsonl`, etc., or subfolders in project mode).
+    dir: PathBuf,
+
+    /// Single-catalog mode: path to the catalog the batch was extracted from.
+    ///
+    /// Mutually exclusive with `--project`.
+    #[arg(long, group = "target")]
+    apply: Option<PathBuf>,
+
+    /// Project mode: project root directory containing `i18n-harness.toml`.
+    ///
+    /// Mutually exclusive with `--apply`.
+    #[arg(long, group = "target")]
+    project: Option<PathBuf>,
+
+    /// If set, append one JSONL event per finding to this file.
+    #[arg(long)]
+    metrics: Option<PathBuf>,
+
+    /// Single-catalog mode only: write the post-translation catalog here
+    /// atomically. Without `--out`, runs as dry-run.
+    #[arg(long, conflicts_with = "project")]
+    out: Option<PathBuf>,
+
+    /// Project mode only: write each post-translation catalog under this
+    /// directory, preserving the manifest-relative directory structure.
+    /// Without `--out-dir`, runs as dry-run.
+    #[arg(long, conflicts_with = "apply")]
+    out_dir: Option<PathBuf>,
+}
+
 /// Which backend to run.
 ///
 /// `ollama` is a `clap` value but only constructible when the CLI is built
@@ -153,7 +238,8 @@ struct TranslateArgs {
 enum BackendChoice {
     /// The closure-driven `ManualBackend`. The CLI wires an identity-echo
     /// closure (returns source verbatim) so the loop is testable end-to-end
-    /// without a model. The same backend powers the M4 two-phase agent path.
+    /// without a model. The same backend powers the two-phase agent CLI
+    /// (`harness import-batch`).
     Manual,
     /// Local Ollama server at `http://localhost:11434`. Requires the CLI to
     /// be built with `--features ollama` (forwards to the backend crate's
@@ -179,6 +265,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Translate(args) => translate(args),
         Command::Init(args) => init(args),
         Command::Open(args) => open(args),
+        Command::ExportBatch(args) => export_batch(args),
+        Command::ImportBatch(args) => import_batch(args),
     }
 }
 
@@ -556,6 +644,881 @@ fn translate(args: TranslateArgs) -> Result<()> {
     Ok(())
 }
 
+fn export_batch(args: ExportBatchArgs) -> Result<()> {
+    match (args.path, args.project) {
+        (Some(path), None) => export_batch_single(path, args.locale, args.out, args.glossary),
+        (None, Some(project_root)) => export_batch_project(project_root, args.locale, args.out),
+        _ => Err(anyhow!(
+            "specify either a catalog path or --project, not both"
+        )),
+    }
+}
+
+fn export_batch_single(
+    path: PathBuf,
+    locale_id: String,
+    out: PathBuf,
+    glossary_path: Option<PathBuf>,
+) -> Result<()> {
+    let locale =
+        Locale::by_id(&locale_id).ok_or_else(|| anyhow!("unknown locale: {}", locale_id))?;
+
+    let glossary = load_optional_glossary(glossary_path.as_deref())?;
+
+    export_batch_one(
+        &path,
+        locale,
+        &out,
+        glossary.as_ref(),
+        glossary_path.as_deref(),
+    )?;
+
+    println!(
+        "{}",
+        out.canonicalize().unwrap_or_else(|_| out.clone()).display()
+    );
+    Ok(())
+}
+
+/// Write one per-catalog export subfolder. Shared by single-catalog and project modes.
+fn export_batch_one(
+    catalog_path: &Path,
+    locale: &Locale,
+    out_dir: &Path,
+    glossary: Option<&Glossary>,
+    glossary_path: Option<&Path>,
+) -> Result<()> {
+    let catalog =
+        extract(catalog_path).with_context(|| format!("extract {}", catalog_path.display()))?;
+
+    let writable: Vec<Unit> = catalog
+        .units()
+        .iter()
+        .filter(|u| u.state.is_writable())
+        .cloned()
+        .collect();
+
+    if writable.is_empty() {
+        eprintln!(
+            "note: no writable units in {}; export folder will be empty",
+            catalog_path.display()
+        );
+    }
+
+    let file_hash = file_hash(catalog_path)?;
+    let batch = Batch::new(BatchKey::new(&file_hash, 0), writable);
+    let prompt = build_agent_prompt(locale, glossary);
+
+    agent_batch::write_export(
+        out_dir,
+        &batch,
+        locale,
+        glossary,
+        glossary_path,
+        catalog_path,
+        &prompt,
+    )
+    .with_context(|| format!("write export to {}", out_dir.display()))?;
+
+    // Create an empty targets.jsonl so agents can append directly.
+    let targets_path = out_dir.join("targets.jsonl");
+    if !targets_path.exists() {
+        std::fs::File::create(&targets_path)
+            .with_context(|| format!("create {}", targets_path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn export_batch_project(project_root: PathBuf, locale_id: String, out: PathBuf) -> Result<()> {
+    use i18n_harness_project::CatalogFormat;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let (project, warnings) = Project::open(&project_root)
+        .with_context(|| format!("open project {}", project_root.display()))?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+
+    let matching: Vec<_> = project
+        .catalogs()
+        .iter()
+        .filter(|c| c.locale == locale_id)
+        .collect();
+
+    if matching.is_empty() {
+        let present: Vec<String> = {
+            let mut seen = std::collections::BTreeSet::new();
+            for c in project.catalogs() {
+                seen.insert(c.locale.clone());
+            }
+            seen.into_iter().collect()
+        };
+        return Err(anyhow!(
+            "no catalogs for locale `{locale_id}` in project {}; \
+             locales present: {}",
+            project_root.display(),
+            if present.is_empty() {
+                "(none)".to_owned()
+            } else {
+                present.join(", ")
+            },
+        ));
+    }
+
+    let locale =
+        Locale::by_id(&locale_id).ok_or_else(|| anyhow!("unknown locale: {}", locale_id))?;
+
+    let glossary = project.glossary();
+
+    std::fs::create_dir_all(&out)
+        .with_context(|| format!("create output dir {}", out.display()))?;
+
+    let mut subfolders: Vec<String> = Vec::new();
+
+    for cat_ref in &matching {
+        if cat_ref.format != CatalogFormat::QtTs {
+            eprintln!(
+                "warning: skipping {:?} catalog `{}` — only Qt catalogs are supported in \
+                 export-batch for now",
+                cat_ref.format, cat_ref.manifest_path
+            );
+            continue;
+        }
+
+        let slug = manifest_path_slug(&cat_ref.manifest_path, &subfolders);
+        let subfolder = out.join(&slug);
+        subfolders.push(slug.clone());
+
+        let catalog_abs = Path::new(&cat_ref.absolute_path);
+        export_batch_one(
+            catalog_abs,
+            locale,
+            &subfolder,
+            glossary,
+            project.paths().glossary(),
+        )?;
+    }
+
+    if subfolders.is_empty() {
+        return Err(anyhow!(
+            "no Qt catalogs matched locale `{locale_id}` in project {}; \
+             non-Qt catalogs are not yet supported by export-batch",
+            project_root.display(),
+        ));
+    }
+
+    let started_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Root README.md
+    let manifest_paths: Vec<&str> = matching
+        .iter()
+        .filter(|c| c.format == CatalogFormat::QtTs)
+        .map(|c| c.manifest_path.as_str())
+        .collect();
+    let readme = render_project_readme(
+        &project_root.display().to_string(),
+        &locale_id,
+        &subfolders,
+        &manifest_paths,
+    );
+    write_file_atomic(&out, "README.md", readme.as_bytes())?;
+
+    // Root meta.json
+    let meta = serde_json::json!({
+        "format_version": "1",
+        "mode": "project",
+        "project_root": project_root.display().to_string(),
+        "locale_id": locale_id,
+        "subfolders": subfolders,
+        "started_at_unix_secs": started_at,
+    });
+    let meta_bytes = {
+        let mut v =
+            serde_json::to_vec_pretty(&meta).map_err(|e| anyhow!("serialize meta.json: {e}"))?;
+        v.push(b'\n');
+        v
+    };
+    write_file_atomic(&out, "meta.json", &meta_bytes)?;
+
+    println!(
+        "{}",
+        out.canonicalize().unwrap_or_else(|_| out.clone()).display()
+    );
+    Ok(())
+}
+
+/// Derive a filesystem-safe slug from a manifest path, avoiding collisions.
+fn manifest_path_slug(manifest_path: &str, existing: &[String]) -> String {
+    // Replace all forbidden characters with `_`; keep `.`.
+    let forbidden = |c: char| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|');
+    let raw: String = manifest_path
+        .chars()
+        .map(|c| if forbidden(c) { '_' } else { c })
+        .collect();
+
+    // Strip a leading dot so we never create hidden folders.
+    let raw = raw.trim_start_matches('.').to_owned();
+
+    // Cap at 200 chars (reserve room for collision suffixes).
+    const MAX_LEN: usize = 200;
+    let base = if raw.len() <= MAX_LEN {
+        raw
+    } else {
+        use sha2::{Digest, Sha256};
+        use std::fmt::Write as _;
+        let mut h = Sha256::new();
+        h.update(manifest_path.as_bytes());
+        let hash = format!("{:x}", h.finalize());
+        let mut s = raw[..MAX_LEN - 9].to_owned();
+        let _ = write!(s, "_{}", &hash[..8]);
+        s
+    };
+
+    // Collision avoidance.
+    if !existing.contains(&base) {
+        return base;
+    }
+    for n in 1u32.. {
+        let candidate = format!("{base}-{n}");
+        if !existing.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("collision loop exhausted u32 space")
+}
+
+fn render_project_readme(
+    project_root: &str,
+    locale_id: &str,
+    subfolders: &[String],
+    manifest_paths: &[&str],
+) -> String {
+    let rows: String = subfolders
+        .iter()
+        .zip(manifest_paths.iter())
+        .map(|(sf, mp)| format!("| `{sf}/` | `{mp}` |\n"))
+        .collect();
+    format!(
+        r#"# Project translation batch — {locale_id}
+
+Project root: `{project_root}`
+Locale: **{locale_id}**
+
+## Catalog subfolders
+
+| Subfolder | Manifest path |
+|---|---|
+{rows}
+Each subfolder contains the same layout as a single-catalog batch
+(`units.jsonl`, `prompt.md`, `targets.jsonl`, `meta.json`).
+
+See `skills/translate-i18n-batch/` for the rule-set and schema.
+"#
+    )
+}
+
+fn write_file_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+    let final_path = dir.join(name);
+    let tmp_path = dir.join(format!("{name}.tmp"));
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(&tmp_path)
+            .with_context(|| format!("create {}", tmp_path.display()))?;
+        f.write_all(bytes)
+            .with_context(|| format!("write {}", tmp_path.display()))?;
+        f.sync_all()
+            .with_context(|| format!("sync {}", tmp_path.display()))?;
+    }
+    std::fs::rename(&tmp_path, &final_path)
+        .with_context(|| format!("rename {} → {}", tmp_path.display(), final_path.display()))?;
+    Ok(())
+}
+
+/// Build the system-prompt string inlined into `prompt.md`.
+///
+/// Glossary content is inlined here so the agent can read everything it
+/// needs from a single file without loading the project glossary separately.
+fn build_agent_prompt(locale: &Locale, glossary: Option<&Glossary>) -> String {
+    use i18n_harness_glossary::Register as GlossRegister;
+
+    let register =
+        glossary
+            .and_then(|g| g.register_for(locale.id))
+            .unwrap_or(match locale.register {
+                i18n_harness_locales::Register::Formal => GlossRegister::Formal,
+                i18n_harness_locales::Register::Informal => GlossRegister::Informal,
+                i18n_harness_locales::Register::Neutral => GlossRegister::Neutral,
+            });
+
+    let register_str = match register {
+        GlossRegister::Formal => "formal",
+        GlossRegister::Informal => "informal",
+        GlossRegister::Neutral => "neutral",
+    };
+
+    let terms_block = match glossary {
+        Some(g) => {
+            let terms: Vec<_> = g.terms_for(locale.id).collect();
+            if terms.is_empty() {
+                "(none)".to_owned()
+            } else {
+                terms
+                    .into_iter()
+                    .map(|(src, tgt)| format!("  {src} → {tgt}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
+        None => "(none)".to_owned(),
+    };
+
+    let dnt_block = match glossary {
+        Some(g) => {
+            let dnt: Vec<_> = g.do_not_translate().collect();
+            if dnt.is_empty() {
+                "(none)".to_owned()
+            } else {
+                dnt.iter()
+                    .map(|s| format!("  - {s}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
+        None => "(none)".to_owned(),
+    };
+
+    format!(
+        r#"# System prompt — agent translation batch
+
+Target locale: {locale_id} ({script:?})
+Register: {register_str}
+
+Glossary terms (source → target):
+{terms_block}
+
+Do not translate:
+{dnt_block}
+
+See README.md in this folder for the schema of targets.jsonl and the full rules.
+If you are running the `translate-i18n-batch` Claude Code skill, it has the full rule-set.
+"#,
+        locale_id = locale.id,
+        script = locale.script,
+    )
+}
+
+fn import_batch(args: ImportBatchArgs) -> Result<()> {
+    match (args.apply, args.project) {
+        (Some(apply_path), None) => {
+            import_batch_single(args.dir, apply_path, args.metrics, args.out)
+        }
+        (None, Some(project_root)) => {
+            import_batch_project(args.dir, project_root, args.metrics, args.out_dir)
+        }
+        (Some(_), Some(_)) => Err(anyhow!("specify either --apply or --project, not both")),
+        (None, None) => Err(anyhow!(
+            "specify either --apply <catalog> or --project <dir>"
+        )),
+    }
+}
+
+fn import_batch_single(
+    dir: PathBuf,
+    apply_path: PathBuf,
+    metrics: Option<PathBuf>,
+    out: Option<PathBuf>,
+) -> Result<()> {
+    let (locale_id, _mode) = read_meta_locale_and_mode(&dir)?;
+    let locale = Locale::by_id(&locale_id)
+        .ok_or_else(|| anyhow!("unknown locale in meta.json: {locale_id}"))?;
+
+    let responses = agent_batch::read_targets(&dir).map_err(|e| anyhow!("{e}"))?;
+
+    let catalog =
+        extract(&apply_path).with_context(|| format!("extract {}", apply_path.display()))?;
+    let original_units = catalog.units().to_vec();
+
+    let mut writable: Vec<Unit> = Vec::new();
+    let mut preserved: Vec<Unit> = Vec::new();
+    for u in &original_units {
+        if u.state.is_writable() {
+            writable.push(u.clone());
+        } else {
+            preserved.push(u.clone());
+        }
+    }
+
+    if writable.len() != responses.len() {
+        return Err(anyhow!(
+            "catalog writable unit count ({writable}) differs from targets.jsonl line count ({got}); \
+             the catalog may have changed since export-batch ran",
+            writable = writable.len(),
+            got = responses.len(),
+        ));
+    }
+
+    let file_hash = file_hash(&apply_path)?;
+    let batch = Batch::new(BatchKey::new(&file_hash, 0), writable);
+
+    verify_batch_matches_export(&dir, &batch)?;
+
+    let response_map: HashMap<String, ManualResponse> = batch
+        .units
+        .iter()
+        .map(|u| u.id.as_str().to_owned())
+        .zip(responses)
+        .collect();
+
+    let backend = ManualBackend::named("agent", false, |ctx| {
+        response_map
+            .get(ctx.unit.id.as_str())
+            .cloned()
+            .unwrap_or(ManualResponse::Skip)
+    });
+    let backend_name = backend.name().to_owned();
+
+    let writer = metrics
+        .as_ref()
+        .map(|p| MetricsWriter::new(&backend_name, &locale_id, FileSink::new(p)));
+    let outcomes = backend
+        .translate_batch(&batch, locale, None)
+        .with_context(|| "agent backend translate")?;
+
+    if outcomes.len() != batch.units.len() {
+        return Err(anyhow!(
+            "backend returned {got} outcomes for batch of {expected}",
+            got = outcomes.len(),
+            expected = batch.units.len(),
+        ));
+    }
+
+    let mut summary = TranslateSummary::default();
+    let merged: Vec<Unit> = batch
+        .units
+        .iter()
+        .zip(outcomes.iter())
+        .map(|(unit, outcome)| merge_outcome(unit, outcome, &mut summary))
+        .collect();
+
+    let reports = validate_batch(&merged, locale, None);
+
+    let mut translated_units: Vec<Unit> = Vec::with_capacity(merged.len());
+    for (unit, report) in merged.into_iter().zip(reports) {
+        if let Some(w) = writer.as_ref()
+            && !report.findings.is_empty()
+            && let Err(e) = w.record_report(&report)
+        {
+            eprintln!("warning: failed to write metrics line: {e}");
+        }
+
+        let mut promoted = unit;
+        if report.is_clean() && promoted.target.is_complete() {
+            promoted.state = UnitState::Finished;
+            summary.finished += 1;
+        } else if !report.is_clean() {
+            summary.flagged += 1;
+            for finding in &report.findings {
+                match finding.flag.severity() {
+                    FlagSeverity::Hard => summary.hard += 1,
+                    FlagSeverity::Soft => summary.soft += 1,
+                    FlagSeverity::Semantic => {}
+                }
+            }
+            print_unit(&promoted, &report);
+        }
+
+        translated_units.push(promoted);
+    }
+
+    let mut overrides = translated_units;
+    overrides.extend(preserved);
+
+    let _bytes =
+        render(&catalog, &overrides).with_context(|| format!("render {}", apply_path.display()))?;
+
+    let write_blocked = summary.hard > 0;
+
+    if let Some(out_path) = out.as_ref() {
+        if write_blocked {
+            eprintln!(
+                "\nblocked: {} hard finding(s); not writing {} (use `harness gate` to inspect)",
+                summary.hard,
+                out_path.display(),
+            );
+        } else {
+            apply(&catalog, &overrides, out_path)
+                .with_context(|| format!("apply → {}", out_path.display()))?;
+            println!(
+                "\nwrote: {} ({} units)",
+                out_path.display(),
+                overrides.len()
+            );
+        }
+    } else {
+        println!("\ndry-run (no --out); skipped write-back");
+    }
+
+    println!(
+        "translate report: {} → locale={} backend={}  writable={} translated={} skipped={} failed={} finished={} flagged={} hard={} soft={}",
+        apply_path.display(),
+        locale_id,
+        backend_name,
+        summary.writable_total,
+        summary.translated,
+        summary.skipped,
+        summary.failed,
+        summary.finished,
+        summary.flagged,
+        summary.hard,
+        summary.soft,
+    );
+
+    if write_blocked {
+        return Err(anyhow!(
+            "{} hard finding(s) — write-back blocked",
+            summary.hard,
+        ));
+    }
+    Ok(())
+}
+
+fn import_batch_project(
+    batch_root: PathBuf,
+    project_root: PathBuf,
+    metrics: Option<PathBuf>,
+    out_dir: Option<PathBuf>,
+) -> Result<()> {
+    // Read root meta.json; confirm mode == "project".
+    let root_meta_path = batch_root.join("meta.json");
+    let root_meta_bytes = std::fs::read(&root_meta_path)
+        .with_context(|| format!("read {}", root_meta_path.display()))?;
+    let root_meta: serde_json::Value = serde_json::from_slice(&root_meta_bytes)
+        .with_context(|| format!("parse {}", root_meta_path.display()))?;
+
+    let mode = root_meta.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+    if mode != "project" {
+        return Err(anyhow!(
+            "batch at {} was produced in single-catalog mode (mode={:?}); \
+             use `--apply <catalog>` instead of `--project`",
+            batch_root.display(),
+            mode,
+        ));
+    }
+
+    let locale_id = root_meta
+        .get("locale_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("root meta.json missing locale_id"))?
+        .to_owned();
+    let locale = Locale::by_id(&locale_id)
+        .ok_or_else(|| anyhow!("unknown locale in meta.json: {locale_id}"))?;
+
+    let subfolders: Vec<String> = root_meta
+        .get("subfolders")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("root meta.json missing subfolders array"))?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_owned))
+        .collect();
+
+    let (project, warnings) = Project::open(&project_root)
+        .with_context(|| format!("open project {}", project_root.display()))?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+
+    let backend_name = "agent";
+    let writer = metrics
+        .as_ref()
+        .map(|p| MetricsWriter::new(backend_name, &locale_id, FileSink::new(p)));
+
+    let mut overall_hard = 0usize;
+    let mut overall_summary = TranslateSummary::default();
+
+    for subfolder_name in &subfolders {
+        let subfolder = batch_root.join(subfolder_name);
+
+        // Read the subfolder's meta.json to find the original catalog path.
+        let sub_meta_path = subfolder.join("meta.json");
+        let sub_meta_bytes = std::fs::read(&sub_meta_path)
+            .with_context(|| format!("read {}", sub_meta_path.display()))?;
+        let sub_meta: serde_json::Value = serde_json::from_slice(&sub_meta_bytes)
+            .with_context(|| format!("parse {}", sub_meta_path.display()))?;
+
+        let source_catalog_path_str = sub_meta
+            .get("source_catalog_path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                anyhow!(
+                    "subfolder meta.json {} missing source_catalog_path",
+                    sub_meta_path.display()
+                )
+            })?;
+        let catalog_abs = Path::new(source_catalog_path_str);
+
+        // Match against the project by manifest_path or absolute_path.
+        let cat_ref = project.catalog(catalog_abs).ok_or_else(|| {
+            anyhow!(
+                "catalog `{}` (from subfolder `{}`) is not registered in project {}",
+                source_catalog_path_str,
+                subfolder_name,
+                project_root.display(),
+            )
+        })?;
+
+        let catalog_abs_path = Path::new(&cat_ref.absolute_path);
+
+        let responses = agent_batch::read_targets(&subfolder).map_err(|e| anyhow!("{e}"))?;
+
+        let catalog = extract(catalog_abs_path)
+            .with_context(|| format!("extract {}", catalog_abs_path.display()))?;
+        let original_units = catalog.units().to_vec();
+
+        let mut writable: Vec<Unit> = Vec::new();
+        let mut preserved: Vec<Unit> = Vec::new();
+        for u in &original_units {
+            if u.state.is_writable() {
+                writable.push(u.clone());
+            } else {
+                preserved.push(u.clone());
+            }
+        }
+
+        if writable.len() != responses.len() {
+            return Err(anyhow!(
+                "catalog `{}` writable unit count ({}) differs from targets.jsonl count ({}); \
+                 the catalog may have changed since export-batch ran",
+                cat_ref.manifest_path,
+                writable.len(),
+                responses.len(),
+            ));
+        }
+
+        let file_hash = file_hash(catalog_abs_path)?;
+        let batch = Batch::new(BatchKey::new(&file_hash, 0), writable);
+
+        verify_batch_matches_export(&subfolder, &batch).with_context(|| {
+            format!(
+                "subfolder `{subfolder_name}` (catalog `{}`)",
+                cat_ref.manifest_path
+            )
+        })?;
+
+        let response_map: HashMap<String, ManualResponse> = batch
+            .units
+            .iter()
+            .map(|u| u.id.as_str().to_owned())
+            .zip(responses)
+            .collect();
+
+        let backend = ManualBackend::named(backend_name, false, |ctx| {
+            response_map
+                .get(ctx.unit.id.as_str())
+                .cloned()
+                .unwrap_or(ManualResponse::Skip)
+        });
+
+        let outcomes = backend
+            .translate_batch(&batch, locale, None)
+            .with_context(|| format!("translate batch for `{}`", cat_ref.manifest_path))?;
+
+        let mut summary = TranslateSummary::default();
+        let merged: Vec<Unit> = batch
+            .units
+            .iter()
+            .zip(outcomes.iter())
+            .map(|(unit, outcome)| merge_outcome(unit, outcome, &mut summary))
+            .collect();
+
+        let reports = validate_batch(&merged, locale, None);
+
+        let mut translated_units: Vec<Unit> = Vec::with_capacity(merged.len());
+        for (unit, report) in merged.into_iter().zip(reports) {
+            if let Some(w) = writer.as_ref()
+                && !report.findings.is_empty()
+                && let Err(e) = w.record_report(&report)
+            {
+                eprintln!("warning: failed to write metrics line: {e}");
+            }
+
+            let mut promoted = unit;
+            if report.is_clean() && promoted.target.is_complete() {
+                promoted.state = UnitState::Finished;
+                summary.finished += 1;
+            } else if !report.is_clean() {
+                summary.flagged += 1;
+                for finding in &report.findings {
+                    match finding.flag.severity() {
+                        FlagSeverity::Hard => summary.hard += 1,
+                        FlagSeverity::Soft => summary.soft += 1,
+                        FlagSeverity::Semantic => {}
+                    }
+                }
+                print_unit(&promoted, &report);
+            }
+
+            translated_units.push(promoted);
+        }
+
+        let mut overrides = translated_units;
+        overrides.extend(preserved);
+
+        let _bytes = render(&catalog, &overrides)
+            .with_context(|| format!("render {}", catalog_abs_path.display()))?;
+
+        let catalog_write_blocked = summary.hard > 0;
+
+        if let Some(out_base) = out_dir.as_ref() {
+            let manifest_rel = Path::new(&cat_ref.manifest_path);
+            let dest = out_base.join(manifest_rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("create dirs {}", parent.display()))?;
+            }
+
+            if catalog_write_blocked {
+                eprintln!(
+                    "\nblocked: {} hard finding(s) in `{}`; not writing {} \
+                     (use `harness gate` to inspect)",
+                    summary.hard,
+                    cat_ref.manifest_path,
+                    dest.display(),
+                );
+            } else {
+                apply(&catalog, &overrides, &dest)
+                    .with_context(|| format!("apply → {}", dest.display()))?;
+                println!("\nwrote: {} ({} units)", dest.display(), overrides.len());
+            }
+        }
+
+        println!(
+            "translate report: {} → locale={} backend={}  writable={} translated={} skipped={} \
+             failed={} finished={} flagged={} hard={} soft={}",
+            cat_ref.manifest_path,
+            locale_id,
+            backend_name,
+            summary.writable_total,
+            summary.translated,
+            summary.skipped,
+            summary.failed,
+            summary.finished,
+            summary.flagged,
+            summary.hard,
+            summary.soft,
+        );
+
+        overall_hard += summary.hard;
+        overall_summary.writable_total += summary.writable_total;
+        overall_summary.translated += summary.translated;
+        overall_summary.skipped += summary.skipped;
+        overall_summary.failed += summary.failed;
+        overall_summary.finished += summary.finished;
+        overall_summary.flagged += summary.flagged;
+        overall_summary.hard += summary.hard;
+        overall_summary.soft += summary.soft;
+    }
+
+    if out_dir.is_none() {
+        println!("\ndry-run (no --out-dir); skipped write-back");
+    }
+
+    println!(
+        "\noverall report: catalogs={} locale={} backend={}  writable={} translated={} \
+         skipped={} failed={} finished={} flagged={} hard={} soft={}",
+        subfolders.len(),
+        locale_id,
+        backend_name,
+        overall_summary.writable_total,
+        overall_summary.translated,
+        overall_summary.skipped,
+        overall_summary.failed,
+        overall_summary.finished,
+        overall_summary.flagged,
+        overall_summary.hard,
+        overall_summary.soft,
+    );
+
+    if overall_hard > 0 {
+        return Err(anyhow!(
+            "{} hard finding(s) across project — some catalogs were not written",
+            overall_hard,
+        ));
+    }
+    Ok(())
+}
+
+fn read_meta_locale_and_mode(dir: &Path) -> Result<(String, String)> {
+    let meta_path = dir.join("meta.json");
+    let meta_bytes =
+        std::fs::read(&meta_path).with_context(|| format!("read {}", meta_path.display()))?;
+    let meta: serde_json::Value = serde_json::from_slice(&meta_bytes)
+        .with_context(|| format!("parse {}", meta_path.display()))?;
+    let locale_id = meta
+        .get("locale_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("meta.json missing locale_id"))?
+        .to_owned();
+    let mode = meta
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("single")
+        .to_owned();
+    Ok((locale_id, mode))
+}
+
+fn load_optional_glossary(path: Option<&Path>) -> Result<Option<Glossary>> {
+    match path {
+        Some(p) => {
+            let (g, warnings) =
+                Glossary::load(p).with_context(|| format!("load glossary {}", p.display()))?;
+            for w in &warnings {
+                eprintln!("glossary warning: {w}");
+            }
+            Ok(Some(g))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Verify the current catalog's writable units (after `Batch::new` sorting)
+/// match the ids recorded in the export folder's `units.jsonl`, position-wise.
+///
+/// `read_targets` already validates that `targets.jsonl` lines align with
+/// `units.jsonl`, but that only proves the export folder is internally
+/// consistent. If the source catalog has been edited (units added, removed,
+/// renamed, or re-keyed) between `export-batch` and `import-batch`, the
+/// writable unit count can still match the response count by coincidence
+/// while the per-position ids drift. Position-wise application would then
+/// silently translate the wrong units. Refuse to proceed instead.
+fn verify_batch_matches_export(export_dir: &Path, batch: &Batch) -> Result<()> {
+    let expected_ids =
+        agent_batch::read_unit_ids(export_dir).map_err(|e| anyhow!("read units.jsonl: {e}"))?;
+    if expected_ids.len() != batch.units.len() {
+        // Already covered upstream by the writable/response count check,
+        // but a second guard here keeps this helper self-contained.
+        return Err(anyhow!(
+            "export folder lists {} units; current catalog has {} writable units",
+            expected_ids.len(),
+            batch.units.len(),
+        ));
+    }
+    for (idx, (current, expected)) in batch.units.iter().zip(expected_ids.iter()).enumerate() {
+        if current.id.as_str() != expected {
+            return Err(anyhow!(
+                "unit id mismatch at position {idx}: export expects `{expected}`, \
+                 current catalog has `{current_id}`. The catalog has changed since \
+                 export-batch ran; re-run export-batch and try again.",
+                current_id = current.id.as_str(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Default)]
 struct TranslateSummary {
     writable_total: usize,
@@ -749,10 +1712,10 @@ fn file_hash(path: &std::path::Path) -> Result<String> {
     use sha2::{Digest, Sha256};
     let bytes = std::fs::read(path).with_context(|| format!("read {} for hash", path.display()))?;
     // SHA-256 hex (lower-case). The `core::Batch` contract treats the
-    // hash as an opaque string; this commits us to a specific algorithm
-    // for the on-disk resume-key persistence that lands with M3's batch-
-    // state recovery. Using a cryptographic hash from the start avoids a
-    // forced migration once persisted state references it.
+    // hash as an opaque string; we commit to a specific algorithm here
+    // so on-disk resume-key persistence stays consistent. Using a
+    // cryptographic hash from the start avoids a forced migration
+    // once persisted state references it.
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(format!("{:x}", hasher.finalize()))

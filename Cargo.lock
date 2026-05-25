@@ -1484,6 +1484,7 @@ dependencies = [
  "i18n-harness-locales",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "ureq",
 ]
@@ -1514,6 +1515,7 @@ dependencies = [
  "i18n-harness-glossary",
  "i18n-harness-locales",
  "i18n-harness-project",
+ "serde_json",
  "sha2",
  "tracing",
  "tracing-subscriber",

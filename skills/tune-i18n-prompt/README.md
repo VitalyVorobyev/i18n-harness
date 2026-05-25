@@ -6,12 +6,13 @@ prompt template, and writes it back to the project.
 
 ## Why this skill exists
 
-The harness runs translations locally with a small model (Gemma 4 2B by
-default). Small models drift on idioms, brand terms, and tone. The translator
-accepts the parts that are right and edits the rest; every edit is recorded.
-A larger model (Claude) is well-suited to look at the edits, infer the failure
-pattern, and rewrite the prompt to compensate — but the larger model never
-runs in-app (no API keys; no telemetry).
+The harness's default path runs translations locally with a small model
+(Gemma 4 2B). Small models drift on idioms, brand terms, and tone. The
+translator accepts the parts that are right and edits the rest; every
+edit is recorded. A larger model (Claude) is well-suited to look at the
+edits, infer the failure pattern, and rewrite the prompt to compensate —
+but the larger model runs in a separate Claude Code session the
+translator opens themselves; the harness itself never calls out to it.
 
 This skill bridges the two: the user exports a bundle from the app, runs the
 skill in Claude Code, gets back a candidate prompt template, and runs
