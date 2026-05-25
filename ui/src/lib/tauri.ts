@@ -8,6 +8,7 @@ import {
 } from "@tauri-apps/plugin-dialog";
 import type {
   BackendConfig,
+  BatchScope,
   CatalogEntry,
   CatalogResponse,
   Correction,
@@ -27,6 +28,7 @@ import type {
   SaveAllDirtyResponse,
   SaveSummary,
   TargetEdit,
+  TranslateBatchStarted,
   TranslateResult,
   Unit,
   UnitId,
@@ -358,6 +360,46 @@ export async function acceptUnitInProject(
   unitId: UnitId,
 ): Promise<Unit> {
   return await invoke<Unit>("accept_unit_in_project", { catalogPath, unitId });
+}
+
+// ── M4.2c.2 — bulk translate with cancellation ──────────────────────────────
+
+/// Start a background bulk translation of in-scope units in `catalogPath`.
+///
+/// Returns the job id + total unit count synchronously; the worker runs in
+/// the background and emits Tauri events keyed by job id:
+/// - `batch-progress-<job_id>` after every successful unit
+///   (payload: `BatchProgressPayload`).
+/// - `batch-completed-<job_id>` on clean exit OR observed cancellation
+///   (payload: `BatchTerminalPayload`; `cancelled` distinguishes the two).
+/// - `batch-failed-<job_id>` on mid-batch hard failure
+///   (payload: `BatchTerminalPayload` with `failed_reason` set).
+///
+/// Subscribe to all three event names before awaiting this call so the
+/// progress emit of a very fast first unit is not missed; unsubscribe on
+/// the terminal event.
+///
+/// Errors with `"a translation is already running for this catalog/locale"`
+/// if another bulk run is in flight for the same pair.
+export async function translateBatchInProject(
+  catalogPath: string,
+  scope: BatchScope,
+): Promise<TranslateBatchStarted> {
+  return await invoke<TranslateBatchStarted>("translate_batch_in_project", {
+    catalogPath,
+    scope,
+  });
+}
+
+/// Signal cancellation for the named in-flight `translate_batch_in_project`
+/// job. Returns `true` if a job with that id existed, `false` otherwise.
+///
+/// Cancellation is cooperative — the worker observes the flag between units,
+/// so the currently-running unit completes before the worker exits. Wait for
+/// the `batch-completed-<job_id>` event (with `cancelled: true`) to know the
+/// worker has stopped.
+export async function cancelTranslation(jobId: string): Promise<boolean> {
+  return await invoke<boolean>("cancel_translation", { jobId });
 }
 
 // ── M4.7 — Project-wide review queue ─────────────────────────────────────────
