@@ -1447,9 +1447,10 @@ mod batch_scope_tests {
 /// Run the per-unit translate loop on a worker thread, emitting Tauri events
 /// for each completed unit and a single terminal event before exiting.
 ///
-/// Always deregisters the job and releases the `active_batches` slot before
-/// returning, regardless of outcome. The terminal event is emitted exactly
-/// once.
+/// Cleanup (job deregister + slot release) is handled via a
+/// [`ScopedJobRegistration`][jobs::ScopedJobRegistration] guard so it happens
+/// on every exit path — including if future code adds an early return — without
+/// repeating the two-step cleanup.
 #[cfg(feature = "ollama")]
 #[allow(clippy::too_many_arguments)]
 fn run_batch_worker(
@@ -1468,6 +1469,15 @@ fn run_batch_worker(
     use tauri::{Emitter, Manager};
 
     let state = app.state::<AppState>();
+    // Adopt ownership of the already-registered job and already-claimed slot.
+    // Drop releases both when this function returns, on every exit path.
+    let _guard = jobs::ScopedJobRegistration::adopt(
+        &state.jobs,
+        &state.active_batches,
+        job_id.clone(),
+        token.clone(),
+        active_slot,
+    );
     let mut completed: usize = 0;
     let mut terminal: BatchTerminalPayload = BatchTerminalPayload {
         completed: 0,
@@ -1535,10 +1545,7 @@ fn run_batch_worker(
         tracing::warn!(job_id = %job_id, error = %e, "batch terminal emit failed");
     }
 
-    // Cleanup: deregister the job and release the active-batches slot. Always
-    // executed on every exit path (success, cancellation, or failure).
-    state.jobs.deregister(&job_id);
-    state.active_batches.release(&active_slot);
+    // `_guard` drops here — deregisters the job and releases the slot via Drop.
 }
 
 /// Signal cancellation for an in-flight `translate_batch_in_project` job.
@@ -2212,6 +2219,15 @@ fn run_evaluation_in_project(
             use tauri::{Emitter, Manager};
 
             let app_state = worker_app.state::<AppState>();
+            // Adopt ownership of the already-registered job and already-claimed
+            // slot. Drop releases both when this closure returns, on every path.
+            let _guard = jobs::ScopedJobRegistration::adopt(
+                &app_state.jobs,
+                &app_state.active_batches,
+                worker_job_id.clone(),
+                token.clone(),
+                worker_eval_slot,
+            );
             let mut accumulator = ScoreAccumulator::new();
             let mut completed: usize = 0;
             let mut failed_reason: Option<String> = None;
@@ -2343,10 +2359,8 @@ fn run_evaluation_in_project(
                 tracing::warn!(job_id = %worker_job_id, error = %e, "eval terminal emit failed");
             }
 
-            // Cleanup: deregister the job and release the eval slot. Always
-            // executed on every exit path.
-            app_state.jobs.deregister(&worker_job_id);
-            app_state.active_batches.release(&worker_eval_slot);
+            // `_guard` drops here — deregisters the job and releases the eval
+            // slot via Drop.
         })
         .map_err(|e| {
             state.jobs.deregister(&job_id);

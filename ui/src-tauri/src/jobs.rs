@@ -238,28 +238,29 @@ impl ActiveBatches {
 /// # Lifetime constraint
 ///
 /// `ScopedJobRegistration<'a>` borrows `JobRegistry` and `ActiveBatches` by
-/// shared reference; the `'a` lifetime must outlive the guard. This means
-/// the guard must be created inside the worker thread body (where the
-/// `tauri::State<'_, AppState>` lifetime is long enough) rather than on the
-/// command-dispatch thread. Wired in the following commit.
-// `#[allow(dead_code)]`: used in the next commit; present here so the types
-// are visible and compile-checked before they are wired into worker entry points.
-#[allow(dead_code)]
+/// shared reference; the `'a` lifetime must outlive the guard. Workers create
+/// the guard by calling [`adopt`][Self::adopt] at the top of the worker body,
+/// borrowing from the `tauri::State<'_, AppState>` that lives for the full
+/// worker function body.
 pub(crate) struct ScopedJobRegistration<'a> {
     jobs: &'a JobRegistry,
     active: &'a ActiveBatches,
     pub(crate) job_id: JobId,
+    // Held so the caller can retrieve the token via `token()` when using
+    // `claim()`. In `adopt()` usage the worker already has the token, so
+    // this copy is intentionally unused.
+    #[allow(dead_code)]
     token: CancellationToken,
     slot: BatchSlot,
 }
 
-#[allow(dead_code)]
 impl<'a> ScopedJobRegistration<'a> {
     /// Claim the slot and register a new job atomically from the caller's
     /// perspective (slot claim is visible before the job id is returned to JS).
     ///
     /// On error the slot is never claimed — the caller sees the busy-slot
     /// message without any side effects.
+    #[allow(dead_code)] // primary entry point; used in tests and future callers
     pub(crate) fn claim(
         jobs: &'a JobRegistry,
         active: &'a ActiveBatches,
@@ -276,6 +277,36 @@ impl<'a> ScopedJobRegistration<'a> {
         })
     }
 
+    /// Adopt ownership of an already-registered job and an already-claimed
+    /// slot. Used by workers that receive the `job_id`, `token`, and `slot`
+    /// as move-captured values from the command thread and want Drop to own
+    /// cleanup rather than writing it manually.
+    ///
+    /// # Safety contract
+    ///
+    /// The caller asserts that `job_id` is registered in `jobs` and `slot`
+    /// is held in `active`. Calling this with stale values produces a no-op
+    /// release (idempotent), not a panic.
+    pub(crate) fn adopt(
+        jobs: &'a JobRegistry,
+        active: &'a ActiveBatches,
+        job_id: JobId,
+        token: CancellationToken,
+        slot: BatchSlot,
+    ) -> Self {
+        Self {
+            jobs,
+            active,
+            job_id,
+            token,
+            slot,
+        }
+    }
+
+    // Used when `claim()` is the constructor — lets the caller retrieve the
+    // freshly minted token. Not called from worker `adopt()` paths where the
+    // token was already obtained by the command thread.
+    #[allow(dead_code)]
     pub(crate) fn token(&self) -> &CancellationToken {
         &self.token
     }
