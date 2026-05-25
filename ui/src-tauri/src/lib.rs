@@ -2711,10 +2711,15 @@ fn run_evaluation_in_project(
     // Each element: (source, human_target, locale_id, flag_strs).
     type EvalExample = (String, String, String, Vec<String>);
     type LocaleEntry = (String, &'static Locale);
-    let (examples_with_corrections, glossary, locale_map): (
+    // Capture the project's EvaluationStore here so the worker thread persists
+    // to the project that LAUNCHED the eval, even if the global project slot
+    // is replaced via open_project / close_project mid-flight (codex P1 on
+    // PR #36).
+    let (examples_with_corrections, glossary, locale_map, eval_store): (
         Vec<EvalExample>,
         Option<Glossary>,
         Vec<LocaleEntry>,
+        i18n_harness_project::EvaluationStore,
     ) = {
         let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
         let project = project_guard.as_ref().ok_or_else(no_project)?;
@@ -2783,8 +2788,9 @@ fn run_evaluation_in_project(
 
         let glossary = project.glossary().cloned();
         let locale_vec: Vec<LocaleEntry> = locale_map_build.into_iter().collect();
+        let eval_store = project.evaluations().clone();
 
-        (examples, glossary, locale_vec)
+        (examples, glossary, locale_vec, eval_store)
     };
 
     let total = examples_with_corrections.len();
@@ -2827,6 +2833,10 @@ fn run_evaluation_in_project(
     let worker_app = app.clone();
     let worker_job_id = job_id.clone();
     let worker_eval_key = eval_key.clone();
+    // Capture the originating project's EvaluationStore so the run is written
+    // to it regardless of any open_project / close_project that happens
+    // mid-flight (codex P1 on PR #36).
+    let worker_eval_store = eval_store;
 
     std::thread::Builder::new()
         .name(format!("eval-{job_id}"))
@@ -2934,18 +2944,16 @@ fn run_evaluation_in_project(
                     .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
                 let run = accumulator.finish(ts, "ollama-translate-v2".to_string());
 
-                // Persist the run.
-                let guard = app_state.project.lock();
-                if let Ok(guard) = guard {
-                    if let Some(project) = guard.as_ref() {
-                        if let Err(e) = project.evaluations().append(&run) {
-                            tracing::warn!(
-                                job_id = %worker_job_id,
-                                error = %e,
-                                "failed to persist evaluation run"
-                            );
-                        }
-                    }
+                // Persist the run via the EvaluationStore captured at spawn
+                // time — NOT app_state.project, which may have been swapped
+                // since this worker started. This guarantees the run lands in
+                // the project that launched it.
+                if let Err(e) = worker_eval_store.append(&run) {
+                    tracing::warn!(
+                        job_id = %worker_job_id,
+                        error = %e,
+                        "failed to persist evaluation run"
+                    );
                 }
                 Some(run)
             } else {

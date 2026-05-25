@@ -168,6 +168,13 @@ impl ScoreAccumulator {
 ///
 /// One line per completed [`EvaluationRun`]. Cheap to construct — I/O happens
 /// only on [`append`](Self::append) and [`list`](Self::list).
+///
+/// `Clone` is cheap (only an `Arc` bump) and is provided so the Tauri layer
+/// can capture a snapshot of a project's evaluation store at job-spawn time.
+/// This binds long-running evaluation workers to the project that started
+/// them, so a subsequent `open_project` / `close_project` cannot redirect
+/// the write to a different project. See codex P1 on PR #36.
+#[derive(Clone)]
 pub struct EvaluationStore {
     path: PathBuf,
     fs: Arc<dyn ProjectFs>,
