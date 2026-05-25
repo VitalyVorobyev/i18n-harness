@@ -33,9 +33,8 @@ use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use i18n_harness_project::{
-    BackendConfig, CatalogEntry, CatalogRef, Correction, CorrectionId, CorrectionProvenance,
-    DraftManifest, GlossaryConfig, LocaleConfig, NewCorrection, Project, ProjectSummary,
-    PromptsConfig,
+    BackendConfig, CatalogEntry, CatalogRef, Correction, CorrectionProvenance, DraftManifest,
+    GlossaryConfig, LocaleConfig, NewCorrection, Project, ProjectSummary, PromptsConfig,
 };
 use serde::Serialize;
 
@@ -2831,30 +2830,7 @@ fn build_catalog_response_backing(
     }
 }
 
-/// Return `(absolute_path, manifest_relative_path)` for a catalog path that
-/// may be absolute or manifest-relative. Errors with
-/// `"catalog not registered in project"` if no registered catalog matches.
-fn resolve_catalog_path(project: &Project, input: &str) -> Result<(PathBuf, PathBuf), String> {
-    let input_path = PathBuf::from(input);
-    let catalog_ref = project
-        .catalog(&input_path)
-        .ok_or_else(|| "catalog not registered in project".to_string())?;
-    let absolute = PathBuf::from(&catalog_ref.absolute_path);
-    let manifest_relative = PathBuf::from(&catalog_ref.manifest_path);
-    Ok((absolute, manifest_relative))
-}
-
-/// Parse a `"corr_<12-hex>"` string into a [`CorrectionId`].
-///
-/// Returns a generic `"invalid correction id"` on failure to avoid leaking
-/// internal format details to the caller.
-fn parse_correction_id(s: &str) -> Result<CorrectionId, String> {
-    if s.starts_with("corr_") && s.len() == 17 && s[5..].chars().all(|c| c.is_ascii_hexdigit()) {
-        Ok(CorrectionId(s.to_owned()))
-    } else {
-        Err("invalid correction id".to_string())
-    }
-}
+use crate::services::project_paths::{parse_correction_id, resolve_catalog_path};
 
 /// Write `content` (UTF-8 text) to `path`, creating or overwriting the file.
 ///
