@@ -1,0 +1,2 @@
+{"id":"app.greeting","kind":"singular","text":"Hallo, {0}!"}
+{"id":"app.items","kind":"plural","texts":["# Eintrag","# Einträge"]}

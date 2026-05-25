@@ -1,0 +1,2 @@
+{"id":"app.greeting","source":"Hello, {0}!","placeholders":[{"kind":"positional","index":0,"name":null,"byte_offset":7,"icu_form":{"token":"{0}"}}],"flags_so_far":[]}
+{"id":"app.items","source":"{count, plural, one {# item} other {# items}}","plural_arity":2,"flags_so_far":[]}

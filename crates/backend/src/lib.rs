@@ -78,6 +78,9 @@ pub mod manual;
 #[cfg(feature = "ollama")]
 pub mod ollama;
 
+pub mod agent_batch;
+
+pub use agent_batch::{AgentBatchError, ExportedUnit, read_targets, write_export};
 pub use context::PromptContext;
 pub use error::BackendError;
 pub use outcome::{FailureKind, TranslatedText, TranslationOutcome};

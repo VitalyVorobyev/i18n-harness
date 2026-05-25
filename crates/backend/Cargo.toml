@@ -33,3 +33,4 @@ ureq = { workspace = true, optional = true }
 [dev-dependencies]
 i18n-harness-adapter-qt.workspace = true
 i18n-harness-gate.workspace = true
+tempfile = "3"

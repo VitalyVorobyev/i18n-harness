@@ -39,8 +39,14 @@ Lab features live in the lab tool and only there. The shared substrate
 is the validation gate, the catalog adapters, the backend trait, and
 the per-project `.i18n-harness/` state; everything else is split.
 
-M0–M3 are shipped. M4 (the product turn) is in flight; see
-`docs/roadmap-product.md` for the sub-milestones.
+M0–M4 are shipped (M4 closed with M4.5 ICU-JSON + M4.10 tuning bundle).
+M5 ships the two-phase agent translation flow: `harness export-batch` /
+`harness import-batch` CLI subcommands plus the
+[`skills/translate-i18n-batch/`](skills/translate-i18n-batch/) spec for
+filling the batch from an external Claude Code / Copilot / Codex
+session. **No UI wiring yet** — the agent flow is a developer/CLI
+surface until M6 promotes it into Settings + the Translate view.
+See `docs/roadmap-product.md` for the sub-milestones.
 
 ## Workspace map
 
@@ -59,7 +65,10 @@ M0–M3 are shipped. M4 (the product turn) is in flight; see
 | `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
 
 `crates/adapter-log/` is *not* present and will not be created until its
-milestone (M5 design-only).
+milestone — the log adapter was the docs' original "M5 design-only" item
+and has been deferred indefinitely. The current M5 (above) is the
+agent translation flow; the log work moves to a later, separately-
+planned milestone.
 
 ## Commands
 
@@ -118,6 +127,12 @@ the round-trip suite, never carved out.
   flag + smoke test).
 - `add-format`: new `CatalogFormat` serializer (module + placeholder
   converter + round-trip fixtures).
+- `translate-i18n-batch`: fill `targets.jsonl` for a batch produced by
+  `harness export-batch`. Translator-facing; runs in a separate Claude
+  Code session pointed at the batch directory.
+- `tune-i18n-prompt`: rewrite a prompt template from a tuning bundle
+  exported by the app. Translator-facing; runs separately from the
+  in-app translation loop.
 
 ## Subagents
 

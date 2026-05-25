@@ -31,25 +31,39 @@ pair.
 
 ## Status
 
-**Pre-alpha.** The Cargo workspace is bootstrapped (Phase 0) and the
-architectural contracts are next (M0 — Qt `.ts` round-trip). See
-[`docs/implementation_plan.md`](docs/implementation_plan.md) for milestone
-scope and [`docs/initial_design.md`](docs/initial_design.md) for the full
-design.
+**Pre-alpha, M0–M5 shipped.** See
+[`docs/roadmap-product.md`](docs/roadmap-product.md) for the
+translator-facing milestone log and
+[`docs/initial_design.md`](docs/initial_design.md) for the full design.
 
-## Planned scope
+- **M0–M3:** core (Qt `.ts` round-trip, validation gate, locales,
+  glossary, manual + ollama backends, initial Tauri UI).
+- **M4 (product turn):** project mode (multi-catalog manifests), PO +
+  ICU-JSON serializers, the React adapter, review queue, bulk translate
+  UI with cancellation, quality eval, prompt-tuning bundle export.
+- **M5 (agent flow, CLI-only):** `harness export-batch` /
+  `harness import-batch` two-phase subcommands for filling translations
+  from an external Claude Code / Copilot / Codex session, plus the
+  [`translate-i18n-batch`](skills/translate-i18n-batch/) skill spec.
+  The agent flow is a CLI surface today — UI integration is the next
+  milestone.
 
-**Catalog formats:** Qt Linguist `.ts` (M0), gettext / Lingui PO (M4),
-ICU-JSON for react-intl / i18next (M4).
+## Scope
 
-**Translation engines:** `manual` — no model (M2); `ollama` — local
-Gemma 4 by default (M2); `openai-compatible` — covers vLLM, LM Studio,
-and cloud APIs (M4). Plus a two-phase CLI
-(`harness export-batch` / `harness import-batch`) for using Claude Code,
-Copilot, or any out-of-process agent as the translator.
+**Catalog formats:** Qt Linguist `.ts`, gettext / Lingui PO, ICU-JSON
+for react-intl / i18next. Each is a `CatalogFormat` plugin behind a
+stable extension point.
 
-**Locales:** `en` source and `de_DE` target through M2; `es_ES` and
-`zh_Hans` arrive in M3 as a single config-row change — data, not code.
+**Translation engines:** `manual` (no model, closure-driven), `ollama`
+(local Gemma 4 by default), `openai-compatible` (covers vLLM, LM
+Studio, and cloud APIs). The M5 two-phase CLI
+(`harness export-batch` / `harness import-batch`) routes through the
+manual backend and lets Claude Code, Copilot, or any out-of-process
+agent act as the translator without any in-process model dependency.
+
+**Locales:** `en` source plus `de_DE`, `es_ES`, `zh_Hans` targets out
+of the box. Adding a new locale is a single config-row change in
+`crates/locales` plus a CLDR plural-arity fixture — data, not code.
 
 ## Quick check
 
