@@ -8,10 +8,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
+import { usePendingCommits } from "../../lib/pending-commits";
 import type { TargetEdit, Unit } from "../../lib/types";
 import { severityOf } from "../../lib/types";
-import { LocaleTag, Spinner } from "../primitives";
+import { LocaleTag, SparklesIcon, Spinner } from "../primitives";
 import { StateBadge } from "../StateBadge/StateBadge";
+import { UntranslatedDraftEditor } from "./UntranslatedDraftEditor";
 
 interface Props {
   locale: string;
@@ -88,22 +90,6 @@ export function MatrixCell({
       <div className="flex items-center gap-2">
         <LocaleTag locale={locale} tone="default" />
         <StateBadge state={state} variant="dot" />
-        <span
-          className={cn(
-            "inline-flex items-center h-4 px-1.5 rounded-pill border",
-            "text-[9.5px] font-medium uppercase tracking-loose whitespace-nowrap",
-            state === "untranslated" &&
-              "bg-state-untranslated-bg border-state-untranslated-border text-state-untranslated",
-            state === "proposed" &&
-              "bg-state-proposed-bg border-state-proposed-border text-state-proposed",
-            state === "finished" &&
-              "bg-state-finished-bg border-state-finished-border text-state-finished",
-            (state === "vanished" || state === "obsolete") &&
-              "bg-state-vanished-bg border-state-vanished-border text-state-vanished",
-          )}
-        >
-          {state}
-        </span>
         {edited && (
           <span
             className={cn(
@@ -130,8 +116,9 @@ export function MatrixCell({
 
       {state === "untranslated" && (
         <UntranslatedBody
-          locale={locale}
+          unit={unit}
           busy={busy}
+          onCommit={(edit) => onEdit(catalogPath, unit, edit)}
           onTranslate={() => onTranslate(catalogPath, unit)}
         />
       )}
@@ -160,42 +147,24 @@ export function MatrixCell({
 // ── State-specific bodies ───────────────────────────────────────────────────
 
 function UntranslatedBody({
-  locale,
+  unit,
   busy,
+  onCommit,
   onTranslate,
 }: {
-  locale: string;
+  unit: Unit;
   busy: boolean;
+  onCommit: (edit: TargetEdit) => void;
   onTranslate: () => void;
 }) {
   return (
-    <>
-      <div
-        className={cn(
-          "flex-1 flex items-center justify-center rounded-md",
-          "border border-dashed border-border-default",
-          "px-3 py-2.5 italic text-fg-tertiary",
-        )}
-        style={{ fontSize: 11.5 }}
-      >
-        no translation
-      </div>
-      <button
-        type="button"
-        onClick={onTranslate}
-        disabled={busy}
-        className={cn(
-          "w-full inline-flex items-center justify-center gap-1.5 h-7 px-3",
-          "rounded-md text-xs font-medium transition-colors duration-100",
-          "text-accent-fg bg-accent",
-          "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
-          "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
-        )}
-      >
-        {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
-        {busy ? "Translating…" : `Translate to ${locale}`}
-      </button>
-    </>
+    <UntranslatedDraftEditor
+      unit={unit}
+      busy={busy}
+      onCommit={onCommit}
+      onTranslate={onTranslate}
+      size="compact"
+    />
   );
 }
 
@@ -221,27 +190,59 @@ function ProposedBody({
   const initial = readSingular(unit);
   const [draft, setDraft] = useState(initial);
   const initialRef = useRef(initial);
+  // Mirror live draft + onCommit into refs so the commit-now callback
+  // registered with the pending-commits registry always sees the latest
+  // values without re-registering on every keystroke.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  const unitRef = useRef(unit);
+  unitRef.current = unit;
   useEffect(() => {
     setDraft(initial);
     initialRef.current = initial;
   }, [initial]);
 
   const commit = () => {
-    if (draft === initialRef.current) return;
-    const text = draft.length === 0 ? null : draft;
+    if (draftRef.current === initialRef.current) return;
+    const text = draftRef.current.length === 0 ? null : draftRef.current;
     const edit: TargetEdit =
-      unit.target.kind === "plural"
+      unitRef.current.target.kind === "plural"
         ? { kind: "plural", form_index: 0, text }
         : { kind: "singular", text };
-    initialRef.current = draft;
-    onCommit(edit);
+    initialRef.current = draftRef.current;
+    onCommitRef.current(edit);
   };
 
+  // Register a commit-now thunk that App.tsx's onSaveAll flushes before
+  // calling saveAllDirty. Without this, Cmd-S in the middle of a typed
+  // edit silently saves stale Rust-side state to disk. The thunk reads
+  // every input via a ref, so we deliberately register once at mount —
+  // re-registering on every render would churn the registry's Set and
+  // change identity even though the captured refs always see latest values.
+  const { register } = usePendingCommits();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commit reads refs; register once
+  useEffect(() => register(commit), [register]);
+
   const acceptDisabled = hardFlag || busy;
+
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow on content: keep the textarea tall enough for the current
+  // draft so multi-line translations stay visible without manual resize.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dom resize needs to fire after each draft change
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   return (
     <>
       <textarea
+        ref={textareaRef}
         value={draft}
         rows={2}
         onChange={(e) => setDraft(e.target.value)}
@@ -256,6 +257,7 @@ function ProposedBody({
           "bg-bg-input border-border-subtle whitespace-pre-wrap break-words",
           "focus:border-accent focus:outline-none focus-visible:outline-none",
           "disabled:bg-bg-surface disabled:text-fg-disabled disabled:cursor-not-allowed",
+          "max-h-[12rem] overflow-y-auto",
         )}
       />
       <div className="flex items-center gap-1">
@@ -290,12 +292,19 @@ function ProposedBody({
           className={cn(
             "inline-flex items-center justify-center h-7 w-7 rounded-md border",
             "transition-colors duration-100",
-            "border-border-default text-fg-secondary bg-transparent",
-            "enabled:hover:bg-bg-hover enabled:hover:text-fg-primary enabled:hover:border-border-strong",
-            "disabled:opacity-40 disabled:cursor-not-allowed",
+            busy
+              ? "border-accent text-accent bg-accent-subtle cursor-wait"
+              : null,
+            busy
+              ? null
+              : "border-border-default text-fg-secondary bg-transparent",
+            busy
+              ? null
+              : "enabled:hover:bg-bg-hover enabled:hover:text-fg-primary enabled:hover:border-border-strong",
+            busy ? null : "disabled:opacity-40 disabled:cursor-not-allowed",
           )}
         >
-          {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
+          {busy ? <Spinner size={14} /> : <SparklesIcon size={12} />}
         </button>
       </div>
     </>
@@ -359,28 +368,6 @@ function readSingular(unit: Unit): string {
 }
 
 // ── Inline SVG icons (no external library) ─────────────────────────────────
-
-function SparklesIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-      <path d="M20 3v4" />
-      <path d="M22 5h-4" />
-      <path d="M4 17v2" />
-      <path d="M5 18H3" />
-    </svg>
-  );
-}
 
 function CheckIcon({ size = 12 }: { size?: number }) {
   return (

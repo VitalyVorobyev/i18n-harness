@@ -19,6 +19,7 @@ export function Spinner({ size = 12 }: SpinnerProps) {
 
   return (
     <span
+      data-testid="translate-spinner"
       className="animate-spin inline-flex shrink-0"
       style={{ width: size, height: size }}
     >

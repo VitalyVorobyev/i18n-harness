@@ -2,6 +2,35 @@ import { cn } from "../../lib/cn";
 import type { Theme } from "../../lib/theme";
 import { ThemeToggle } from "../ThemeToggle/ThemeToggle";
 
+// Inline spinner used for the Save button's in-flight state.
+function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 14 14"
+      fill="none"
+      aria-hidden="true"
+      className="animate-spin"
+    >
+      <circle
+        cx="7"
+        cy="7"
+        r="5.5"
+        stroke="currentColor"
+        strokeOpacity="0.25"
+        strokeWidth="2"
+      />
+      <path
+        d="M7 1.5A5.5 5.5 0 0 1 12.5 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // Views available in project mode.
 // "translate" is the default; "glossary" reuses the existing GlossaryPanel.
 // "settings" and "quality" are placeholders for M4.3c/d.
@@ -203,6 +232,12 @@ interface ProjectTopBarProps {
   onCloseProject: () => void;
   /** Total units needing review across the project; drives the badge on the Review tab. */
   reviewQueueCount?: number;
+  /** Number of catalogs with unsaved edits (0..N). */
+  unsavedCount?: number;
+  /** True while saveAllDirty is in-flight. */
+  saving?: boolean;
+  /** Called when the Save button is clicked. */
+  onSave?: () => void;
 }
 
 export function ProjectTopBar({
@@ -213,6 +248,9 @@ export function ProjectTopBar({
   onToggleTheme,
   onCloseProject,
   reviewQueueCount = 0,
+  unsavedCount = 0,
+  saving = false,
+  onSave,
 }: ProjectTopBarProps) {
   return (
     <header
@@ -296,8 +334,31 @@ export function ProjectTopBar({
         </TabButtonWithBadge>
       </div>
 
-      {/* Right: theme toggle + close project */}
+      {/* Right: save button + theme toggle + close project */}
       <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
+        <ActionButton
+          onClick={onSave}
+          disabled={unsavedCount === 0 && !saving}
+          tone={unsavedCount > 0 ? "primary" : "default"}
+          title={
+            unsavedCount > 0
+              ? `Save ${unsavedCount} catalog(s) — ⌘S`
+              : "No unsaved changes"
+          }
+          aria-label={
+            unsavedCount > 0
+              ? `Save ${unsavedCount} unsaved catalog(s)`
+              : "Save — no unsaved changes"
+          }
+        >
+          {saving && <Spinner size={12} />}
+          Save
+          {unsavedCount > 0 && (
+            <span className="rounded-pill bg-bg-base/40 px-1 text-[10px] font-semibold tabular-nums">
+              {unsavedCount}
+            </span>
+          )}
+        </ActionButton>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <ActionButton onClick={onCloseProject} title="Close project">
           Close project
@@ -315,12 +376,14 @@ function ActionButton({
   disabled,
   title,
   tone = "default",
+  "aria-label": ariaLabel,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   title?: string;
   tone?: "default" | "primary";
+  "aria-label"?: string;
 }) {
   const primary = tone === "primary";
   return (
@@ -329,6 +392,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-2 h-7 px-3 rounded-md border",
         "text-sm font-medium transition-colors duration-100 ease-out",

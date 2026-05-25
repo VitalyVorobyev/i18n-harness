@@ -9,8 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
+import { usePendingCommits } from "../../lib/pending-commits";
 import type {
-  BatchScope,
   CatalogResponse,
   GateReport,
   ProjectSummary,
@@ -19,9 +19,18 @@ import type {
   UnitId,
 } from "../../lib/types";
 import { severityOf } from "../../lib/types";
-import { Eyebrow, LocaleTag, ProgressBar, Spinner } from "../primitives";
+import {
+  Eyebrow,
+  LocaleTag,
+  SegmentBar,
+  SparklesIcon,
+  Spinner,
+} from "../primitives";
 import { StateBadge } from "../StateBadge/StateBadge";
 import { Inspector } from "./Inspector/Inspector";
+import type { StatusFilterId } from "./StatusFilter";
+import { unitMatchesFilter } from "./StatusFilter";
+import { UntranslatedDraftEditor } from "./UntranslatedDraftEditor";
 
 // ── Prop types ─────────────────────────────────────────────────────────────
 
@@ -34,11 +43,15 @@ interface Props {
   reports: Record<UnitId, GateReport>;
   busyIds: Set<UnitId>;
   batchActive: boolean;
+  /** Status filter lifted from TranslatePanel — persists across mode switches. */
+  statusFilter: StatusFilterId;
+  onStatusFilterChange?: (id: StatusFilterId) => void;
   onEnsureCatalogLoaded: (absPath: string) => Promise<void>;
   onTranslateUnit: (catalogPath: string, unit: Unit) => void;
   onEditUnit: (catalogPath: string, unit: Unit, edit: TargetEdit) => void;
   onAcceptUnit: (catalogPath: string, unit: Unit) => void;
-  onTranslateAll: (catalogPath: string, scope: BatchScope) => void;
+  /** Open the "Translate untranslated" modal scoped to this locale. */
+  onOpenTranslateModal: () => void;
 }
 
 // ── Inspector collapse persistence ────────────────────────────────────────
@@ -146,11 +159,13 @@ export function FocusView({
   reports,
   busyIds,
   batchActive,
+  statusFilter,
+  onStatusFilterChange,
   onEnsureCatalogLoaded,
   onTranslateUnit,
   onEditUnit,
   onAcceptUnit,
-  onTranslateAll,
+  onOpenTranslateModal,
 }: Props) {
   // Auto-load catalogs for the focused locale.
   useEffect(() => {
@@ -217,13 +232,15 @@ export function FocusView({
 
   const filteredEntries = useMemo(() => {
     const lower = search.trim().toLowerCase();
-    if (!lower) return allEntries;
-    return allEntries.filter(
-      (e) =>
+    return allEntries.filter((e) => {
+      if (!unitMatchesFilter(e.unit, statusFilter)) return false;
+      if (!lower) return true;
+      return (
         e.unit.id.toLowerCase().includes(lower) ||
-        e.unit.source.toLowerCase().includes(lower),
-    );
-  }, [allEntries, search]);
+        e.unit.source.toLowerCase().includes(lower)
+      );
+    });
+  }, [allEntries, search, statusFilter]);
 
   // Clamp/reset selection when filter changes.
   useEffect(() => {
@@ -253,25 +270,15 @@ export function FocusView({
 
   const openCount = focusStat.untranslated + focusStat.proposed;
 
-  // ── Translate untranslated (batch for focused locale) ───────────────────
+  // ── Translate untranslated — open scope modal ─────────────────────────
+  //
+  // Previously dispatched directly to onTranslateAll. Now opens
+  // RunOnScopeModal scoped to the focused locale.
 
   const onTranslateUntranslated = useCallback(() => {
     if (batchActive) return;
-    for (const ref of summary.catalogs) {
-      if (ref.locale !== focusLocale) continue;
-      const cached = openCatalogs.get(ref.absolute_path);
-      if (!cached) continue;
-      const hasWork = cached.units.some((u) => u.state === "untranslated");
-      if (!hasWork) continue;
-      onTranslateAll(ref.absolute_path, "untranslated");
-    }
-  }, [
-    batchActive,
-    summary.catalogs,
-    openCatalogs,
-    focusLocale,
-    onTranslateAll,
-  ]);
+    onOpenTranslateModal();
+  }, [batchActive, onOpenTranslateModal]);
 
   // ── Accept callback (bridges to Inspector prop shape) ──────────────────
 
@@ -487,37 +494,6 @@ export function FocusView({
                 </span>
               </div>
 
-              {/* Single / Matrix segmented toggle */}
-              <div
-                className="flex items-center rounded-md border border-border-default bg-bg-elevated"
-                style={{ padding: 2, gap: 2 }}
-              >
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-sm",
-                    "text-xs font-medium bg-bg-selected text-fg-primary",
-                  )}
-                  aria-current="true"
-                >
-                  <ListIcon size={11} />
-                  Single
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setFocusLocale(null)}
-                  aria-label="Switch to matrix view"
-                  className={cn(
-                    "inline-flex items-center gap-1.5 h-[22px] px-2.5 rounded-sm",
-                    "text-xs font-medium text-fg-secondary",
-                    "hover:bg-bg-hover hover:text-fg-primary transition-colors duration-100",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
-                  )}
-                >
-                  <GridIcon size={11} />
-                  Matrix
-                </button>
-              </div>
-
               <button
                 type="button"
                 onClick={onTranslateUntranslated}
@@ -555,7 +531,7 @@ export function FocusView({
             >
               {focusLocale}
             </span>
-            <ProgressBar
+            <SegmentBar
               total={focusStat.total}
               finished={focusStat.finished}
               proposed={focusStat.proposed}
@@ -585,23 +561,20 @@ export function FocusView({
             Source / id
           </span>
           <span className="flex-1 font-mono">Target — {focusLocale}</span>
-          <span
-            className="font-mono"
-            style={{ flex: "0 0 110px", textAlign: "right" }}
-          >
-            State
-          </span>
         </div>
 
         {/* Unit rows or empty state */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           {filteredEntries.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-fg-tertiary">
               <p>Nothing to translate here.</p>
-              {search && (
+              {(search || statusFilter !== "all") && (
                 <button
                   type="button"
-                  onClick={() => setSearch("")}
+                  onClick={() => {
+                    setSearch("");
+                    onStatusFilterChange?.("all");
+                  }}
                   className="text-xs text-accent underline-offset-2 hover:underline"
                 >
                   Clear filter
@@ -613,7 +586,6 @@ export function FocusView({
               <FocusRow
                 key={`${entry.catalogPath}::${entry.unit.id}`}
                 entry={entry}
-                focusLocale={focusLocale}
                 selected={idx === selectedIdx}
                 busy={busyIds.has(entry.unit.id)}
                 dirty={dirtyIds.has(entry.unit.id)}
@@ -781,7 +753,7 @@ function LocaleRowButton({
             : "—"}
         </span>
       </div>
-      <ProgressBar
+      <SegmentBar
         total={stat.total}
         finished={stat.finished}
         proposed={stat.proposed}
@@ -795,7 +767,6 @@ function LocaleRowButton({
 
 interface FocusRowProps {
   entry: FocusEntry;
-  focusLocale: string;
   selected: boolean;
   busy: boolean;
   dirty: boolean;
@@ -810,7 +781,6 @@ interface FocusRowProps {
 
 function FocusRow({
   entry,
-  focusLocale,
   selected,
   busy,
   dirty,
@@ -859,10 +829,10 @@ function FocusRow({
 
       {/* Source + id column (~240px) */}
       <div
-        className="flex flex-col gap-[3px] shrink-0 ml-3 pr-4"
+        className="flex flex-col gap-[3px] shrink-0 ml-3 pr-4 min-w-0 overflow-hidden"
         style={{ flex: "0 0 240px" }}
       >
-        <span className="font-mono text-[13px] text-fg-primary leading-snug break-words">
+        <span className="block font-mono text-[13px] text-fg-primary leading-snug break-words overflow-wrap-anywhere">
           {unit.source}
         </span>
         <span
@@ -902,7 +872,6 @@ function FocusRow({
         {selected ? (
           <SelectedTarget
             unit={unit}
-            focusLocale={focusLocale}
             busy={busy}
             hardFlag={hardFlag}
             onEdit={onEdit}
@@ -930,14 +899,6 @@ function FocusRow({
             <span className="text-fg-tertiary">review intent</span>
           </div>
         )}
-      </div>
-
-      {/* State pill — anchored right */}
-      <div
-        className="shrink-0 flex justify-end pt-[2px] pl-3"
-        style={{ flex: "0 0 110px" }}
-      >
-        <StateBadge state={state} variant="pill" />
       </div>
     </div>
   );
@@ -979,7 +940,6 @@ function ReadOnlyTarget({ unit }: { unit: Unit }) {
 
 function SelectedTarget({
   unit,
-  focusLocale,
   busy,
   hardFlag,
   onEdit,
@@ -988,7 +948,6 @@ function SelectedTarget({
   onReopen,
 }: {
   unit: Unit;
-  focusLocale: string;
   busy: boolean;
   hardFlag: boolean;
   onEdit: (edit: TargetEdit) => void;
@@ -998,34 +957,19 @@ function SelectedTarget({
 }) {
   if (unit.state === "untranslated") {
     return (
-      <div className="flex flex-col gap-2">
-        <div
-          className="px-3 py-3 rounded-md text-[12.5px] italic text-fg-tertiary"
-          style={{
-            border: "1px dashed var(--color-border-default)",
-            background: "var(--color-bg-input)",
-          }}
-        >
-          no translation yet
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onTranslate}
-            disabled={busy}
-            className={cn(
-              "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium",
-              "transition-colors duration-100",
-              "text-accent-fg bg-accent",
-              "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
-              "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
-            )}
-            title={`Translate this unit to ${focusLocale}`}
-          >
-            {busy ? <Spinner size={11} /> : <SparklesIcon size={11} />}
-            {busy ? "Translating…" : `Translate to ${focusLocale}`}
-            <KbdChip>⌘T</KbdChip>
-          </button>
+      <div className="flex flex-col gap-1.5">
+        <UntranslatedDraftEditor
+          unit={unit}
+          busy={busy}
+          onCommit={onEdit}
+          onTranslate={onTranslate}
+          size="full"
+        />
+        <div className="flex items-center gap-1 mt-0.5">
+          <KbdChip>⌘T</KbdChip>
+          <span className="text-[11px] text-fg-tertiary">
+            translate with model
+          </span>
         </div>
       </div>
     );
@@ -1106,6 +1050,12 @@ function SingularEditor({
   const [draft, setDraft] = useState(initial);
   const initialRef = useRef(initial);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Mirror live values into refs so the registered commit-now thunk reads
+  // the latest draft without re-registering on every keystroke.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const onEditRef = useRef(onEdit);
+  onEditRef.current = onEdit;
 
   useEffect(() => {
     setDraft(initial);
@@ -1127,11 +1077,19 @@ function SingularEditor({
   }, [draft]);
 
   const commit = () => {
-    if (draft === initialRef.current) return;
-    const text = draft.length === 0 ? null : draft;
-    onEdit({ kind: "singular", text });
-    initialRef.current = draft;
+    if (draftRef.current === initialRef.current) return;
+    const text = draftRef.current.length === 0 ? null : draftRef.current;
+    onEditRef.current({ kind: "singular", text });
+    initialRef.current = draftRef.current;
   };
+
+  // Register a commit-now thunk so Save All flushes a typed-but-not-blurred
+  // singular draft BEFORE asking the Rust side to persist. Same rationale
+  // as MatrixCell.ProposedBody — Cmd-S does not synthesize a blur. The
+  // thunk reads everything via refs so we register once at mount.
+  const { register } = usePendingCommits();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commit reads refs; register once
+  useEffect(() => register(commit), [register]);
 
   return (
     <>
@@ -1190,6 +1148,14 @@ function PluralEditor({
     Array.from({ length: arity }, (_, i) => forms[i] ?? ""),
   );
   const initialRef = useRef([...drafts]);
+  // Mirror live values into refs so the registered commit-now thunk reads
+  // the latest drafts without re-registering on every keystroke.
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const onEditRef = useRef(onEdit);
+  onEditRef.current = onEdit;
+  const arityRef = useRef(arity);
+  arityRef.current = arity;
 
   // Intentionally reset only when the unit identity changes; arity and forms
   // are derived from unit and chasing them would cause spurious re-initialisation
@@ -1204,12 +1170,26 @@ function PluralEditor({
   }, [unit.id, arity, forms]);
 
   const commitForm = (idx: number) => {
-    const text = drafts[idx] ?? "";
+    const text = draftsRef.current[idx] ?? "";
     if (text === (initialRef.current[idx] ?? "")) return;
     const val = text.length === 0 ? null : text;
-    onEdit({ kind: "plural", form_index: idx, text: val });
-    initialRef.current = [...drafts];
+    onEditRef.current({ kind: "plural", form_index: idx, text: val });
+    initialRef.current = [...draftsRef.current];
   };
+
+  // Register a commit-now thunk that walks every form. Same rationale as
+  // SingularEditor — Cmd-S does not synthesize blur, so untouched-by-blur
+  // forms would otherwise be lost. The closure reads `arityRef` /
+  // `draftsRef` so we register once at mount and never re-register.
+  const { register } = usePendingCommits();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commitForm reads refs; register once
+  useEffect(
+    () =>
+      register(() => {
+        for (let i = 0; i < arityRef.current; i++) commitForm(i);
+      }),
+    [register],
+  );
 
   const FORM_LABELS = ["Zero", "One", "Two", "Few", "Many", "Other"];
 
@@ -1318,8 +1298,13 @@ function ActionBar({
           "inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium",
           "transition-colors duration-100",
           "text-accent-fg bg-accent",
-          "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
-          "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
+          busy ? "cursor-wait" : null,
+          busy
+            ? null
+            : "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
+          busy
+            ? null
+            : "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
         )}
       >
         {busy ? <Spinner size={11} /> : <SparklesIcon size={11} />}
@@ -1437,28 +1422,6 @@ function KbdLegendItem({ kbd, label }: { kbd: string; label: string }) {
 
 // ── Inline SVG icons ────────────────────────────────────────────────────────
 
-function SparklesIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-      <path d="M20 3v4" />
-      <path d="M22 5h-4" />
-      <path d="M4 17v2" />
-      <path d="M5 18H3" />
-    </svg>
-  );
-}
-
 function CheckIcon({ size = 12 }: { size?: number }) {
   return (
     <svg
@@ -1534,29 +1497,6 @@ function FlagIcon({ size = 11 }: { size?: number }) {
   );
 }
 
-function ListIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <line x1={8} x2={21} y1={6} y2={6} />
-      <line x1={8} x2={21} y1={12} y2={12} />
-      <line x1={8} x2={21} y1={18} y2={18} />
-      <line x1={3} x2={3.01} y1={6} y2={6} />
-      <line x1={3} x2={3.01} y1={12} y2={12} />
-      <line x1={3} x2={3.01} y1={18} y2={18} />
-    </svg>
-  );
-}
-
 function PencilIcon({ size = 11 }: { size?: number }) {
   return (
     <svg
@@ -1572,27 +1512,6 @@ function PencilIcon({ size = 11 }: { size?: number }) {
     >
       <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
       <path d="m15 5 4 4" />
-    </svg>
-  );
-}
-
-function GridIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect width={7} height={7} x={3} y={3} rx={1} />
-      <rect width={7} height={7} x={14} y={3} rx={1} />
-      <rect width={7} height={7} x={14} y={14} rx={1} />
-      <rect width={7} height={7} x={3} y={14} rx={1} />
     </svg>
   );
 }

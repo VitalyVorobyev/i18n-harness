@@ -1600,6 +1600,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "toml 0.9.12+spec-1.1.0",

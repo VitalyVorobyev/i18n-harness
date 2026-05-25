@@ -12,7 +12,7 @@ import type {
   MetricsResponse,
   ProjectSummary,
 } from "../../lib/types";
-import { Eyebrow, LocaleTag, ProgressBar } from "../primitives";
+import { Eyebrow, LocaleTag, SegmentBar } from "../primitives";
 
 // ── Inline SVG icons (no external icon library dependency) ────────────────────
 
@@ -611,7 +611,7 @@ function LocaleProgressCard({
 
       {/* Progress bar */}
       <div style={{ marginBottom: 12 }}>
-        <ProgressBar
+        <SegmentBar
           total={stat.total}
           finished={stat.finished}
           proposed={stat.proposed}

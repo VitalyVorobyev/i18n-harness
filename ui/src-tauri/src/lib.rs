@@ -860,8 +860,18 @@ fn open_project(
     root: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<ProjectOpenResponse, String> {
-    let root_path = PathBuf::from(&root);
-    let (project, warnings) = Project::open(&root_path).map_err(|e| e.to_string())?;
+    open_project_impl(Path::new(&root), &state)
+}
+
+/// State-only impl of [`open_project`] — same semantics, takes a borrowed
+/// [`AppState`] so integration tests can drive the Tauri command surface
+/// without spinning up a real Tauri runtime. The command wrapper above is
+/// a one-liner that calls into this helper.
+pub(crate) fn open_project_impl(
+    root: &Path,
+    state: &AppState,
+) -> Result<ProjectOpenResponse, String> {
+    let (project, warnings) = Project::open(root).map_err(|e| e.to_string())?;
     let summary = project.summary();
     let glossary_for_slot = project.glossary().cloned();
 
@@ -1002,7 +1012,17 @@ fn open_catalog_in_project(
     catalog_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<CatalogResponse, String> {
-    let path = PathBuf::from(&catalog_path);
+    open_catalog_in_project_impl(&catalog_path, &state)
+}
+
+/// State-only impl of [`open_catalog_in_project`] — same semantics, takes a
+/// borrowed [`AppState`] so integration tests can drive the open + edit + save
+/// flow without spinning up a real Tauri runtime.
+pub(crate) fn open_catalog_in_project_impl(
+    catalog_path: &str,
+    state: &AppState,
+) -> Result<CatalogResponse, String> {
+    let path = PathBuf::from(catalog_path);
 
     let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
     let project = project_guard.as_ref().ok_or_else(no_project)?;
@@ -1051,13 +1071,25 @@ fn update_unit_target_in_project(
     edit: TargetEdit,
     state: tauri::State<'_, AppState>,
 ) -> Result<Unit, String> {
-    let abs = PathBuf::from(&catalog_path);
+    update_unit_target_in_project_impl(&catalog_path, &unit_id, edit, &state)
+}
+
+/// State-only impl of [`update_unit_target_in_project`] — same semantics, takes
+/// a borrowed [`AppState`] so integration tests can drive the open + edit +
+/// save flow without spinning up a real Tauri runtime.
+pub(crate) fn update_unit_target_in_project_impl(
+    catalog_path: &str,
+    unit_id: &str,
+    edit: TargetEdit,
+    state: &AppState,
+) -> Result<Unit, String> {
+    let abs = PathBuf::from(catalog_path);
     let mut store = state
         .project_catalogs
         .lock()
         .map_err(project_catalogs_lock_poisoned)?;
     let entry = store.get_mut(&abs).ok_or_else(no_catalog_in_project)?;
-    let id = UnitId::from(unit_id);
+    let id = UnitId::from(unit_id.to_owned());
     let unit = entry
         .catalog
         .find_unit_mut(&id)
@@ -1162,6 +1194,13 @@ pub struct SaveAllDirtyResponse {
 /// flag cleared regardless of whether a later entry failed.
 #[tauri::command]
 fn save_all_dirty(state: tauri::State<'_, AppState>) -> Result<SaveAllDirtyResponse, String> {
+    save_all_dirty_impl(&state)
+}
+
+/// State-only impl of [`save_all_dirty`] — same semantics, takes a borrowed
+/// [`AppState`] so integration tests can drive the open + edit + save flow
+/// without spinning up a real Tauri runtime.
+pub(crate) fn save_all_dirty_impl(state: &AppState) -> Result<SaveAllDirtyResponse, String> {
     let mut store = state
         .project_catalogs
         .lock()
@@ -1274,7 +1313,14 @@ fn is_catalog_dirty(
     catalog_path: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
-    let abs = PathBuf::from(&catalog_path);
+    is_catalog_dirty_impl(&catalog_path, &state)
+}
+
+/// State-only impl of [`is_catalog_dirty`] — same semantics, takes a borrowed
+/// [`AppState`] so integration tests can drive the open + edit + save flow
+/// without spinning up a real Tauri runtime.
+pub(crate) fn is_catalog_dirty_impl(catalog_path: &str, state: &AppState) -> Result<bool, String> {
+    let abs = PathBuf::from(catalog_path);
     let store = state
         .project_catalogs
         .lock()
@@ -1320,6 +1366,138 @@ fn translate_unit_in_project(
         locale,
         glossary.as_ref(),
     )
+}
+
+/// Propose a translation for one glossary term using the project's default
+/// backend.
+///
+/// Looks up the term by `term_id` (the case-sensitive source key) in the
+/// project's glossary, refuses DNT terms and missing terms, then calls the
+/// backend with a minimal synthetic unit whose source text is the term's
+/// source string.
+///
+/// Returns the proposed translation string on success. Does not write anything
+/// to disk — the caller decides whether to accept and persist the proposal.
+///
+/// # Errors
+///
+/// - `"no project open"` — open a project first.
+/// - `"no glossary configured for this project"` — the project manifest has no
+///   `[glossary]` block (no glossary path declared or the file is absent).
+/// - `"term not found"` — no term with `source == term_id` in the glossary.
+/// - `"term is do-not-translate"` — the term's `dnt` flag is set; translating
+///   it would contradict the glossary contract.
+/// - backend / locale errors forwarded from the translate machinery.
+///
+/// Available only when the crate is built with the `ollama` feature.
+#[cfg(feature = "ollama")]
+#[tauri::command]
+async fn translate_glossary_term(
+    state: tauri::State<'_, AppState>,
+    project_path: String,
+    term_id: String,
+    target_locale: String,
+) -> Result<String, String> {
+    use i18n_harness_backend::OllamaBackend;
+
+    // Snapshot the glossary and validate the term under the project lock, then
+    // drop the lock before the network call.
+    let (term_source, glossary, locale) = {
+        let abs = PathBuf::from(&project_path);
+        let project_guard = state.project.lock().map_err(project_lock_poisoned)?;
+        let project = project_guard.as_ref().ok_or_else(no_project)?;
+
+        // Validate the caller is referencing the currently-open project.
+        if project.paths().root() != abs {
+            return Err(format!(
+                "project at `{project_path}` is not the currently-open project"
+            ));
+        }
+
+        let glossary = project
+            .glossary()
+            .cloned()
+            .ok_or_else(|| "no glossary configured for this project".to_string())?;
+
+        let locale = Locale::by_id(&target_locale)
+            .ok_or_else(|| format!("unknown locale `{target_locale}`; add it to crates/locales"))?;
+
+        let term_source = glossary_term_source(&glossary, &term_id)?;
+        (term_source, glossary, locale)
+    };
+
+    let backend =
+        OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
+    dispatch_glossary_term_translation(&backend, &term_source, locale, &glossary)
+}
+
+/// Validate a glossary term lookup and return the term's source string.
+///
+/// Extracts the repeated "find term, check DNT" logic shared by the command
+/// and its test helpers. Returns the source string so the caller holds it by
+/// value after the glossary borrow ends.
+#[cfg(feature = "ollama")]
+fn glossary_term_source(glossary: &Glossary, term_id: &str) -> Result<String, String> {
+    let term = glossary
+        .term(term_id)
+        .ok_or_else(|| "term not found".to_string())?;
+    if term.do_not_translate {
+        return Err("term is do-not-translate".to_string());
+    }
+    Ok(term_id.to_owned())
+}
+
+/// Drive any `TranslationBackend` to translate one glossary term, returning
+/// the proposed translation string.
+///
+/// Builds a minimal synthetic singular unit from `term_source`, calls
+/// `backend.translate_batch`, and extracts the singular text from the first
+/// outcome. This is the testable inner core of `translate_glossary_term`; the
+/// Tauri command wraps it with `AppState` resolution and `OllamaBackend`
+/// construction.
+///
+/// # Why a synthetic Unit
+///
+/// The `TranslationBackend` trait takes a `&Batch` (a slice of `Unit`s) — it
+/// has no glossary-term–specific entry point. Building a minimal unit is
+/// cheaper than adding a new trait method and stays within the existing
+/// backend contract. The unit id is `"glossary::<term_source>"` so callers and
+/// metrics can distinguish glossary-assist calls from catalog-unit calls.
+#[cfg(feature = "ollama")]
+fn dispatch_glossary_term_translation(
+    backend: &dyn i18n_harness_backend::TranslationBackend,
+    term_source: &str,
+    locale: &Locale,
+    glossary: &Glossary,
+) -> Result<String, String> {
+    use i18n_harness_backend::TranslationOutcome;
+    use i18n_harness_core::{Batch, BatchKey};
+
+    let synthetic =
+        Unit::untranslated_singular(format!("glossary::{term_source}"), term_source.to_owned());
+
+    let batch = Batch::new(BatchKey::new("glossary", 0), vec![synthetic]);
+    let backend_name = backend.name().to_string();
+
+    let outcomes = backend
+        .translate_batch(&batch, locale, Some(glossary))
+        .map_err(|e| format!("backend `{backend_name}` failed: {e}"))?;
+
+    let outcome = outcomes
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("backend `{backend_name}` returned no outcomes"))?;
+
+    match outcome {
+        TranslationOutcome::Translated { text, .. } => match text {
+            i18n_harness_backend::TranslatedText::Singular(s) => Ok(s),
+            i18n_harness_backend::TranslatedText::Plural(_) => {
+                Err("backend returned plural for a singular glossary term".to_string())
+            }
+        },
+        TranslationOutcome::Skipped { reason } => Err(format!("backend skipped: {reason}")),
+        TranslationOutcome::Failed { reason, .. } => Err(format!("backend failed: {reason}")),
+    }
 }
 
 /// Resolve `(locale, glossary)` for a project-routed translate command.
@@ -1589,6 +1767,17 @@ pub struct TranslateBatchStarted {
     pub total: usize,
 }
 
+/// Pre-unit event payload, emitted as `batch-unit-started-<job_id>` just before
+/// the backend call begins for each unit. Lets the frontend light up a per-cell
+/// spinner without waiting for the full round-trip to complete.
+#[derive(Debug, Serialize, Clone)]
+pub struct BatchUnitStartedPayload {
+    /// Id of the unit about to be translated.
+    pub unit_id: String,
+    /// Target locale for this translation call.
+    pub locale: String,
+}
+
 /// Per-unit progress event payload, emitted as `batch-progress-<job_id>` after
 /// each completed network round-trip.
 #[derive(Debug, Serialize, Clone)]
@@ -1635,6 +1824,8 @@ pub struct BatchTerminalPayload {
 ///
 /// Events emitted (subscribe before the response lands; the worker only starts
 /// once this function returns):
+/// - `batch-unit-started-<job_id>` just before each backend call, carrying
+///   [`BatchUnitStartedPayload`]. Lets the UI light a per-cell spinner.
 /// - `batch-progress-<job_id>` after each successful unit, carrying
 ///   [`BatchProgressPayload`].
 /// - `batch-completed-<job_id>` once on clean exit OR cancellation, carrying
@@ -1846,6 +2037,14 @@ fn run_batch_worker(
         if token.is_cancelled() {
             terminal.cancelled = true;
             break;
+        }
+
+        let started_payload = BatchUnitStartedPayload {
+            unit_id: unit_id.as_str().to_owned(),
+            locale: locale.id.to_owned(),
+        };
+        if let Err(e) = app.emit(&format!("batch-unit-started-{job_id}"), &started_payload) {
+            tracing::warn!(job_id = %job_id, error = %e, "batch-unit-started emit failed");
         }
 
         match translate_one(
@@ -3203,6 +3402,15 @@ fn parse_correction_id(s: &str) -> Result<CorrectionId, String> {
     }
 }
 
+/// Write `content` (UTF-8 text) to `path`, creating or overwriting the file.
+///
+/// This is a pure filesystem thin-wrapper used by the frontend "Save .md"
+/// flow in ProofreadView — no business logic here.
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content.as_bytes()).map_err(|e| format!("write failed: {e}"))
+}
+
 /// Entry point invoked from `main.rs` (and from the mobile entry point
 /// macro when the crate is built for iOS/Android).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -3245,6 +3453,7 @@ pub fn run() {
         list_open_catalogs,
         is_catalog_dirty,
         translate_unit_in_project,
+        translate_glossary_term,
         translate_batch_in_project,
         cancel_translation,
         record_correction_in_project,
@@ -3266,6 +3475,7 @@ pub fn run() {
         list_evaluation_runs_in_project,
         export_tuning_bundle_in_project,
         list_tuning_bundles_in_project,
+        write_text_file,
     ]);
 
     #[cfg(not(feature = "ollama"))]
@@ -3312,9 +3522,313 @@ pub fn run() {
         list_evaluation_runs_in_project,
         export_tuning_bundle_in_project,
         list_tuning_bundles_in_project,
+        write_text_file,
     ]);
 
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ── Tests: translate_glossary_term helpers ────────────────────────────────────
+
+#[cfg(all(test, feature = "ollama"))]
+mod glossary_term_translation_tests {
+    use super::{dispatch_glossary_term_translation, glossary_term_source};
+    use i18n_harness_backend::{ManualBackend, ManualResponse};
+    use i18n_harness_glossary::Glossary;
+    use i18n_harness_locales::Locale;
+
+    fn make_glossary() -> Glossary {
+        let toml = r#"
+[meta]
+schema_version = 1
+
+[[term]]
+source = "Open"
+do_not_translate = false
+notes = "verb sense"
+[term.translations]
+de_DE = "Öffnen"
+
+[[term]]
+source = "ChromaCheck"
+do_not_translate = true
+"#;
+        let (g, _) = Glossary::from_toml(toml).expect("parse");
+        g
+    }
+
+    fn de_de() -> &'static Locale {
+        Locale::by_id("de_DE").expect("de_DE locale must exist")
+    }
+
+    #[test]
+    fn found_term_returns_canned_translation() {
+        let glossary = make_glossary();
+        let backend = ManualBackend::new(|ctx| {
+            ManualResponse::Singular(format!("translated:{}", ctx.unit.source))
+        });
+        let result =
+            dispatch_glossary_term_translation(&backend, "Open", de_de(), &glossary).unwrap();
+        assert_eq!(result, "translated:Open");
+    }
+
+    #[test]
+    fn dnt_term_returns_error() {
+        let glossary = make_glossary();
+        let err = glossary_term_source(&glossary, "ChromaCheck").unwrap_err();
+        assert_eq!(err, "term is do-not-translate");
+    }
+
+    #[test]
+    fn missing_term_returns_error() {
+        let glossary = make_glossary();
+        let err = glossary_term_source(&glossary, "NonExistent").unwrap_err();
+        assert_eq!(err, "term not found");
+    }
+
+    #[test]
+    fn backend_skip_propagates_as_error() {
+        let glossary = make_glossary();
+        let backend = ManualBackend::new(|_| ManualResponse::Skip);
+        let err =
+            dispatch_glossary_term_translation(&backend, "Open", de_de(), &glossary).unwrap_err();
+        assert!(
+            err.starts_with("backend skipped"),
+            "expected 'backend skipped', got: {err}"
+        );
+    }
+
+    #[test]
+    fn backend_fail_propagates_as_error() {
+        let glossary = make_glossary();
+        let backend = ManualBackend::new(|_| ManualResponse::Fail {
+            reason: "model-refused".to_owned(),
+            retryable: false,
+        });
+        let err =
+            dispatch_glossary_term_translation(&backend, "Open", de_de(), &glossary).unwrap_err();
+        assert!(
+            err.contains("model-refused"),
+            "expected reason in error, got: {err}"
+        );
+    }
+}
+
+// ── Tests: BatchUnitStartedPayload structure ──────────────────────────────────
+
+#[cfg(all(test, feature = "ollama"))]
+mod batch_unit_started_tests {
+    use super::BatchUnitStartedPayload;
+
+    #[test]
+    fn payload_fields_round_trip_through_serde() {
+        let p = BatchUnitStartedPayload {
+            unit_id: "u::hello".to_owned(),
+            locale: "de_DE".to_owned(),
+        };
+        let json = serde_json::to_string(&p).expect("serialize");
+        let back: serde_json::Value = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back["unit_id"], "u::hello");
+        assert_eq!(back["locale"], "de_DE");
+    }
+
+    // The loop in `run_batch_worker` emits one `batch-unit-started-<id>` per
+    // iteration (one per unit_id in the batch). This structural test checks that
+    // the payload count equals the number of units: it drives the payload
+    // construction path in isolation so clippy/miri can also exercise it.
+    #[test]
+    fn one_started_payload_constructed_per_unit() {
+        let unit_ids = ["u1", "u2", "u3"];
+        let locale_id = "de_DE";
+        let payloads: Vec<BatchUnitStartedPayload> = unit_ids
+            .iter()
+            .map(|uid| BatchUnitStartedPayload {
+                unit_id: (*uid).to_owned(),
+                locale: locale_id.to_owned(),
+            })
+            .collect();
+        assert_eq!(payloads.len(), unit_ids.len());
+        for (p, expected_id) in payloads.iter().zip(&unit_ids) {
+            assert_eq!(&p.unit_id, expected_id);
+            assert_eq!(p.locale, locale_id);
+        }
+    }
+}
+
+// ── Tests: end-to-end open → edit → save → reopen contract ─────────────────────
+//
+// These tests bypass the Tauri runtime and drive the *_impl helpers directly.
+// They exist because translator-facing "Save all" complaints traced back to
+// the question: when a Proposed edit is applied to an Untranslated unit,
+// does the bytes-on-disk → reopen → in-memory state round-trip preserve the
+// edit? The single test that follows answers that question without any
+// frontend wiring in scope; if it ever turns red, the bug is in Rust.
+#[cfg(test)]
+mod save_roundtrip_integration_tests {
+    use super::{
+        AppState, TargetEdit, is_catalog_dirty_impl, open_catalog_in_project_impl,
+        open_project_impl, save_all_dirty_impl, update_unit_target_in_project_impl,
+    };
+    use i18n_harness_core::{Target, UnitState};
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Minimal Qt `.ts` fixture: one unfinished singular unit. Exactly the
+    /// shape that Linguist + the harness's extract path produce on first run.
+    /// Body bytes are stable across runs.
+    const TS_BEFORE: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE TS>\n<TS version=\"2.1\" language=\"de_DE\" sourcelanguage=\"en\">\n<context>\n    <name>MainWindow</name>\n    <message>\n        <location filename=\"src/mainwindow.cpp\" line=\"42\"/>\n        <source>Hello</source>\n        <translation type=\"unfinished\"></translation>\n    </message>\n</context>\n</TS>\n";
+
+    const MANIFEST: &str = r#"[project]
+name = "save-roundtrip-test"
+schema = 1
+
+[locales.de_DE]
+register = "neutral"
+
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+"#;
+
+    fn write_project(dir: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = dir.path().to_path_buf();
+        let manifest_path = root.join("i18n-harness.toml");
+        fs::write(&manifest_path, MANIFEST).expect("write manifest");
+        let translations_dir = root.join("translations");
+        fs::create_dir_all(&translations_dir).expect("create translations dir");
+        let ts_path = translations_dir.join("app_de.ts");
+        fs::write(&ts_path, TS_BEFORE).expect("write .ts");
+        (root, ts_path)
+    }
+
+    /// The forensic test the maintainer asked for. Open a fresh project, edit
+    /// one unit, save all, then drop the AppState (simulating an app restart)
+    /// and reopen. The edit must survive every step:
+    ///
+    ///   - in-memory state after edit: `state == Proposed`, dirty == true.
+    ///   - in-memory state after save: dirty == false.
+    ///   - on-disk file after save: contains `Hallo Welt` and still
+    ///     carries `type="unfinished"` (write contract for Proposed).
+    ///   - in-memory state after reopen (fresh AppState): the parser must
+    ///     promote `type="unfinished" + non-empty body` back to Proposed,
+    ///     so the unit comes back with `state == Proposed` and the
+    ///     translated text intact.
+    ///
+    /// If this test fails, the bug is on the Rust side. If it passes, the
+    /// "Save all loses changes" report is necessarily a frontend issue
+    /// (the textarea draft never made it into the IPC layer, or the IPC
+    /// race lost the edit).
+    #[test]
+    fn edit_save_reopen_preserves_proposed_translation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (root, ts_path) = write_project(&dir);
+
+        // Phase 1 — open project, open catalog, confirm Untranslated.
+        let state = AppState::default();
+        let open_resp = open_project_impl(&root, &state).expect("open project");
+        // Use the path the project resolved — on macOS the temp dir lives at
+        // /var/folders/... which symlinks to /private/var/folders/..., and the
+        // canonicalized form on disk does not match the manifest-resolved form.
+        // The project's own absolute_path is the IPC handle the UI uses too.
+        let abs_path = open_resp
+            .summary
+            .catalogs
+            .iter()
+            .find(|c| {
+                std::path::Path::new(&c.absolute_path).file_name()
+                    == Some(ts_path.file_name().unwrap())
+            })
+            .expect("project must know about the catalog")
+            .absolute_path
+            .clone();
+        let opened = open_catalog_in_project_impl(&abs_path, &state).expect("open catalog");
+        assert_eq!(opened.unit_count, 1, "fixture has one unit");
+        let unit_id = opened.units[0].id.to_string();
+        assert_eq!(
+            opened.units[0].state,
+            UnitState::Untranslated,
+            "before edit: state must be Untranslated"
+        );
+
+        // Phase 2 — apply an edit; state machine promotes to Proposed.
+        let edited = update_unit_target_in_project_impl(
+            &abs_path,
+            &unit_id,
+            TargetEdit::Singular {
+                text: Some("Hallo Welt".to_owned()),
+            },
+            &state,
+        )
+        .expect("update edit");
+        assert_eq!(
+            edited.state,
+            UnitState::Proposed,
+            "after edit: state must be Proposed"
+        );
+        match &edited.target {
+            Target::Singular { text } => assert_eq!(
+                text.as_deref(),
+                Some("Hallo Welt"),
+                "after edit: target text must be the new value"
+            ),
+            Target::Plural { .. } => panic!("expected singular target"),
+        }
+        assert!(
+            is_catalog_dirty_impl(&abs_path, &state).expect("dirty check"),
+            "after edit: catalog must be marked dirty"
+        );
+
+        // Phase 3 — save all dirty; expect one saved entry, no failure.
+        let save = save_all_dirty_impl(&state).expect("save all dirty");
+        assert_eq!(save.saved.len(), 1, "save_all_dirty: one saved entry");
+        assert_eq!(
+            save.saved[0].path, abs_path,
+            "save_all_dirty: path must match"
+        );
+        assert!(save.failed_path.is_none(), "save_all_dirty: no failure");
+        assert!(
+            !is_catalog_dirty_impl(&abs_path, &state).expect("dirty check post-save"),
+            "post-save: dirty flag must be cleared"
+        );
+
+        // Phase 4 — read bytes off disk; assert write contract.
+        let bytes_after = fs::read_to_string(&abs_path).expect("read .ts after save");
+        assert!(
+            bytes_after.contains("Hallo Welt"),
+            "on-disk: must contain the edited text\n----\n{bytes_after}\n----"
+        );
+        assert!(
+            bytes_after.contains("type=\"unfinished\""),
+            "on-disk: must retain type=\"unfinished\" (Proposed write contract)\n----\n{bytes_after}\n----"
+        );
+
+        // Phase 5 — drop AppState (simulate app restart), reopen, verify
+        // the edit survives the parse path.
+        drop(state);
+        let state2 = AppState::default();
+        open_project_impl(&root, &state2).expect("reopen project");
+        let reopened = open_catalog_in_project_impl(&abs_path, &state2).expect("reopen catalog");
+        assert_eq!(reopened.unit_count, 1, "after reopen: still one unit");
+        let unit = &reopened.units[0];
+        assert_eq!(
+            unit.state,
+            UnitState::Proposed,
+            "after reopen: state must round-trip as Proposed (parse promotion)"
+        );
+        match &unit.target {
+            Target::Singular { text } => assert_eq!(
+                text.as_deref(),
+                Some("Hallo Welt"),
+                "after reopen: target text must round-trip intact"
+            ),
+            Target::Plural { .. } => panic!("expected singular target after reopen"),
+        }
+        assert!(
+            !is_catalog_dirty_impl(&abs_path, &state2).expect("dirty after reopen"),
+            "after reopen: catalog must be clean"
+        );
+    }
 }

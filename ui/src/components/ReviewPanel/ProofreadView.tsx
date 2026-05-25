@@ -10,6 +10,7 @@
 // Clicking a unit jumps to Translate (with focusLocale if a locale column is active).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { pickReviewSaveLocation, writeTextFile } from "../../lib/tauri";
 import type {
   CatalogResponse,
   GateReport,
@@ -17,7 +18,7 @@ import type {
   Unit,
   UnitId,
 } from "../../lib/types";
-import { ProgressBar } from "../primitives";
+import { SegmentBar } from "../primitives";
 
 // ── Inline SVG icons ──────────────────────────────────────────────────────────
 
@@ -116,6 +117,45 @@ function ArrowRightIcon({ size = 14 }: { size?: number }) {
   );
 }
 
+function ClipboardIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    </svg>
+  );
+}
+
+function DownloadIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ProofreadViewProps {
@@ -135,6 +175,9 @@ export interface ProofreadViewProps {
    *  project catalog on mount so the manuscript renders without forcing the
    *  user to open each catalog manually first. */
   onEnsureCatalogLoaded?: (absPath: string) => Promise<void>;
+  /** Optional toast callback — called with feedback after Copy or Save As.
+   *  Falls back to silent behavior when absent (backward-compatible). */
+  onToast?: (message: string, kind: "info" | "error") => void;
 }
 
 // Show/filter toggle state — local to this view.
@@ -201,7 +244,7 @@ function LocaleHeadStat({
             %
           </span>
         </span>
-        <ProgressBar
+        <SegmentBar
           total={total}
           finished={finished}
           proposed={0}
@@ -837,14 +880,16 @@ function SideNav({
   onShowChange,
   activeFilters,
   onFilterToggle,
-  onExport,
+  onCopy,
+  onSaveAs,
 }: {
   catalogNavItems: CatalogNavItem[];
   show: ShowToggles;
   onShowChange: (key: keyof ShowToggles) => void;
   activeFilters: Set<FilterChipKey>;
   onFilterToggle: (key: FilterChipKey) => void;
-  onExport: () => void;
+  onCopy: () => void;
+  onSaveAs: () => void;
 }) {
   return (
     <aside
@@ -970,7 +1015,7 @@ function SideNav({
             >
               {nav.total}
             </span>
-            <ProgressBar
+            <SegmentBar
               total={nav.total}
               finished={nav.finished}
               proposed={0}
@@ -1097,11 +1142,20 @@ function SideNav({
         })}
       </div>
 
-      {/* Export button */}
-      <div style={{ marginTop: "auto", paddingTop: 8 }}>
+      {/* Copy / Save .md buttons */}
+      <div
+        style={{
+          marginTop: "auto",
+          paddingTop: 8,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
         <button
           type="button"
-          onClick={onExport}
+          aria-label="Copy review report to clipboard"
+          onClick={onCopy}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1129,8 +1183,42 @@ function SideNav({
             el.style.color = "var(--color-fg-secondary)";
           }}
         >
-          <ArrowRightIcon size={13} />
-          Export&hellip;
+          <ClipboardIcon size={13} />
+          Copy
+        </button>
+        <button
+          type="button"
+          aria-label="Save review report as Markdown file"
+          onClick={onSaveAs}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            width: "100%",
+            padding: "7px 12px",
+            borderRadius: 5,
+            border: "1px solid var(--color-border-default)",
+            background: "transparent",
+            color: "var(--color-fg-secondary)",
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: "pointer",
+            transition: "all 80ms",
+          }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.background = "var(--color-bg-hover)";
+            el.style.color = "var(--color-fg-primary)";
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget as HTMLButtonElement;
+            el.style.background = "transparent";
+            el.style.color = "var(--color-fg-secondary)";
+          }}
+        >
+          <DownloadIcon size={13} />
+          Save .md
         </button>
       </div>
     </aside>
@@ -1450,6 +1538,7 @@ export function ProofreadView({
   onNavigateToUnit,
   onOpenHardFlags,
   onEnsureCatalogLoaded,
+  onToast,
 }: ProofreadViewProps) {
   const [show, setShow] = useState<ShowToggles>({
     sourceIds: false,
@@ -1531,24 +1620,32 @@ export function ProofreadView({
     [onNavigateToUnit, focusedLocale],
   );
 
-  const handleExport = useCallback(async () => {
+  const handleCopy = useCallback(async () => {
     const md = buildMarkdown(rows, summary.locales, summary);
     try {
       await navigator.clipboard.writeText(md);
-      // Could show a toast here, but ProofreadView has no direct toast access.
-      // The action is self-evident; a future PR can wire flashInfo.
-    } catch {
-      // Clipboard API not available (non-secure context in some Tauri webviews).
-      // Fallback: open a data URL.
-      const blob = new Blob([md], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${summary.name}-review.md`;
-      a.click();
-      URL.revokeObjectURL(url);
+      onToast?.("Copied review report to clipboard", "info");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Clipboard write failed";
+      onToast?.(`Copy failed: ${msg}`, "error");
     }
-  }, [rows, summary]);
+  }, [rows, summary, onToast]);
+
+  const handleSaveAs = useCallback(async () => {
+    const md = buildMarkdown(rows, summary.locales, summary);
+    const path = await pickReviewSaveLocation(summary.name);
+    if (path === null) {
+      // User cancelled — no toast.
+      return;
+    }
+    try {
+      await writeTextFile(path, md);
+      onToast?.(`Saved review to ${path}`, "info");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Write failed";
+      onToast?.(`Save failed: ${msg}`, "error");
+    }
+  }, [rows, summary, onToast]);
 
   const handleMarkReviewed = useCallback(() => {
     // No IPC for mark_project_reviewed exists yet — no-op stub.
@@ -1571,7 +1668,8 @@ export function ProofreadView({
         onShowChange={handleShowChange}
         activeFilters={activeFilters}
         onFilterToggle={handleFilterToggle}
-        onExport={handleExport}
+        onCopy={handleCopy}
+        onSaveAs={handleSaveAs}
       />
 
       <div

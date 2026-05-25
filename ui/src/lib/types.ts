@@ -546,6 +546,15 @@ export interface TranslateBatchStarted {
   total: number;
 }
 
+// BatchUnitStartedPayload mirrors ui/src-tauri/src/lib.rs.
+// Emitted on `batch-unit-started-<job_id>` just before each backend call begins.
+export interface BatchUnitStartedPayload {
+  /** Id of the unit about to be translated. */
+  unit_id: string;
+  /** Target locale for this translation call. */
+  locale: string;
+}
+
 // BatchProgressPayload mirrors ui/src-tauri/src/lib.rs.
 // Emitted on `batch-progress-<job_id>` after each completed network round-trip.
 export interface BatchProgressPayload {

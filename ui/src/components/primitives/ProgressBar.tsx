@@ -1,66 +1,55 @@
-interface Props {
-  total: number;
-  finished: number;
-  proposed: number;
-  height?: number;
-  width?: number | string;
+// ProgressBar — accessible single-value progress indicator.
+//
+// Implements the ARIA progressbar role with explicit valuenow / valuemin /
+// valuemax attributes. Two visual variants: "inline" (1.5px tall, suited for
+// row-level indicators) and "block" (2.5px tall, suited for modals and cards).
+// Fill width transitions smoothly via CSS; no indeterminate mode (that is a
+// separate primitive).
+
+interface ProgressBarProps {
+  value: number;
+  max: number;
+  variant?: "inline" | "block";
+  label?: string;
+  showPercent?: boolean;
 }
 
 export function ProgressBar({
-  total,
-  finished,
-  proposed,
-  height = 6,
-  width,
-}: Props) {
-  const safeTotal = total > 0 ? total : 1;
-  const finishedPct = Math.min(100, (finished / safeTotal) * 100);
-  const proposedPct = Math.min(100 - finishedPct, (proposed / safeTotal) * 100);
-  const remainderPct = 100 - finishedPct - proposedPct;
+  value,
+  max,
+  variant = "inline",
+  label,
+  showPercent = false,
+}: ProgressBarProps) {
+  // Clamp value defensively so callers can pass raw counters without guards.
+  const safeMax = max > 0 ? max : 1;
+  const clamped = Math.max(0, Math.min(safeMax, value));
+  const pct = (clamped / safeMax) * 100;
 
-  const style: React.CSSProperties = {
-    display: "flex",
-    height,
-    borderRadius: 999,
-    overflow: "hidden",
-    width:
-      width !== undefined
-        ? typeof width === "number"
-          ? `${width}px`
-          : width
-        : "100%",
-    flexShrink: 0,
-  };
+  const trackClass = variant === "block" ? "h-2.5" : "h-1.5";
 
   return (
-    <div
-      style={style}
-      role="img"
-      aria-label={`${finished} finished, ${proposed} proposed of ${total} total`}
-    >
-      {finishedPct > 0 && (
+    <div className="flex items-center gap-2 w-full">
+      <div
+        role="progressbar"
+        aria-valuenow={clamped}
+        aria-valuemin={0}
+        aria-valuemax={safeMax}
+        aria-label={label}
+        className={`relative flex-1 rounded-pill overflow-hidden bg-bg-input ${trackClass}`}
+      >
         <div
-          style={{
-            width: `${finishedPct}%`,
-            background: "var(--color-state-finished)",
-          }}
+          className={`absolute inset-y-0 left-0 rounded-pill bg-accent transition-[width] duration-150 ease-out ${trackClass}`}
+          style={{ width: `${pct}%` }}
         />
-      )}
-      {proposedPct > 0 && (
-        <div
-          style={{
-            width: `${proposedPct}%`,
-            background: "var(--color-state-proposed)",
-          }}
-        />
-      )}
-      {remainderPct > 0 && (
-        <div
-          style={{
-            width: `${remainderPct}%`,
-            background: "var(--color-bg-input)",
-          }}
-        />
+      </div>
+      {showPercent && (
+        <span
+          className="shrink-0 font-mono text-[11px] text-fg-tertiary tabular-nums"
+          aria-hidden="true"
+        >
+          {Math.round(pct)}%
+        </span>
       )}
     </div>
   );

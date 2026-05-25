@@ -126,4 +126,50 @@ test.describe("Translate — Matrix mode", () => {
     expect(ids).toContain("MainWindow/Save");
     expect(ids).toContain("SettingsDialog/Dark");
   });
+
+  test("per-cell sparkle button shows spinner while mock translate runs", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+
+    // Wait for catalogs to load: the sparkle button only appears once the
+    // catalog data has been fetched (untranslated cells show the button).
+    const sparkleBtn = page
+      .getByRole("button", { name: /translate with model/i })
+      .first();
+    await expect(sparkleBtn).toBeVisible({ timeout: 5000 });
+
+    // Click and immediately assert the spinner appears (busy state renders
+    // before the 400 ms mock delay resolves).
+    await sparkleBtn.click();
+    const spinner = page.getByTestId("translate-spinner").first();
+    await expect(spinner).toBeVisible({ timeout: 500 });
+
+    // Wait for the mock delay to complete (400 ms) plus a small margin.
+    await page.waitForTimeout(600);
+
+    // After the mock delay the spinner is gone and the cell shows [MT] prefix.
+    await expect(spinner).not.toBeVisible({ timeout: 1000 });
+    await expect(page.getByText(/^\[MT\]/).first()).toBeVisible({
+      timeout: 2000,
+    });
+  });
+
+  test("header 'Translate untranslated' button opens scope modal with Start", async ({
+    page,
+  }) => {
+    await navigateToTranslate(page);
+    await page.waitForTimeout(1000);
+
+    const batchBtn = page.getByRole("button", {
+      name: /translate untranslated/i,
+    });
+    await expect(batchBtn).toBeVisible();
+
+    // Clicking opens the RunOnScopeModal — the modal has a Start button.
+    await batchBtn.click();
+    await expect(page.getByRole("button", { name: /^start$/i })).toBeVisible({
+      timeout: 2000,
+    });
+  });
 });

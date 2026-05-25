@@ -5,6 +5,7 @@ import {
   pickGlossaryFile,
   pickGlossarySaveLocation,
   saveGlossary,
+  translateGlossaryTerm,
 } from "../../lib/tauri";
 import type {
   GlossaryPayload,
@@ -14,7 +15,9 @@ import type {
 } from "../../lib/types";
 import { Eyebrow } from "../primitives/Eyebrow";
 import { LocaleTag } from "../primitives/LocaleTag";
-import { ProgressBar } from "../primitives/ProgressBar";
+import { SegmentBar } from "../primitives/SegmentBar";
+import { SparklesIcon } from "../primitives/SparklesIcon";
+import { Spinner } from "../primitives/Spinner";
 
 const REGISTERS = ["formal", "informal", "neutral"] as const;
 type Register = (typeof REGISTERS)[number];
@@ -28,6 +31,13 @@ interface Props {
   initialPath?: string;
   /** Navigate to Translate panel, select a unit. */
   onOpenInTranslate?: (unitId: string) => void;
+  /**
+   * Absolute path of the project root (directory containing i18n-harness.toml).
+   * When provided, per-locale AI-assist sparkle buttons are shown in the term
+   * detail editor, allowing the user to request a backend-generated translation
+   * draft for a single (term, locale) pair.
+   */
+  projectPath?: string;
 }
 
 // ── Top-level loader — always renders hooks unconditionally ───────────────────
@@ -37,6 +47,7 @@ export function GlossaryPanel({
   flashInfo,
   initialPath,
   onOpenInTranslate,
+  projectPath,
 }: Props) {
   const [locales, setLocales] = useState<LocaleInfo[]>([]);
   const [path, setPath] = useState<string | null>(null);
@@ -156,6 +167,8 @@ export function GlossaryPanel({
       onOpen={() => void open(payload, dirty)}
       onSave={() => void save(payload, path)}
       onOpenInTranslate={onOpenInTranslate}
+      projectPath={projectPath}
+      flashError={flashError}
     />
   );
 }
@@ -172,6 +185,8 @@ interface EditorProps {
   onOpen: () => void;
   onSave: () => void;
   onOpenInTranslate?: (unitId: string) => void;
+  projectPath?: string;
+  flashError: (msg: string) => void;
 }
 
 function GlossaryEditor({
@@ -184,6 +199,8 @@ function GlossaryEditor({
   onOpen,
   onSave,
   onOpenInTranslate,
+  projectPath,
+  flashError,
 }: EditorProps) {
   const [search, setSearch] = useState("");
   const [viewFilter, setViewFilter] = useState<ViewFilter>("all");
@@ -191,6 +208,8 @@ function GlossaryEditor({
     payload.terms.length > 0 ? 0 : null,
   );
   const sourceInputRef = useRef<HTMLInputElement | null>(null);
+  // busyKeys tracks in-flight AI-assist requests as "${termSource}::${locale}".
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
 
   const knownLocaleIds = useMemo(() => locales.map((l) => l.id), [locales]);
   const allLocaleIds = useMemo(
@@ -281,6 +300,48 @@ function GlossaryEditor({
     [updatePayload],
   );
 
+  // AI-assist: request a backend-generated translation draft for one locale.
+  const handleTranslateLocale = useCallback(
+    (termSource: string, locale: string) => {
+      if (!projectPath) return;
+      const key = `${termSource}::${locale}`;
+      setBusyKeys((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      });
+      translateGlossaryTerm(projectPath, termSource, locale)
+        .then((proposed) => {
+          // Patch the translation using the same updater path as manual edits,
+          // so the term is marked dirty and savable.
+          updatePayload((p) => ({
+            ...p,
+            terms: p.terms.map((t) =>
+              t.source === termSource
+                ? {
+                    ...t,
+                    translations: { ...t.translations, [locale]: proposed },
+                  }
+                : t,
+            ),
+          }));
+        })
+        .catch((e) => {
+          flashError(
+            `AI translation failed for "${termSource}" (${locale}): ${formatError(e)}`,
+          );
+        })
+        .finally(() => {
+          setBusyKeys((prev) => {
+            const next = new Set(prev);
+            next.delete(key);
+            return next;
+          });
+        });
+    },
+    [projectPath, updatePayload, flashError],
+  );
+
   // ⌘S / Ctrl+S
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -366,6 +427,8 @@ function GlossaryEditor({
           onOpenInTranslate={onOpenInTranslate}
           dirty={dirty}
           onSave={onSave}
+          busyKeys={busyKeys}
+          onTranslateLocale={projectPath ? handleTranslateLocale : undefined}
         />
       ) : (
         <GlossaryDetailEmpty
@@ -390,6 +453,8 @@ function SelectedTermDetail({
   onOpenInTranslate,
   dirty,
   onSave,
+  busyKeys,
+  onTranslateLocale,
 }: {
   entry: FilteredTerm;
   allLocaleIds: string[];
@@ -403,6 +468,8 @@ function SelectedTermDetail({
   onOpenInTranslate?: (unitId: string) => void;
   dirty: boolean;
   onSave: () => void;
+  busyKeys: Set<string>;
+  onTranslateLocale?: (termSource: string, locale: string) => void;
 }) {
   return (
     <GlossaryTermDetail
@@ -416,6 +483,8 @@ function SelectedTermDetail({
       onOpenInTranslate={onOpenInTranslate}
       dirty={dirty}
       onSave={onSave}
+      busyKeys={busyKeys}
+      onTranslateLocale={onTranslateLocale}
     />
   );
 }
@@ -569,7 +638,7 @@ function GlossaryNavRail({
           >
             <LocaleTag locale={id} tone="muted" />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <ProgressBar
+              <SegmentBar
                 total={total}
                 finished={covered}
                 proposed={0}
@@ -1073,6 +1142,8 @@ function GlossaryTermDetail({
   onOpenInTranslate,
   dirty,
   onSave,
+  busyKeys,
+  onTranslateLocale,
 }: {
   term: TermEntry;
   allLocaleIds: string[];
@@ -1086,6 +1157,8 @@ function GlossaryTermDetail({
   onOpenInTranslate?: (unitId: string) => void;
   dirty: boolean;
   onSave: () => void;
+  busyKeys: Set<string>;
+  onTranslateLocale?: (termSource: string, locale: string) => void;
 }) {
   return (
     <div
@@ -1329,6 +1402,12 @@ function GlossaryTermDetail({
                   disabled={term.do_not_translate}
                   sourceTerm={term.source}
                   last={i === allLocaleIds.length - 1}
+                  busy={busyKeys.has(`${term.source}::${id}`)}
+                  canAiAssist={
+                    !!onTranslateLocale &&
+                    !term.do_not_translate &&
+                    term.source.length > 0
+                  }
                   onChange={(v) =>
                     onUpdateTerm((t) => {
                       const next = { ...t.translations };
@@ -1336,6 +1415,11 @@ function GlossaryTermDetail({
                       else next[id] = v;
                       return { ...t, translations: next };
                     })
+                  }
+                  onAiAssist={
+                    onTranslateLocale
+                      ? () => onTranslateLocale(term.source, id)
+                      : undefined
                   }
                 />
               ))}
@@ -1458,14 +1542,22 @@ function TranslationRow({
   disabled,
   sourceTerm,
   last,
+  busy,
+  canAiAssist,
   onChange,
+  onAiAssist,
 }: {
   locale: string;
   value: string;
   disabled: boolean;
   sourceTerm: string;
   last: boolean;
+  /** True while an AI-assist request is in flight for this (term, locale). */
+  busy: boolean;
+  /** Whether the AI-assist button should be shown at all. */
+  canAiAssist: boolean;
   onChange: (v: string) => void;
+  onAiAssist?: () => void;
 }) {
   const missing = !disabled && value.length === 0;
   return (
@@ -1529,6 +1621,60 @@ function TranslationRow({
           minWidth: 0,
         }}
       />
+      {canAiAssist && (
+        <button
+          type="button"
+          onClick={busy ? undefined : onAiAssist}
+          disabled={busy}
+          aria-label={
+            busy
+              ? `Requesting AI translation for ${locale}…`
+              : `Propose AI translation for ${locale}`
+          }
+          title={
+            busy
+              ? `Requesting AI translation for ${locale}…`
+              : `Propose AI translation for ${locale}`
+          }
+          style={{
+            flexShrink: 0,
+            width: 24,
+            height: 24,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid var(--color-border-default)",
+            borderRadius: 4,
+            background: "transparent",
+            color: busy
+              ? "var(--color-fg-tertiary)"
+              : "var(--color-fg-secondary)",
+            cursor: busy ? "default" : "pointer",
+            opacity: busy ? 0.7 : 1,
+            transition: "color 100ms, border-color 100ms, background 100ms",
+          }}
+          onMouseEnter={(e) => {
+            if (!busy) {
+              (e.currentTarget as HTMLButtonElement).style.color =
+                "var(--color-accent)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor =
+                "var(--color-accent)";
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "var(--color-bg-hover)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color =
+              "var(--color-fg-secondary)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "var(--color-border-default)";
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "transparent";
+          }}
+        >
+          {busy ? <Spinner size={12} /> : <SparklesIcon size={12} />}
+        </button>
+      )}
     </div>
   );
 }

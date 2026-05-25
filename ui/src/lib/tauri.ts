@@ -149,6 +149,31 @@ export async function pickGlossarySaveLocation(): Promise<string | null> {
   return selected ?? null;
 }
 
+export async function pickReviewSaveLocation(
+  projectName: string,
+): Promise<string | null> {
+  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const selected = await saveDialog({
+    title: "Save review report",
+    defaultPath: `${slug}-review.md`,
+    filters: [
+      {
+        name: "Markdown (.md)",
+        extensions: ["md"],
+      },
+    ],
+  });
+  return selected ?? null;
+}
+
+/** Write UTF-8 text to `path`, creating or overwriting the file. */
+export async function writeTextFile(
+  path: string,
+  content: string,
+): Promise<void> {
+  return await invoke<void>("write_text_file", { path, content });
+}
+
 // ── M4.2 project-mode wrappers ────────────────────────────────────────────────
 
 export async function openProject(root: string): Promise<ProjectOpenResponse> {
@@ -235,6 +260,23 @@ export async function translateUnitInProject(
   return await invoke<TranslateResult>("translate_unit_in_project", {
     catalogPath,
     unitId,
+  });
+}
+
+/// Propose a translation for one glossary term using the project's default
+/// backend. Returns the proposed translation string.
+///
+/// Errors if the project has no glossary, the term is not found,
+/// the term has `do_not_translate = true`, or the backend call fails.
+export async function translateGlossaryTerm(
+  projectPath: string,
+  termId: string,
+  targetLocale: string,
+): Promise<string> {
+  return await invoke<string>("translate_glossary_term", {
+    projectPath,
+    termId,
+    targetLocale,
   });
 }
 

@@ -5,7 +5,7 @@ import type {
   CatalogResponse,
   ProjectSummary,
 } from "../../lib/types";
-import { LocaleTag, ProgressBar } from "../primitives";
+import { LocaleTag, SegmentBar } from "../primitives";
 
 interface Props {
   summary: ProjectSummary;
@@ -251,7 +251,7 @@ function CatalogItem({
 
         {/* Row 2: stacked progress bar — only when catalog is loaded */}
         {stats !== null ? (
-          <ProgressBar
+          <SegmentBar
             finished={stats.finished}
             proposed={stats.proposed}
             total={stats.total}

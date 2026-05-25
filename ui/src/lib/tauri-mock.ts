@@ -7,6 +7,9 @@
 //
 // Import this file only through the test setup or the conditional in tauri.ts.
 
+const MOCK_TRANSLATE_DELAY_MS = 400;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 import type {
   CatalogResponse,
   GlossaryLoadResponse,
@@ -211,10 +214,11 @@ function cmdAcceptUnitInProject(args: {
   return JSON.parse(JSON.stringify(unit)) as Unit;
 }
 
-function cmdTranslateUnitInProject(args: {
+async function cmdTranslateUnitInProject(args: {
   catalogPath: string;
   unitId: UnitId;
-}): TranslateResult {
+}): Promise<TranslateResult> {
+  await sleep(MOCK_TRANSLATE_DELAY_MS);
   const catalog = state.catalogs.get(args.catalogPath);
   if (!catalog) throw new Error(`Catalog not found: ${args.catalogPath}`);
   const unit = catalog.units.find((u) => u.id === args.unitId);
@@ -501,6 +505,7 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
     prompt_template_version: "mock-v1",
   }),
   list_tuning_bundles_in_project: () => [],
+  write_text_file: () => undefined,
   load_metrics: () => ({ path: "", events: [], error_count: 0, line_count: 0 }),
   open_catalog: () => ({ path: "", unit_count: 0, language: null, units: [] }),
   update_unit_target: () => {
@@ -541,6 +546,10 @@ export function mockOpenDialog(_opts: unknown): Promise<string | null> {
   return Promise.resolve(result);
 }
 
+// Overrideable in tests via window.__mockSaveResult.
 export function mockSaveDialog(_opts: unknown): Promise<string | null> {
-  return Promise.resolve("/mock/save/location.toml");
+  const result =
+    (window as { __mockSaveResult?: string | null }).__mockSaveResult ??
+    "/mock/save/location.toml";
+  return Promise.resolve(result);
 }

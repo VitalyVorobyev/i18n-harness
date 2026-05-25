@@ -1,5 +1,5 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveBatch } from "./components/BatchProgressWidget/BatchProgressWidget";
 import { BatchProgressWidget } from "./components/BatchProgressWidget/BatchProgressWidget";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
@@ -13,7 +13,15 @@ import type { ProjectView } from "./components/TopBar/TopBar";
 import { ProjectTopBar } from "./components/TopBar/TopBar";
 import type { MatrixFilter } from "./components/TranslatePanel";
 import { TranslatePanel } from "./components/TranslatePanel";
+import type {
+  PairJobHandle,
+  PairProgress,
+  PairTerminal,
+  ScopePair,
+} from "./components/TranslatePanel/RunOnScopeModal";
 import type { UnitEditorHandle } from "./components/TranslatePanel/UnitEditor/UnitEditor";
+import type { CommitNowFn, CommitRegistry } from "./lib/pending-commits";
+import { PendingCommitsContext } from "./lib/pending-commits";
 import {
   acceptUnitInProject,
   cancelTranslation,
@@ -98,6 +106,8 @@ export function App() {
   // errors and we toast it. The UI only tracks one batch at a time (the one
   // that is running most recently).
   const [activeBatch, setActiveBatch] = useState<ActiveBatch | null>(null);
+  // True while saveAllDirty is in-flight; drives the topbar Save button spinner.
+  const [isSaving, setIsSaving] = useState(false);
   const unlistenRef = useRef<UnlistenFn | null>(null);
   // Mirror of activeBatch kept in a ref so the unmount cleanup can read the
   // latest value without capturing a stale closure.
@@ -159,6 +169,50 @@ export function App() {
   );
 
   const editorRef = useRef<UnitEditorHandle | null>(null);
+
+  // Pending-commit registry. Every matrix/focus textarea registers a
+  // commit-now callback on mount; onSaveAll calls flushAll BEFORE the IPC
+  // save so that drafts typed without a subsequent blur (the Cmd-S case)
+  // make it to the Rust side first. Tracked in-flight IPC promises are
+  // also awaited so a save cannot race past a still-pending edit. The
+  // registry is created once and never re-allocated — the Set lives in
+  // a ref so commit-now thunks keep their identity across renders.
+  const pendingCommitsRef = useRef<Set<CommitNowFn>>(new Set());
+  const inFlightIpcRef = useRef<Set<Promise<unknown>>>(new Set());
+  const commitRegistry = useMemo<CommitRegistry>(
+    () => ({
+      register: (commit: CommitNowFn) => {
+        pendingCommitsRef.current.add(commit);
+        return () => {
+          pendingCommitsRef.current.delete(commit);
+        };
+      },
+      trackInFlight: (promise: Promise<unknown>) => {
+        inFlightIpcRef.current.add(promise);
+        // Use .finally so both fulfilled and rejected promises remove
+        // themselves — leaking a rejected promise would block every
+        // future Save All forever. The IPC trampolines (onEditUnitFor
+        // etc.) all `.catch` internally and call flashError, so the
+        // promises tracked here resolve to undefined. The .catch below
+        // is paranoia: any caller that hands us a rejecting promise
+        // would otherwise crash the page with an unhandled rejection.
+        void promise
+          .catch(() => {})
+          .finally(() => {
+            inFlightIpcRef.current.delete(promise);
+          });
+      },
+      flushAll: async () => {
+        const commits = Array.from(pendingCommitsRef.current);
+        // Promise.allSettled keeps a slow/failed commit from blocking
+        // the other textareas — Save All still proceeds.
+        await Promise.allSettled(commits.map((c) => Promise.resolve(c())));
+        const pending = Array.from(inFlightIpcRef.current);
+        await Promise.allSettled(pending);
+      },
+    }),
+    [],
+  );
 
   // On mount, check whether a project is already open (returns None on first
   // launch since the Rust slot resets after a restart).
@@ -312,11 +366,20 @@ export function App() {
 
   // "Save & Close" — save all dirty catalogs, then close (abort if save fails).
   const handleSaveAndClose = useCallback(async () => {
+    // Same flush pattern as onSaveAll — pending textarea drafts and in-flight
+    // IPC promises must land before we save, otherwise Save & Close abandons
+    // the unflushed text. See onSaveAll for the full rationale.
+    try {
+      await commitRegistry.flushAll();
+    } catch {
+      // Best-effort — per-cell errors are reported as toasts.
+    }
     try {
       await editorRef.current?.flushPendingEdit();
     } catch {
       // Best-effort flush; continue with save.
     }
+    setIsSaving(true);
     try {
       const resp = await saveAllDirty();
       if (resp.failed_path) {
@@ -330,9 +393,11 @@ export function App() {
       flashError(`Save failed: ${formatError(e)}. Close aborted.`);
       setCloseConfirm({ kind: "none" });
       return;
+    } finally {
+      setIsSaving(false);
     }
     await _doCloseProject();
-  }, [_doCloseProject, flashError]);
+  }, [_doCloseProject, flashError, commitRegistry]);
 
   // "Discard & Close" — close immediately, dropping all unsaved state.
   const handleDiscardAndClose = useCallback(() => {
@@ -464,6 +529,16 @@ export function App() {
 
   const onSave = useCallback(async () => {
     if (!catalog || !activeCatalogPath) return;
+    // Flush every registered matrix/focus textarea draft and every still-
+    // pending IPC promise FIRST. The `dirtyIds.size === 0` early-return
+    // below is otherwise the bug — typed-but-not-blurred edits would never
+    // mark the unit dirty, the save would skip, and the disk file would
+    // stay stale. See onSaveAll for the full rationale.
+    try {
+      await commitRegistry.flushAll();
+    } catch {
+      // Best-effort — per-cell errors are surfaced as toasts.
+    }
     try {
       await editorRef.current?.flushPendingEdit();
     } catch (e) {
@@ -491,18 +566,33 @@ export function App() {
     catalog,
     activeCatalogPath,
     dirtyIds,
+    commitRegistry,
     scheduleRescan,
     flashInfo,
     flashError,
   ]);
 
   const onSaveAll = useCallback(async () => {
-    if (dirtyCatalogPaths.size === 0) return;
+    // Flush every matrix/focus textarea's uncommitted draft AND every
+    // still-pending IPC promise BEFORE deciding the save is a no-op. The
+    // React-side `dirtyCatalogPaths` set is the UI's view of dirty state,
+    // but it lags the Rust store by one render after a commit lands. We
+    // deliberately do NOT short-circuit on `dirtyCatalogPaths.size === 0`
+    // here: that gate would skip the save for the Cmd-S-without-blur case
+    // because the draft has not yet committed when the user pressed Save.
+    // `saveAllDirty()` is cheap when the Rust store has no dirty entries
+    // (it returns an empty `saved` list and no error).
+    try {
+      await commitRegistry.flushAll();
+    } catch {
+      // Best-effort — individual commit errors are reported per-cell.
+    }
     try {
       await editorRef.current?.flushPendingEdit();
     } catch {
       // Best-effort flush; continue saving.
     }
+    setIsSaving(true);
     try {
       const resp = await saveAllDirty();
       const savedCount = resp.saved.length;
@@ -532,13 +622,15 @@ export function App() {
       }
     } catch (e) {
       flashError(`Save all failed: ${formatError(e)}`);
+    } finally {
+      setIsSaving(false);
     }
   }, [
-    dirtyCatalogPaths,
     activeCatalogPath,
     scheduleRescan,
     flashInfo,
     flashError,
+    commitRegistry,
   ]);
 
   const onDiscard = useCallback(async () => {
@@ -666,7 +758,11 @@ export function App() {
 
   const onEditUnitFor = useCallback(
     (absPath: string, unit: Unit, edit: TargetEdit) => {
-      void (async () => {
+      // Track the IPC promise so onSaveAll's flushAll can await it. Without
+      // this, a blur that fires immediately before Cmd-S could race the
+      // save: dirty state has not yet propagated to the Rust store when
+      // saveAllDirty walks it.
+      const p = (async () => {
         try {
           const updated = await updateUnitTargetInProject(
             absPath,
@@ -681,8 +777,16 @@ export function App() {
           flashError(`Edit failed: ${formatError(e)}`);
         }
       })();
+      commitRegistry.trackInFlight(p);
     },
-    [replaceUnitFor, markDirty, markCatalogDirty, scheduleRescan, flashError],
+    [
+      replaceUnitFor,
+      markDirty,
+      markCatalogDirty,
+      scheduleRescan,
+      flashError,
+      commitRegistry,
+    ],
   );
 
   const onTranslateUnitFor = useCallback(
@@ -809,6 +913,11 @@ export function App() {
       // The path passed in is already captured; alias for clarity in callbacks.
       const batchCatalogPath = catalogPath;
 
+      // Track which unit ids this batch has announced via onUnitStart so that
+      // the terminal handler can defensively clear them all from busyIds even
+      // if a progress event was missed.
+      const batchStartedIds = new Set<string>();
+
       const unlisten = await listenBatchProgress(
         jobId,
         // onProgress
@@ -819,6 +928,14 @@ export function App() {
             clearTimeout(stuckGuardTimer);
             stuckGuardTimer = null;
           }
+
+          // Unit completed — remove it from the spinner set.
+          setBusyIds((prev) => {
+            if (!prev.has(payload.unit.id)) return prev;
+            const next = new Set(prev);
+            next.delete(payload.unit.id);
+            return next;
+          });
 
           // Update batch progress UI.
           setActiveBatch((prev) => {
@@ -864,6 +981,17 @@ export function App() {
           }
           setActiveBatch(null);
 
+          // Defensively clear any unit ids this batch announced from busyIds.
+          // Handles the case where a progress event was dropped (e.g. instant
+          // backend completing before a React render cycle fires).
+          if (batchStartedIds.size > 0) {
+            setBusyIds((prev) => {
+              const next = new Set(prev);
+              for (const id of batchStartedIds) next.delete(id);
+              return next;
+            });
+          }
+
           // Toast with outcome.
           if (status === "failed" && payload.failed_reason) {
             flashError(
@@ -880,10 +1008,24 @@ export function App() {
           // Rescan review queue to pick up newly-flagged units.
           scheduleRescan();
         },
+        // onUnitStart — adds the unit to the spinner set so its matrix cell
+        // and focus row show a busy indicator before the translation completes.
+        (payload) => {
+          batchStartedIds.add(payload.unit_id);
+          setBusyIds((prev) => {
+            const next = new Set(prev);
+            next.add(payload.unit_id);
+            return next;
+          });
+        },
       );
 
       // Stash so we can call it on cleanup or user-cancel.
       unlistenRef.current = unlisten;
+
+      // Capture the wall-clock time now that listeners are registered and
+      // the batch is about to be displayed. Used for ETA computation.
+      const startedAt = Date.now();
 
       // Now that listeners are registered, initialise the batch UI state.
       setActiveBatch({
@@ -893,6 +1035,7 @@ export function App() {
         completed: 0,
         total,
         recent: [],
+        startedAt,
       });
 
       // Arm the stuck-batch guard: if the terminal event never arrives
@@ -917,6 +1060,155 @@ export function App() {
       }
     },
     [markCatalogDirty, scheduleRescan, flashInfo, flashError],
+  );
+
+  // ── Per-pair batch starter for RunOnScopeModal ──────────────────────────
+  //
+  // Mirrors the `onTranslateAll` machinery but is shaped for the modal:
+  // starts one (catalogPath, "untranslated") batch, subscribes to its events,
+  // updates the catalog cache on progress, and returns a `PairJobHandle` so
+  // the modal can track per-pair progress and cancel individual jobs.
+  //
+  // The stuck-batch guard is armed per job; the guard fires `onTerminal` with
+  // a synthetic "stuck" error so the modal row reflects the failure.
+  const startBatchForPair = useCallback(
+    async (
+      pair: ScopePair,
+      onPairProgress: (p: PairProgress) => void,
+      onPairTerminal: (t: PairTerminal) => void,
+    ): Promise<PairJobHandle> => {
+      const { catalogPath } = pair;
+
+      // Start the batch to get the server-assigned job_id.
+      let started: { job_id: string; total: number };
+      try {
+        started = await translateBatchInProject(catalogPath, "untranslated");
+      } catch (e) {
+        throw new Error(`Failed to start: ${formatError(e)}`);
+      }
+      const { job_id: jobId, total } = started;
+
+      const batchCatalogPath = catalogPath;
+      let terminalReceived = false;
+      const stuckGuardMs = 10_000;
+      let stuckGuardTimer: ReturnType<typeof setTimeout> | null = null;
+      const batchStartedIds = new Set<string>();
+
+      const unlisten = await listenBatchProgress(
+        jobId,
+        // onProgress
+        (payload) => {
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
+
+          // Clear the unit from busyIds.
+          setBusyIds((prev) => {
+            if (!prev.has(payload.unit.id)) return prev;
+            const next = new Set(prev);
+            next.delete(payload.unit.id);
+            return next;
+          });
+
+          // Merge translated unit into catalog cache.
+          setOpenCatalogs((prev) => {
+            const entry = prev.get(batchCatalogPath);
+            if (!entry) return prev;
+            const next = new Map(prev);
+            next.set(batchCatalogPath, {
+              ...entry,
+              units: entry.units.map((u) =>
+                u.id === payload.unit.id ? payload.unit : u,
+              ),
+            });
+            return next;
+          });
+
+          // Mark unit + catalog dirty.
+          setDirtyIds((prev) => {
+            if (prev.has(payload.unit.id)) return prev;
+            const next = new Set(prev);
+            next.add(payload.unit.id);
+            return next;
+          });
+          markCatalogDirty(batchCatalogPath);
+
+          // Forward to modal.
+          onPairProgress({
+            completed: payload.completed,
+            total: payload.total,
+          });
+        },
+        // onTerminal
+        (payload, status) => {
+          terminalReceived = true;
+          if (stuckGuardTimer !== null) {
+            clearTimeout(stuckGuardTimer);
+            stuckGuardTimer = null;
+          }
+          unlisten?.();
+
+          // Clear busy ids for this job's units.
+          if (batchStartedIds.size > 0) {
+            setBusyIds((prev) => {
+              const next = new Set(prev);
+              for (const id of batchStartedIds) next.delete(id);
+              return next;
+            });
+          }
+
+          scheduleRescan();
+
+          onPairTerminal({
+            completed: payload.completed,
+            total: payload.total,
+            cancelled: payload.cancelled,
+            failedReason:
+              status === "failed" ? (payload.failed_reason ?? null) : null,
+          });
+        },
+        // onUnitStart
+        (payload) => {
+          console.log("[batch] unit-started:", payload.unit_id);
+          batchStartedIds.add(payload.unit_id);
+          setBusyIds((prev) => {
+            const next = new Set(prev);
+            next.add(payload.unit_id);
+            return next;
+          });
+        },
+      );
+
+      // Arm the stuck-batch guard: if no terminal event arrives within
+      // stuckGuardMs, synthesise a failure so the modal row is not stuck.
+      if (!terminalReceived) {
+        stuckGuardTimer = setTimeout(() => {
+          stuckGuardTimer = null;
+          if (!terminalReceived) {
+            unlisten?.();
+            onPairTerminal({
+              completed: 0,
+              total,
+              cancelled: false,
+              failedReason:
+                "No progress received — batch may have completed before listeners were ready.",
+            });
+            scheduleRescan();
+          }
+        }, stuckGuardMs);
+      }
+
+      const handle: PairJobHandle = {
+        jobId,
+        cancel: () => {
+          cancelTranslation(jobId).catch(() => {});
+        },
+      };
+      return handle;
+    },
+    [markCatalogDirty, scheduleRescan],
   );
 
   // Cancel any in-flight batch.
@@ -1058,241 +1350,254 @@ export function App() {
   const reviewQueueByCatalog = reviewQueue?.by_catalog ?? {};
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
-      <ProjectTopBar
-        projectName={summary.name}
-        locales={summary.locales}
-        activeLocaleFilter={activeLocaleFilter}
-        onLocaleFilterChange={handleLocaleFilterChange}
-        view={projectView}
-        onViewChange={setProjectView}
-        theme={theme}
-        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-        onCloseProject={handleCloseProject}
-        reviewQueueCount={reviewQueueTotal}
-      />
+    <PendingCommitsContext.Provider value={commitRegistry}>
+      <div className="h-screen w-screen flex flex-col overflow-hidden bg-bg-base text-fg-primary">
+        <ProjectTopBar
+          projectName={summary.name}
+          locales={summary.locales}
+          activeLocaleFilter={activeLocaleFilter}
+          onLocaleFilterChange={handleLocaleFilterChange}
+          view={projectView}
+          onViewChange={setProjectView}
+          theme={theme}
+          onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onCloseProject={handleCloseProject}
+          reviewQueueCount={reviewQueueTotal}
+          unsavedCount={unsavedCatalogCount}
+          saving={isSaving}
+          onSave={onSaveAll}
+        />
 
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Workspace sidebar — rendered only for views without their own
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          {/* Workspace sidebar — rendered only for views without their own
             left rail. Translate (Matrix/Focus), Glossary (master-detail
             rail), Settings (long-form), and Review (sub-tab + side-nav)
             provide their own navigation and would render two stacked
             rails otherwise. */}
-        {(projectView === "overview" || projectView === "quality") && (
-          <ProjectSidebar
-            summary={summary}
-            activeCatalogPath={activeCatalogPath}
-            dirtyCatalogPaths={dirtyCatalogPaths}
-            activeLocaleFilter={activeLocaleFilter}
-            onCatalogSelect={handleCatalogSelect}
-            reviewQueueTotal={reviewQueueTotal}
-            reviewQueueByCatalog={reviewQueueByCatalog}
-            onOpenReviewQueue={() => setProjectView("review")}
-            openCatalogs={openCatalogs}
+          {(projectView === "overview" || projectView === "quality") && (
+            <ProjectSidebar
+              summary={summary}
+              activeCatalogPath={activeCatalogPath}
+              dirtyCatalogPaths={dirtyCatalogPaths}
+              activeLocaleFilter={activeLocaleFilter}
+              onCatalogSelect={handleCatalogSelect}
+              reviewQueueTotal={reviewQueueTotal}
+              reviewQueueByCatalog={reviewQueueByCatalog}
+              onOpenReviewQueue={() => setProjectView("review")}
+              openCatalogs={openCatalogs}
+            />
+          )}
+
+          {/* Main content area */}
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            {/* Overview view */}
+            {projectView === "overview" && (
+              <OverviewPanel
+                summary={summary}
+                openCatalogs={openCatalogs}
+                dirtyCatalogPaths={dirtyCatalogPaths}
+                focusLocale={focusLocale}
+                setFocusLocale={setFocusLocale}
+                setProjectView={setProjectView}
+              />
+            )}
+
+            {/* Translate view */}
+            <div
+              className={
+                projectView === "translate"
+                  ? "flex-1 flex overflow-hidden min-h-0"
+                  : "hidden"
+              }
+            >
+              <TranslatePanel
+                summary={summary}
+                openCatalogs={openCatalogs}
+                activeCatalogPath={activeCatalogPath}
+                catalog={catalog}
+                selectedId={selectedId}
+                filter={filter}
+                search={search}
+                dirtyIds={dirtyIds}
+                reports={reports}
+                busyIds={busyIds}
+                batchActive={activeBatch !== null}
+                error={error}
+                editorRef={editorRef}
+                focusLocale={focusLocale}
+                setFocusLocale={setFocusLocale}
+                onSelect={setSelectedId}
+                onFilterChange={setFilter}
+                onSearchChange={setSearch}
+                onEdit={onEditTarget}
+                onTranslate={onTranslate}
+                onAccept={onAccept}
+                onEnsureCatalogLoaded={ensureCatalogLoaded}
+                onTranslateUnitFor={onTranslateUnitFor}
+                onEditUnitFor={onEditUnitFor}
+                onAcceptUnitFor={onAcceptUnitFor}
+                onTranslateAll={onTranslateAll}
+                startBatchForPair={startBatchForPair}
+              />
+            </div>
+
+            {/* Glossary view */}
+            <div
+              className={
+                projectView === "glossary" ? "flex-1 flex min-h-0" : "hidden"
+              }
+            >
+              {glossaryPath ? (
+                <GlossaryPanel
+                  flashError={flashError}
+                  flashInfo={flashInfo}
+                  initialPath={glossaryPath}
+                  projectPath={summary.root}
+                />
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary p-8 text-center">
+                  <p>
+                    This project has no glossary. Add a{" "}
+                    <code className="font-mono text-xs bg-bg-surface px-1 py-0.5 rounded border border-border-subtle">
+                      glossary.toml
+                    </code>{" "}
+                    and update the manifest in Settings.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Settings view — M4.3c manifest editor */}
+            <div
+              className={
+                projectView === "settings" ? "flex-1 flex min-h-0" : "hidden"
+              }
+            >
+              <ProjectSettings
+                summary={summary}
+                onMutation={handleProjectMutation}
+                flashError={flashError}
+                flashInfo={flashInfo}
+              />
+            </div>
+
+            {/* Quality view — M4.3d */}
+            <div
+              className={
+                projectView === "quality" ? "flex-1 flex min-h-0" : "hidden"
+              }
+            >
+              <QualityPanel
+                summary={summary}
+                flashError={flashError}
+                flashInfo={flashInfo}
+              />
+            </div>
+
+            {/* Review panel — Queue + Proofread sub-tabs */}
+            <div
+              className={
+                projectView === "review" ? "flex-1 flex min-h-0" : "hidden"
+              }
+            >
+              <ReviewPanel
+                summary={summary}
+                openCatalogs={openCatalogs}
+                reports={reports}
+                reviewQueue={reviewQueue}
+                onOpenItem={onOpenReviewQueueItem}
+                onNavigateToUnit={async (catalogPath, unitId, locale) => {
+                  await handleCatalogSelect(catalogPath);
+                  setSelectedId(unitId);
+                  if (locale) {
+                    setFocusLocale(locale);
+                  }
+                  setProjectView("translate");
+                }}
+                onOpenHardFlags={() => setProjectView("review")}
+                onEnsureCatalogLoaded={ensureCatalogLoaded}
+                onToast={(message, kind) =>
+                  kind === "error" ? flashError(message) : flashInfo(message)
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer bar — always visible in project mode; shows batch progress or catalog/save summary */}
+        {(projectView === "translate" || activeBatch !== null) && (
+          <footer className="shrink-0 h-9 px-4 flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface text-xs text-fg-tertiary">
+            {activeBatch ? (
+              /* Batch in-flight: show progress widget across full footer width */
+              <BatchProgressWidget
+                batch={activeBatch}
+                onCancel={onCancelBatch}
+              />
+            ) : (
+              /* Normal Translate view footer */
+              <>
+                <span>
+                  {summary.catalogs.length}{" "}
+                  {summary.catalogs.length === 1 ? "catalog" : "catalogs"}
+                  {unsavedCatalogCount > 0 && (
+                    <>
+                      {" "}
+                      &middot;{" "}
+                      <span className="text-state-proposed font-medium">
+                        {unsavedCatalogCount} unsaved
+                      </span>
+                    </>
+                  )}
+                </span>
+                {unsavedCatalogCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={onSaveAll}
+                    className="h-6 px-3 rounded-md border border-border-default bg-transparent text-xs font-medium text-fg-secondary hover:bg-bg-hover hover:text-fg-primary hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                    title="Save all unsaved catalogs (Cmd+Shift+S)"
+                  >
+                    Save all
+                  </button>
+                )}
+              </>
+            )}
+          </footer>
+        )}
+
+        {/* Loading overlay */}
+        {loading && (
+          <div
+            aria-live="polite"
+            className="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-md border border-border-default bg-bg-elevated text-sm text-fg-secondary shadow-md"
+          >
+            Loading catalog…
+          </div>
+        )}
+
+        {toast && <ToastBanner toast={toast} />}
+
+        {/* Close-project confirmation overlay — shown when there are unsaved
+          catalogs and the user has clicked "Close project". Three actions:
+          Save & Close, Discard & Close, Cancel. */}
+        {closeConfirm.kind === "pending" && (
+          <CloseConfirmOverlay
+            unsavedCount={dirtyCatalogPaths.size}
+            onSaveAndClose={() => void handleSaveAndClose()}
+            onDiscardAndClose={handleDiscardAndClose}
+            onCancel={() => setCloseConfirm({ kind: "none" })}
           />
         )}
 
-        {/* Main content area */}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {/* Overview view */}
-          {projectView === "overview" && (
-            <OverviewPanel
-              summary={summary}
-              openCatalogs={openCatalogs}
-              dirtyCatalogPaths={dirtyCatalogPaths}
-              focusLocale={focusLocale}
-              setFocusLocale={setFocusLocale}
-              setProjectView={setProjectView}
-            />
-          )}
-
-          {/* Translate view */}
-          <div
-            className={
-              projectView === "translate"
-                ? "flex-1 flex overflow-hidden min-h-0"
-                : "hidden"
-            }
-          >
-            <TranslatePanel
-              summary={summary}
-              openCatalogs={openCatalogs}
-              activeCatalogPath={activeCatalogPath}
-              catalog={catalog}
-              selectedId={selectedId}
-              filter={filter}
-              search={search}
-              dirtyIds={dirtyIds}
-              reports={reports}
-              busyIds={busyIds}
-              batchActive={activeBatch !== null}
-              error={error}
-              editorRef={editorRef}
-              focusLocale={focusLocale}
-              setFocusLocale={setFocusLocale}
-              onSelect={setSelectedId}
-              onFilterChange={setFilter}
-              onSearchChange={setSearch}
-              onEdit={onEditTarget}
-              onTranslate={onTranslate}
-              onAccept={onAccept}
-              onEnsureCatalogLoaded={ensureCatalogLoaded}
-              onTranslateUnitFor={onTranslateUnitFor}
-              onEditUnitFor={onEditUnitFor}
-              onAcceptUnitFor={onAcceptUnitFor}
-              onTranslateAll={onTranslateAll}
-            />
-          </div>
-
-          {/* Glossary view */}
-          <div
-            className={
-              projectView === "glossary" ? "flex-1 flex min-h-0" : "hidden"
-            }
-          >
-            {glossaryPath ? (
-              <GlossaryPanel
-                flashError={flashError}
-                flashInfo={flashInfo}
-                initialPath={glossaryPath}
-              />
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary p-8 text-center">
-                <p>
-                  This project has no glossary. Add a{" "}
-                  <code className="font-mono text-xs bg-bg-surface px-1 py-0.5 rounded border border-border-subtle">
-                    glossary.toml
-                  </code>{" "}
-                  and update the manifest in Settings.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Settings view — M4.3c manifest editor */}
-          <div
-            className={
-              projectView === "settings" ? "flex-1 flex min-h-0" : "hidden"
-            }
-          >
-            <ProjectSettings
-              summary={summary}
-              onMutation={handleProjectMutation}
-              flashError={flashError}
-              flashInfo={flashInfo}
-            />
-          </div>
-
-          {/* Quality view — M4.3d */}
-          <div
-            className={
-              projectView === "quality" ? "flex-1 flex min-h-0" : "hidden"
-            }
-          >
-            <QualityPanel
-              summary={summary}
-              flashError={flashError}
-              flashInfo={flashInfo}
-            />
-          </div>
-
-          {/* Review panel — Queue + Proofread sub-tabs */}
-          <div
-            className={
-              projectView === "review" ? "flex-1 flex min-h-0" : "hidden"
-            }
-          >
-            <ReviewPanel
-              summary={summary}
-              openCatalogs={openCatalogs}
-              reports={reports}
-              reviewQueue={reviewQueue}
-              onOpenItem={onOpenReviewQueueItem}
-              onNavigateToUnit={async (catalogPath, unitId, locale) => {
-                await handleCatalogSelect(catalogPath);
-                setSelectedId(unitId);
-                if (locale) {
-                  setFocusLocale(locale);
-                }
-                setProjectView("translate");
-              }}
-              onOpenHardFlags={() => setProjectView("review")}
-              onEnsureCatalogLoaded={ensureCatalogLoaded}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Footer bar — always visible in project mode; shows batch progress or catalog/save summary */}
-      {(projectView === "translate" || activeBatch !== null) && (
-        <footer className="shrink-0 h-9 px-4 flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface text-xs text-fg-tertiary">
-          {activeBatch ? (
-            /* Batch in-flight: show progress widget across full footer width */
-            <BatchProgressWidget batch={activeBatch} onCancel={onCancelBatch} />
-          ) : (
-            /* Normal Translate view footer */
-            <>
-              <span>
-                {summary.catalogs.length}{" "}
-                {summary.catalogs.length === 1 ? "catalog" : "catalogs"}
-                {unsavedCatalogCount > 0 && (
-                  <>
-                    {" "}
-                    &middot;{" "}
-                    <span className="text-state-proposed font-medium">
-                      {unsavedCatalogCount} unsaved
-                    </span>
-                  </>
-                )}
-              </span>
-              {unsavedCatalogCount > 0 && (
-                <button
-                  type="button"
-                  onClick={onSaveAll}
-                  className="h-6 px-3 rounded-md border border-border-default bg-transparent text-xs font-medium text-fg-secondary hover:bg-bg-hover hover:text-fg-primary hover:border-border-strong active:bg-bg-selected transition-colors duration-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-                  title="Save all unsaved catalogs (Cmd+Shift+S)"
-                >
-                  Save all
-                </button>
-              )}
-            </>
-          )}
-        </footer>
-      )}
-
-      {/* Loading overlay */}
-      {loading && (
-        <div
-          aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 px-3 py-2 rounded-md border border-border-default bg-bg-elevated text-sm text-fg-secondary shadow-md"
-        >
-          Loading catalog…
-        </div>
-      )}
-
-      {toast && <ToastBanner toast={toast} />}
-
-      {/* Close-project confirmation overlay — shown when there are unsaved
-          catalogs and the user has clicked "Close project". Three actions:
-          Save & Close, Discard & Close, Cancel. */}
-      {closeConfirm.kind === "pending" && (
-        <CloseConfirmOverlay
-          unsavedCount={dirtyCatalogPaths.size}
-          onSaveAndClose={() => void handleSaveAndClose()}
-          onDiscardAndClose={handleDiscardAndClose}
-          onCancel={() => setCloseConfirm({ kind: "none" })}
-        />
-      )}
-
-      {/* Discard shortcut handler — accessible via onDiscard (no visible button
+        {/* Discard shortcut handler — accessible via onDiscard (no visible button
           in M4.3a; the per-catalog discard action is wired and callable via
           keyboard in later slices). */}
-      <span
-        className="sr-only"
-        aria-hidden="true"
-        data-discard={String(!!onDiscard)}
-      />
-    </div>
+        <span
+          className="sr-only"
+          aria-hidden="true"
+          data-discard={String(!!onDiscard)}
+        />
+      </div>
+    </PendingCommitsContext.Provider>
   );
 }
 

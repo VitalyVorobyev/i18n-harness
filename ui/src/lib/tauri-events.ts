@@ -8,15 +8,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   BatchProgressPayload,
   BatchTerminalPayload,
+  BatchUnitStartedPayload,
   EvaluationProgressPayload,
   EvaluationTerminalPayload,
 } from "./types";
 
 /**
- * Subscribe to all three batch-event channels for a given job.
+ * Subscribe to all four batch-event channels for a given job.
  *
  * Returns a combined unlisten function: calling it unregisters all
- * three listeners in one step. The listeners are already established
+ * four listeners in one step. The listeners are already established
  * before this promise resolves, so the caller can start the batch
  * command after `await listenBatchProgress(...)` without racing against
  * a fast first-unit emit.
@@ -28,6 +29,7 @@ export async function listenBatchProgress(
   jobId: string,
   onProgress: (p: BatchProgressPayload) => void,
   onTerminal: (p: BatchTerminalPayload, status: "completed" | "failed") => void,
+  onUnitStart?: (p: BatchUnitStartedPayload) => void,
 ): Promise<UnlistenFn> {
   const u1 = await listen<BatchProgressPayload>(
     `batch-progress-${jobId}`,
@@ -40,11 +42,18 @@ export async function listenBatchProgress(
   const u3 = await listen<BatchTerminalPayload>(`batch-failed-${jobId}`, (e) =>
     onTerminal(e.payload, "failed"),
   );
+  const u4 = onUnitStart
+    ? await listen<BatchUnitStartedPayload>(
+        `batch-unit-started-${jobId}`,
+        (e) => onUnitStart(e.payload),
+      )
+    : null;
 
   return () => {
     u1();
     u2();
     u3();
+    if (u4) u4();
   };
 }
 

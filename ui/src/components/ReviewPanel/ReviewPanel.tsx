@@ -40,6 +40,8 @@ export interface ReviewPanelProps {
    *  on first render — without this the manuscript stays empty until the
    *  user manually opens each catalog from Translate. */
   onEnsureCatalogLoaded?: (absPath: string) => Promise<void>;
+  /** Forwarded to ProofreadView for Copy/Save As feedback. */
+  onToast?: (message: string, kind: "info" | "error") => void;
 }
 
 export function ReviewPanel({
@@ -51,6 +53,7 @@ export function ReviewPanel({
   onNavigateToUnit,
   onOpenHardFlags,
   onEnsureCatalogLoaded,
+  onToast,
 }: ReviewPanelProps) {
   const [subTab, setSubTab] = useState<SubTab>("queue");
 
@@ -151,6 +154,7 @@ export function ReviewPanel({
           onNavigateToUnit={onNavigateToUnit}
           onOpenHardFlags={onOpenHardFlags}
           onEnsureCatalogLoaded={onEnsureCatalogLoaded}
+          onToast={onToast}
         />
       </div>
     </div>

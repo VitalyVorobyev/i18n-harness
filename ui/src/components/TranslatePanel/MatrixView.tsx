@@ -12,7 +12,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import type {
-  BatchScope,
   CatalogResponse,
   GateReport,
   ProjectSummary,
@@ -21,10 +20,18 @@ import type {
   UnitId,
 } from "../../lib/types";
 import { severityOf } from "../../lib/types";
-import { Eyebrow, LocaleTag, ProgressBar } from "../primitives";
+import {
+  Eyebrow,
+  LocaleTag,
+  SegmentBar,
+  SparklesIcon,
+  Spinner,
+} from "../primitives";
 import type { Filter as CatalogFilter } from "./CatalogList/CatalogList";
 import { Inspector } from "./Inspector/Inspector";
 import { MatrixCell } from "./MatrixCell";
+import type { StatusFilterId } from "./StatusFilter";
+import { unitMatchesFilter } from "./StatusFilter";
 
 // ── Extended filter union ────────────────────────────────────────────────
 //
@@ -73,6 +80,9 @@ interface Props {
   batchActive: boolean;
   filter: MatrixFilter;
   search: string;
+  /** Status filter lifted from TranslatePanel sub-header — applied on top
+   *  of the saved-view `filter` so both can narrow the row list at once. */
+  statusFilter: StatusFilterId;
   onFilterChange: (f: MatrixFilter) => void;
   onSearchChange: (s: string) => void;
   /** Auto-load a project catalog into the App's openCatalogs cache. The
@@ -88,9 +98,8 @@ interface Props {
   onTranslateUnit: (catalogPath: string, unit: Unit) => void;
   onEditUnit: (catalogPath: string, unit: Unit, edit: TargetEdit) => void;
   onAcceptUnit: (catalogPath: string, unit: Unit) => void;
-  /** Run-model-on-selection — dispatches `translate_batch_in_project`
-   *  once per locale for the current saved-view scope. */
-  onTranslateAll: (catalogPath: string, scope: BatchScope) => void;
+  /** Open the "Translate untranslated" modal pre-filled with all locales. */
+  onOpenTranslateModal: () => void;
 }
 
 // ── Matrix-row data model ────────────────────────────────────────────────
@@ -309,6 +318,7 @@ export function MatrixView({
   batchActive,
   filter,
   search,
+  statusFilter,
   onFilterChange,
   onSearchChange,
   onEnsureCatalogLoaded,
@@ -316,7 +326,7 @@ export function MatrixView({
   onTranslateUnit,
   onEditUnit,
   onAcceptUnit,
-  onTranslateAll,
+  onOpenTranslateModal,
 }: Props) {
   // ── Auto-load every project catalog into the cache ──────────────────────
   //
@@ -372,12 +382,19 @@ export function MatrixView({
 
   const filteredRows = useMemo(() => {
     const lower = search.trim().toLowerCase();
-    return rows.filter(
-      (row) =>
-        rowMatchesFilter(row, filter, hideFinished) &&
-        rowMatchesSearch(row, lower),
-    );
-  }, [rows, filter, hideFinished, search]);
+    return rows.filter((row) => {
+      if (!rowMatchesFilter(row, filter, hideFinished)) return false;
+      if (!rowMatchesSearch(row, lower)) return false;
+      // statusFilter from TranslatePanel sub-header: pass if ANY cell in
+      // the row satisfies the unit-level predicate, or if filter is "all".
+      if (statusFilter !== "all") {
+        const cells = Array.from(row.byLocale.values());
+        if (!cells.some((entry) => unitMatchesFilter(entry.unit, statusFilter)))
+          return false;
+      }
+      return true;
+    });
+  }, [rows, filter, hideFinished, search, statusFilter]);
 
   const counts = useMemo(() => countByFilter(rows), [rows]);
   const localeStats = useMemo(
@@ -535,25 +552,16 @@ export function MatrixView({
     onAcceptUnit,
   ]);
 
-  // ── Run model on selected ──────────────────────────────────────────────
+  // ── Translate untranslated — open the scope modal ─────────────────────
   //
-  // The existing batch IPC takes a single (catalog, scope). Matrix mode's
-  // "Run model on selected" is locale-fanout: one batch per locale, queued
-  // sequentially by the existing single-slot stuck-guard in App. For PR 4
-  // we dispatch immediately for every locale that has at least one
-  // matching unit; the user gets one toast per batch.
+  // Previously dispatched directly to onTranslateAll per locale. Now opens
+  // RunOnScopeModal so the user sees which pairs will run and which are
+  // skipped before work begins.
 
   const onRunOnSelected = useCallback(() => {
     if (batchActive) return;
-    const scope: BatchScope = "untranslated";
-    for (const ref of summary.catalogs) {
-      const cached = openCatalogs.get(ref.absolute_path);
-      if (!cached) continue;
-      const hasTarget = cached.units.some((u) => u.state === "untranslated");
-      if (!hasTarget) continue;
-      onTranslateAll(ref.absolute_path, scope);
-    }
-  }, [batchActive, summary.catalogs, openCatalogs, onTranslateAll]);
+    onOpenTranslateModal();
+  }, [batchActive, onOpenTranslateModal]);
 
   // The Inspector accepts an `onAccept(unitId)` that is bound to App's
   // active catalog — but Matrix mode is multi-catalog. We curry the right
@@ -689,8 +697,13 @@ export function MatrixView({
                 "inline-flex items-center gap-2 h-7 px-3 rounded-md text-xs font-medium",
                 "transition-colors duration-100",
                 "text-accent-fg bg-accent",
-                "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
-                "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
+                batchActive ? "cursor-wait" : null,
+                batchActive
+                  ? null
+                  : "enabled:hover:bg-accent-hover enabled:active:bg-accent-active",
+                batchActive
+                  ? null
+                  : "disabled:bg-accent-subtle disabled:text-fg-disabled disabled:cursor-not-allowed",
               )}
               title={
                 batchActive
@@ -700,7 +713,8 @@ export function MatrixView({
                     : "Translate untranslated across all locales"
               }
             >
-              Run model on selected
+              {batchActive ? <Spinner size={12} /> : <SparklesIcon size={12} />}
+              Translate untranslated
             </button>
           </div>
           <input
@@ -851,9 +865,9 @@ function MatrixCard({
       {/* Card head */}
       <div className="flex items-start gap-3 px-4 py-2.5 border-b border-border-subtle">
         <div className="flex-1 min-w-0 flex flex-col gap-1">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
             <span
-              className="font-mono text-[11.5px] text-fg-secondary"
+              className="flex-1 min-w-0 truncate font-mono text-[11.5px] text-fg-secondary"
               title={row.unitId}
             >
               {row.unitId}
@@ -869,7 +883,7 @@ function MatrixCard({
               </span>
             )}
           </div>
-          <p className="m-0 font-mono text-sm text-fg-primary leading-snug break-words">
+          <p className="m-0 max-h-32 overflow-y-auto pr-1 font-mono text-sm text-fg-primary leading-snug break-words">
             {row.source}
           </p>
         </div>
@@ -1049,7 +1063,7 @@ function LocaleRowButton({
             : "—"}
         </span>
       </div>
-      <ProgressBar
+      <SegmentBar
         total={stat.total}
         finished={stat.finished}
         proposed={stat.proposed}

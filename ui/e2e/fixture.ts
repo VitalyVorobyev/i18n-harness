@@ -182,7 +182,9 @@ export const test = base.extend<Fixtures>({
           dirtyCatalogs.add(a.catalogPath as string);
           return JSON.parse(JSON.stringify(unit));
         },
-        translate_unit_in_project: (a) => {
+        translate_unit_in_project: async (a) => {
+          // Simulate model latency so the spinner is visible during tests.
+          await new Promise<void>((r) => setTimeout(r, 400));
           const { unit } = findUnit(
             a.catalogPath as string,
             a.unitId as string,
