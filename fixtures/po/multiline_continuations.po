@@ -1,0 +1,25 @@
+# A PO file using multi-line "..." continuations and embedded newlines (\n).
+msgid ""
+msgstr ""
+"Project-Id-Version: myapp 1.0\n"
+"Language: de_DE\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/dialogs/about.cpp:14
+msgid ""
+"This is a longer message that the original .pot generator split across "
+"two source lines so the file stayed under 80 columns."
+msgstr ""
+"Dies ist eine längere Nachricht, die der ursprüngliche .pot-Generator "
+"auf zwei Quellzeilen aufgeteilt hat, damit die Datei unter 80 Spalten bleibt."
+
+#: src/dialogs/eula.cpp:7
+msgid "Line one\nLine two\nLine three"
+msgstr "Zeile eins\nZeile zwei\nZeile drei"
+
+#: src/dialogs/error.cpp:22
+msgid "Quote: \"hello\""
+msgstr "Zitat: \"hallo\""

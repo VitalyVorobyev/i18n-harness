@@ -1,0 +1,19 @@
+# Arabic translation showcasing 6-form plurals (zero, one, two, few, many, other).
+msgid ""
+msgstr ""
+"Project-Id-Version: myapp 1.0\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5);\n"
+
+#: src/inbox.cpp:18
+msgid "%d unread message"
+msgid_plural "%d unread messages"
+msgstr[0] "لا توجد رسائل غير مقروءة"
+msgstr[1] "رسالة واحدة غير مقروءة"
+msgstr[2] "رسالتان غير مقروءتين"
+msgstr[3] "%d رسائل غير مقروءة"
+msgstr[4] "%d رسالة غير مقروءة"
+msgstr[5] "%d رسالة غير مقروءة"

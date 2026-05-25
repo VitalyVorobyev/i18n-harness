@@ -349,18 +349,30 @@ wires `handleProjectMutation` to update the in-memory `summary` after
 each command. Directly addresses user feedback #6 (add/remove `.ts` files
 from a project without editing TOML by hand).
 
-### M4.4 — PO serializer
+### M4.4 — PO serializer ✓ shipped
 
-New `crates/catalog/src/po.rs` implementing the `CatalogFormat` trait
-(designed in this milestone since the trait itself doesn't exist yet).
-Ships:
+New `crates/catalog/src/po/` implementing the `CatalogFormat` trait — the
+trait itself ships in this slice (in `crates/catalog/src/format.rs`).
+Shipped:
 
-- Reader + writer with byte-stable round-trip over a fixture corpus at
-  `fixtures/po/`.
-- Placeholder converter gettext `%s`/`%d`/`%(name)s` ↔ ICU `{n}` with
-  a property test on the converter pair.
-- Plural-form reconciliation between PO's `Plural-Forms` header and
-  the locale's CLDR arity.
+- `CatalogFormat` trait with `id`, `extensions`, `extract`, `apply`,
+  `placeholders_to_icu`, `placeholders_from_icu`. Qt stays in its own
+  crate; a `BackingCatalog` enum on the Tauri side dispatches Qt vs.
+  catalog-crate flavors uniformly. ICU-JSON (M4.5) adds one more arm.
+- PO reader + writer with byte-stable round-trip over `fixtures/po/`
+  (six fixtures: singular, Polish 3-form, Arabic 6-form, msgctxt,
+  mixed placeholders, multi-line continuations).
+- Placeholder converter gettext `%s`/`%d`/`%(name)s`/`%1$s` ↔ ICU `{n}`,
+  with a property test on the converter pair and a per-unit
+  conversion-specifier table so `%d` writes back as `%d` (not `%s`).
+- Plural-form reconciliation (`reconcile_plural_arity`): PO header
+  `nplurals` and locale CLDR arity are compared; mismatch logs a warning
+  and prefers the locale for new writes without rewriting existing
+  `msgstr[N]` blocks (the user's header stays authoritative).
+- `open_catalog_in_project`, `save_catalog_in_project`,
+  `save_all_dirty`, `discard_changes_in_project`, and
+  `scan_project_review_state` all dispatch by format; opening a PO
+  catalog through the manifest now works end-to-end.
 
 ### M4.5 — ICU-JSON serializer; wire `crates/adapter-react`
 

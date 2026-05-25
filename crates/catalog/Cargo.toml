@@ -13,8 +13,12 @@ workspace = true
 
 [features]
 default = []
-# `po` and `icu-json` features land in M4 with their deps.
+# `icu-json` lands in M4.5.
 
 [dependencies]
 i18n-harness-core.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

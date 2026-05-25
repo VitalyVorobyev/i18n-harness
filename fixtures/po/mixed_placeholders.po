@@ -1,0 +1,25 @@
+# Mixed placeholder styles: bare %s/%d, positional %1$s, Python named %(name)s.
+msgid ""
+msgstr ""
+"Project-Id-Version: myapp 1.0\n"
+"Language: de_DE\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/status.cpp:10
+msgid "Loaded %s in %d ms"
+msgstr "%s in %d ms geladen"
+
+#: src/share.cpp:24
+msgid "Open %1$s with %2$s"
+msgstr "%1$s mit %2$s öffnen"
+
+#: src/notify.cpp:30
+msgid "%(user)s sent %(count)d messages"
+msgstr "%(user)s hat %(count)d Nachrichten gesendet"
+
+#: src/about.cpp:8
+msgid "Battery 100%% charged"
+msgstr "Akku zu 100%% geladen"
