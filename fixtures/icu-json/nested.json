@@ -1,0 +1,23 @@
+{
+  "app": {
+    "menu": {
+      "file": {
+        "open": "Open file",
+        "save": "Save file",
+        "close": "Close"
+      },
+      "edit": {
+        "copy": "Copy",
+        "paste": "Paste"
+      }
+    },
+    "status": {
+      "ready": "Ready",
+      "loading": "Loading {name}"
+    }
+  },
+  "errors": {
+    "not_found": "Resource not found: {path}",
+    "network": "Network error"
+  }
+}

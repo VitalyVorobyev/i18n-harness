@@ -2161,17 +2161,21 @@ fn scan_project_review_state(
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // M4.4 wires gettext-po through the catalog crate; M4.5 will add
-        // icu-json. Unsupported formats are still skipped.
+        // M4.4 wired gettext-po and M4.5 added icu-json; all manifest
+        // formats are now handled through `extract_for_format`. The guard
+        // remains in case future formats land in the manifest enum before
+        // their wiring is finished — surface the gap loudly rather than
+        // failing later in extract.
         if !matches!(
             catalog_ref.format,
             i18n_harness_project::CatalogFormat::QtTs
-                | i18n_harness_project::CatalogFormat::GettextPo,
+                | i18n_harness_project::CatalogFormat::GettextPo
+                | i18n_harness_project::CatalogFormat::IcuJson,
         ) {
             tracing::warn!(
                 path = %catalog_ref.manifest_path,
                 format = ?catalog_ref.format,
-                "scan_project_review_state: format not yet wired (M4.5 will add ICU-JSON)"
+                "scan_project_review_state: format not yet wired"
             );
             continue;
         }

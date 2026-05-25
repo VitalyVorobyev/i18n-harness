@@ -1,0 +1,5 @@
+{
+  "messages.count": "{count, plural, one {1 message} other {# messages}}",
+  "files.count": "{count, plural, =0 {No files} one {one file} other {# files}}",
+  "minutes.ago": "{count, plural, one {1 minute ago} other {# minutes ago}}"
+}

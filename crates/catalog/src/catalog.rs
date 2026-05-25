@@ -108,6 +108,7 @@ impl Catalog {
     pub fn header_plural_arity(&self) -> Option<u32> {
         match &self.extract_state {
             ExtractState::Po(state) => state.header_nplurals,
+            ExtractState::IcuJson(_) => None,
         }
     }
 }
@@ -120,4 +121,6 @@ impl Catalog {
 pub(crate) enum ExtractState {
     /// PO-format edit points. See `crate::po::ExtractStatePo`.
     Po(crate::po::ExtractStatePo),
+    /// ICU-JSON format edit points. See `crate::icu_json::ExtractStateIcuJson`.
+    IcuJson(crate::icu_json::ExtractStateIcuJson),
 }

@@ -1494,6 +1494,7 @@ version = "0.1.0"
 dependencies = [
  "i18n-harness-core",
  "proptest",
+ "serde_json",
  "thiserror 2.0.18",
  "tracing",
 ]
