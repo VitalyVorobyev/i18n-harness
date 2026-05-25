@@ -154,14 +154,21 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
             }
             (Target::Plural { forms }, originals)
         } else {
-            let block = entry
-                .msgstr_blocks
-                .first()
-                .expect("non-plural entry must have one msgstr block");
-            let icu = if block.unescaped.is_empty() {
-                None
-            } else {
-                Some(to_icu(&block.unescaped).map_err(CatalogError::PlaceholderConversion)?)
+            // Obsolete entries (`#~` prefixed) may reach here with no
+            // msgstr_blocks because the parser captures `is_obsolete` from
+            // the comment marker but does not parse the embedded
+            // `#~ msgid` / `#~ msgstr` lines (round-trip relies on
+            // unchanged-byte splicing to preserve them). Treat any
+            // non-plural entry without an msgstr block as an empty
+            // singular target — the resulting unit is non-writable
+            // (Obsolete state) and never touched on apply.
+            // Codex P1 on PR #38.
+            let block = entry.msgstr_blocks.first();
+            let icu = match block {
+                Some(b) if !b.unescaped.is_empty() => {
+                    Some(to_icu(&b.unescaped).map_err(CatalogError::PlaceholderConversion)?)
+                }
+                _ => None,
             };
             (Target::Singular { text: icu.clone() }, vec![icu])
         };

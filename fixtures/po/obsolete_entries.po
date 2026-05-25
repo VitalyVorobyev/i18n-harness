@@ -1,0 +1,26 @@
+# German translation of myapp, with obsolete entries preserved.
+# `#~` lines are gettext's obsolete-entry syntax — they keep old translations
+# around in case the source string returns. Codex P1 on PR #38 surfaced a
+# panic in the extract path when these landed without an msgstr block; this
+# fixture pins the regression.
+msgid ""
+msgstr ""
+"Project-Id-Version: myapp 1.0\n"
+"Language: de_DE\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/mainwindow.cpp:42
+msgid "Hello"
+msgstr "Hallo"
+
+#: src/mainwindow.cpp:58
+msgid "Save"
+msgstr "Speichern"
+
+#~ msgid "Deprecated menu item"
+#~ msgstr "Veralteter Menüeintrag"
+
+#~ msgid "Another removed string"
+#~ msgstr "Eine weitere entfernte Zeichenkette"

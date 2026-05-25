@@ -19,7 +19,7 @@
 use std::fs;
 use std::path::Path;
 
-use i18n_harness_core::{Target, Unit};
+use i18n_harness_core::{Target, Unit, UnitState};
 
 use super::parse::MsgstrBlock;
 use super::placeholder::{PoPlaceholder, from_icu_with_table};
@@ -46,6 +46,21 @@ pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
 
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
     for (unit, edit_state) in units.iter().zip(edit.units.iter()) {
+        // Obsolete / Vanished units are never rewritten — their msgstr_blocks
+        // may be empty (gettext `#~` obsolete entries are not parsed into the
+        // edit state; round-trip relies on source-byte splicing for them).
+        // The corresponding bytes pass through unchanged because no edit
+        // range is added for this unit. Codex P1 follow-up on PR #38.
+        //
+        // Note: this guard intentionally checks for Obsolete/Vanished
+        // specifically rather than calling `is_writable()`. Finished units
+        // MUST be rewritten when the user edits them — `is_writable` excludes
+        // Finished for the CLI batch contract, but the PO apply path is the
+        // UI write side and follows the `is_ui_editable` semantics from
+        // M4.3a.1.
+        if matches!(unit.state, UnitState::Obsolete | UnitState::Vanished) {
+            continue;
+        }
         let new_targets = collect_target_strings(&unit.target);
         if new_targets.len() != edit_state.msgstr_blocks.len() {
             // Plural arity changed (e.g., locale arity reconciliation
