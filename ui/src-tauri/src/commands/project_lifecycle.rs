@@ -27,10 +27,8 @@ pub(crate) fn open_project(
 /// [`AppState`] so integration tests can drive the Tauri command surface
 /// without spinning up a real Tauri runtime. The command wrapper above is
 /// a one-liner that calls into this helper.
-pub(crate) fn open_project_impl(
-    root: &Path,
-    state: &AppState,
-) -> Result<ProjectOpenResponse, String> {
+#[doc(hidden)]
+pub fn open_project_impl(root: &Path, state: &AppState) -> Result<ProjectOpenResponse, String> {
     let (project, warnings) = Project::open(root).map_err(|e| e.to_string())?;
     let summary = project.summary();
     let glossary_for_slot = project.glossary().cloned();

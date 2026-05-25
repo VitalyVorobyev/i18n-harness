@@ -34,7 +34,8 @@ pub(crate) fn open_catalog_in_project(
 /// State-only impl of [`open_catalog_in_project`] — same semantics, takes a
 /// borrowed [`AppState`] so integration tests can drive the open + edit + save
 /// flow without spinning up a real Tauri runtime.
-pub(crate) fn open_catalog_in_project_impl(
+#[doc(hidden)]
+pub fn open_catalog_in_project_impl(
     catalog_path: &str,
     state: &AppState,
 ) -> Result<CatalogResponse, String> {
@@ -96,7 +97,8 @@ pub(crate) fn update_unit_target_in_project(
 /// State-only impl of [`update_unit_target_in_project`] — same semantics, takes
 /// a borrowed [`AppState`] so integration tests can drive the open + edit +
 /// save flow without spinning up a real Tauri runtime.
-pub(crate) fn update_unit_target_in_project_impl(
+#[doc(hidden)]
+pub fn update_unit_target_in_project_impl(
     catalog_path: &str,
     unit_id: &str,
     edit: TargetEdit,
@@ -165,7 +167,8 @@ pub(crate) fn save_all_dirty(
 /// State-only impl of [`save_all_dirty`] — same semantics, takes a borrowed
 /// [`AppState`] so integration tests can drive the open + edit + save flow
 /// without spinning up a real Tauri runtime.
-pub(crate) fn save_all_dirty_impl(state: &AppState) -> Result<SaveAllDirtyResponse, String> {
+#[doc(hidden)]
+pub fn save_all_dirty_impl(state: &AppState) -> Result<SaveAllDirtyResponse, String> {
     let mut store = state
         .project_catalogs
         .lock()
@@ -287,7 +290,8 @@ pub(crate) fn is_catalog_dirty(
 /// State-only impl of [`is_catalog_dirty`] — same semantics, takes a borrowed
 /// [`AppState`] so integration tests can drive the open + edit + save flow
 /// without spinning up a real Tauri runtime.
-pub(crate) fn is_catalog_dirty_impl(catalog_path: &str, state: &AppState) -> Result<bool, String> {
+#[doc(hidden)]
+pub fn is_catalog_dirty_impl(catalog_path: &str, state: &AppState) -> Result<bool, String> {
     let abs = PathBuf::from(catalog_path);
     let store = state
         .project_catalogs
