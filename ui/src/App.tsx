@@ -1,5 +1,6 @@
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ActiveBatch } from "./components/BatchProgressWidget/BatchProgressWidget";
 import { BatchProgressWidget } from "./components/BatchProgressWidget/BatchProgressWidget";
 import { GlossaryPanel } from "./components/GlossaryPanel/GlossaryPanel";
@@ -486,7 +487,14 @@ export function App() {
   const onTranslate = useCallback(
     async (id: UnitId) => {
       if (!activeCatalogPath) return;
-      setBusyIds((prev) => new Set(prev).add(id));
+      // Force the busy-state render to commit synchronously BEFORE the IPC
+      // starts. Without flushSync, React batches the busy=true commit with
+      // the downstream state updates that fire after the await, so the
+      // spinner renders only at the very end of the round-trip. Same fix
+      // applied to onTranslateUnitFor and onAcceptUnitFor below.
+      flushSync(() => {
+        setBusyIds((prev) => new Set(prev).add(id));
+      });
       try {
         const result = await translateUnitInProject(activeCatalogPath, id);
         replaceUnit(result.unit);
@@ -671,7 +679,9 @@ export function App() {
   const onAccept = useCallback(
     async (id: UnitId) => {
       if (!activeCatalogPath) return;
-      setBusyIds((prev) => new Set(prev).add(id));
+      flushSync(() => {
+        setBusyIds((prev) => new Set(prev).add(id));
+      });
       try {
         const updated = await acceptUnitInProject(activeCatalogPath, id);
         replaceUnit(updated);
@@ -787,7 +797,9 @@ export function App() {
   const onTranslateUnitFor = useCallback(
     (absPath: string, unit: Unit) => {
       const id = unit.id;
-      setBusyIds((prev) => new Set(prev).add(id));
+      flushSync(() => {
+        setBusyIds((prev) => new Set(prev).add(id));
+      });
       void (async () => {
         try {
           const result = await translateUnitInProject(absPath, id);
@@ -826,7 +838,9 @@ export function App() {
   const onAcceptUnitFor = useCallback(
     (absPath: string, unit: Unit) => {
       const id = unit.id;
-      setBusyIds((prev) => new Set(prev).add(id));
+      flushSync(() => {
+        setBusyIds((prev) => new Set(prev).add(id));
+      });
       void (async () => {
         try {
           const updated = await acceptUnitInProject(absPath, id);

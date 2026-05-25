@@ -44,8 +44,10 @@ test.describe("Translate — Matrix mode", () => {
     // Wait a generous timeout for the IPC calls to resolve.
     await page.waitForTimeout(1000);
 
-    // Each source unit maps to one card article in the matrix list.
-    const cards = page.locator("article");
+    // Each source unit maps to one card article in the matrix list. Other
+    // tabs (QualityPanel) also render <article> elements in the DOM even
+    // when hidden, so filter to visible articles only.
+    const cards = page.locator("article:visible");
     await expect(cards).toHaveCount(EXPECTED_UNIT_COUNT, { timeout: 5000 });
   });
 
@@ -79,12 +81,16 @@ test.describe("Translate — Matrix mode", () => {
     await navigateToTranslate(page);
     await page.waitForTimeout(1000);
 
-    // "Speichern" is the de_DE translation for "Save" in the fixture.
-    await expect(page.getByText("Speichern")).toBeVisible();
+    // "Speichern" is the de_DE translation for "Save" in the fixture. Scope
+    // to the MainWindow/Save matrix card to avoid the sidebar/breadcrumb
+    // copies that also contain the project name and term previews.
+    const saveCard = page.getByLabel("Unit MainWindow/Save", { exact: true });
+    await expect(saveCard.getByText("Speichern")).toBeVisible();
 
     // The finished cell should NOT have a Translate button adjacent to it.
-    // We verify by checking that "Speichern" is NOT inside a button.
-    const speicherenInsideButton = page.locator('button:has-text("Speichern")');
+    const speicherenInsideButton = saveCard.locator(
+      'button:has-text("Speichern")',
+    );
     await expect(speicherenInsideButton).toHaveCount(0);
   });
 
@@ -139,11 +145,16 @@ test.describe("Translate — Matrix mode", () => {
       .first();
     await expect(sparkleBtn).toBeVisible({ timeout: 5000 });
 
-    // Click and immediately assert the spinner appears (busy state renders
-    // before the 400 ms mock delay resolves).
+    // Click and immediately assert the spinner appears. Tight 100 ms
+    // timeout — the flushSync wrap on the click handler must commit the
+    // busy state synchronously, so the spinner is in the DOM by the next
+    // paint. A regression where React batches busy=true with the IPC's
+    // downstream state updates would push the spinner to the *end* of
+    // the round-trip (~400 ms on the mock); this assertion fails fast
+    // in that case.
     await sparkleBtn.click();
     const spinner = page.getByTestId("translate-spinner").first();
-    await expect(spinner).toBeVisible({ timeout: 500 });
+    await expect(spinner).toBeVisible({ timeout: 100 });
 
     // Wait for the mock delay to complete (400 ms) plus a small margin.
     await page.waitForTimeout(600);
