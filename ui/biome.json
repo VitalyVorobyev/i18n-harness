@@ -7,7 +7,10 @@
     "ignoreUnknown": true,
     "includes": [
       "src/**",
+      "e2e/**",
       "vite.config.ts",
+      "vitest.config.ts",
+      "playwright.config.ts",
       "biome.json",
       "package.json",
       "tsconfig.json",
