@@ -38,6 +38,7 @@ i18n-harness-backend = { workspace = true }
 i18n-harness-gate = { workspace = true }
 i18n-harness-glossary = { workspace = true }
 i18n-harness-project = { workspace = true }
+i18n-harness-reuse = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }

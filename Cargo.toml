@@ -10,6 +10,7 @@ members = [
     "crates/adapter-qt",
     "crates/adapter-react",
     "crates/project",
+    "crates/reuse",
     "crates/cli",
     "ui/src-tauri",
 ]
@@ -87,6 +88,7 @@ i18n-harness-catalog = { path = "crates/catalog", version = "0.1.0" }
 i18n-harness-adapter-qt = { path = "crates/adapter-qt", version = "0.1.0" }
 i18n-harness-adapter-react = { path = "crates/adapter-react", version = "0.1.0" }
 i18n-harness-project = { path = "crates/project", version = "0.1.0" }
+i18n-harness-reuse = { path = "crates/reuse", version = "0.1.0" }
 
 [profile.release]
 lto = "thin"

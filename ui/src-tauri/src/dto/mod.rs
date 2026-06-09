@@ -8,6 +8,7 @@ pub mod eval;
 pub mod glossary;
 pub mod metrics;
 pub mod project;
+pub mod reuse;
 #[cfg(feature = "ollama")]
 pub mod translate;
 pub mod tuning;
@@ -19,6 +20,7 @@ pub use eval::*;
 pub use glossary::*;
 pub use metrics::*;
 pub use project::*;
+pub use reuse::*;
 #[cfg(feature = "ollama")]
 pub use translate::*;
 pub use tuning::*;

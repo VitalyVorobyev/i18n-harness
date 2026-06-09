@@ -5,6 +5,7 @@ import type {
   CatalogResponse,
   ProjectSummary,
 } from "../../lib/types";
+import { CatalogActions } from "../CatalogActions";
 import { LocaleTag, SegmentBar } from "../primitives";
 
 interface Props {
@@ -26,6 +27,14 @@ interface Props {
    * Only opened catalogs have stats — unloaded catalogs render a skeleton bar.
    */
   openCatalogs?: Map<string, CatalogResponse>;
+  /** Absolute paths with a reuse/split/merge IPC call in flight. */
+  reuseBusyPaths?: Set<string>;
+  /** Apply manifest (or ad-hoc) reference translations into this catalog. */
+  onApplyReferences?: (catalogPath: string) => void;
+  /** Carve the writable-untranslated remainder of this catalog to a `.ts`. */
+  onExportRemainder?: (catalogPath: string) => void;
+  /** Fold a translated remainder `.ts` back into this catalog. */
+  onMergeCatalog?: (catalogPath: string) => void;
 }
 
 type CatalogProgressStats = {
@@ -56,6 +65,10 @@ export function ProjectSidebar({
   reviewQueueByCatalog = {},
   onOpenReviewQueue,
   openCatalogs = new Map(),
+  reuseBusyPaths,
+  onApplyReferences,
+  onExportRemainder,
+  onMergeCatalog,
 }: Props) {
   const totalCatalogs = summary.catalogs.length;
 
@@ -134,6 +147,10 @@ export function ProjectSidebar({
                     loaded !== undefined ? catalogStatsOf(loaded) : null
                   }
                   onClick={() => onCatalogSelect(ref.absolute_path)}
+                  reuseBusy={reuseBusyPaths?.has(ref.absolute_path) ?? false}
+                  onApplyReferences={onApplyReferences}
+                  onExportRemainder={onExportRemainder}
+                  onMergeCatalog={onMergeCatalog}
                 />
               );
             })}
@@ -153,6 +170,10 @@ function CatalogItem({
   reviewCount,
   catalogStats: stats,
   onClick,
+  reuseBusy,
+  onApplyReferences,
+  onExportRemainder,
+  onMergeCatalog,
 }: {
   catalogRef: CatalogRef;
   isActive: boolean;
@@ -164,6 +185,10 @@ function CatalogItem({
    */
   catalogStats: CatalogProgressStats | null;
   onClick: () => void;
+  reuseBusy: boolean;
+  onApplyReferences?: (catalogPath: string) => void;
+  onExportRemainder?: (catalogPath: string) => void;
+  onMergeCatalog?: (catalogPath: string) => void;
 }) {
   // Display the manifest-relative path; fall back to the absolute path's
   // last two segments if the manifest path is just a filename.
@@ -173,14 +198,23 @@ function CatalogItem({
   const dir =
     segments.length > 1 ? `${segments.slice(0, -1).join("/")}/` : null;
 
+  // Reuse/split/merge are Qt-only and only wired when handlers are supplied.
+  const actionsEnabled =
+    catalogRef.format === "qt-ts" &&
+    onApplyReferences !== undefined &&
+    onExportRemainder !== undefined &&
+    onMergeCatalog !== undefined;
+
   return (
-    <li>
+    // The nav button and the actions menu are siblings — the menu must not be
+    // nested inside the row <button> (invalid interactive nesting).
+    <li className="relative group">
       <button
         type="button"
         onClick={onClick}
         aria-current={isActive ? "page" : undefined}
         className={cn(
-          "group w-full flex flex-col gap-1.5 px-3 py-2 text-left",
+          "w-full flex flex-col gap-1.5 px-3 py-2 text-left",
           "transition-colors duration-75 ease-out",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent",
           isActive
@@ -205,8 +239,9 @@ function CatalogItem({
               </p>
             )}
 
-            {/* Filename + dirty mark + review badge */}
-            <div className="flex items-center gap-1">
+            {/* Filename + dirty mark + review badge.
+                pr-5 reserves room for the absolutely-positioned actions menu. */}
+            <div className="flex items-center gap-1 pr-5">
               <p className="font-mono text-xs truncate flex-1 min-w-0">
                 {filename}
               </p>
@@ -270,6 +305,23 @@ function CatalogItem({
           />
         )}
       </button>
+
+      {actionsEnabled &&
+        onApplyReferences &&
+        onExportRemainder &&
+        onMergeCatalog && (
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity duration-75">
+            <CatalogActions
+              catalogPath={catalogRef.absolute_path}
+              displayName={displayPath}
+              busy={reuseBusy}
+              enabled={actionsEnabled}
+              onApplyReferences={onApplyReferences}
+              onExportRemainder={onExportRemainder}
+              onMerge={onMergeCatalog}
+            />
+          </div>
+        )}
     </li>
   );
 }

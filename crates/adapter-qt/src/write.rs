@@ -5,8 +5,6 @@
 //! out byte-identical.
 
 use std::collections::HashMap;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use i18n_harness_core::{Target, Unit, UnitState};
@@ -14,6 +12,7 @@ use i18n_harness_core::{Target, Unit, UnitState};
 use crate::catalog::{Catalog, EditPoint, TypeAttr};
 use crate::error::ApplyError;
 use crate::placeholder::from_icu;
+use crate::subset::write_atomic;
 
 /// Write a catalog back to disk, applying any changes the caller made to the
 /// units relative to what `extract` produced.
@@ -36,30 +35,7 @@ use crate::placeholder::from_icu;
 /// See [`ApplyError`].
 pub fn apply(catalog: &Catalog, units: &[Unit], out: &Path) -> Result<(), ApplyError> {
     let new_bytes = render(catalog, units)?;
-
-    let tmp = match out.extension() {
-        Some(ext) => out.with_extension(format!("{}.tmp", ext.to_string_lossy())),
-        None => out.with_extension("tmp"),
-    };
-    {
-        let mut f = fs::File::create(&tmp).map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-        f.write_all(&new_bytes).map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-        f.sync_all().map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-    }
-    fs::rename(&tmp, out).map_err(|source| ApplyError::Io {
-        path: out.to_path_buf(),
-        source,
-    })?;
-    Ok(())
+    write_atomic(&new_bytes, out)
 }
 
 /// In-memory render. Exposed for callers (e.g. the CLI's `round-trip`

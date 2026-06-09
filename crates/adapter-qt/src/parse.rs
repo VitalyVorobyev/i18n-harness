@@ -12,7 +12,7 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 
-use crate::catalog::{Catalog, EditPoint, TypeAttr};
+use crate::catalog::{Catalog, ContextSpan, EditPoint, TypeAttr};
 use crate::error::ExtractError;
 use crate::placeholder::to_icu;
 
@@ -40,11 +40,18 @@ pub fn extract(path: &Path) -> Result<Catalog, ExtractError> {
         },
     })?;
 
+    // A `<context>` may have been left open if the document ended without a
+    // matching `</context>` (malformed Qt). The parser does not synthesize a
+    // span for it; such input fails the `saw_ts_root` / XML checks earlier or
+    // simply yields no context entry, and `render_subset` falls back to
+    // per-message deletes, which is still correct.
     Ok(Catalog {
         source_path: path.to_path_buf(),
         source_bytes: bytes,
         language: state.language,
         edit_points: state.edit_points,
+        message_spans: state.message_spans,
+        contexts: state.contexts,
         original_units: state.units.clone(),
         units: state.units,
     })
@@ -75,6 +82,27 @@ struct ParseState {
     current_context: Option<String>,
     units: Vec<Unit>,
     edit_points: Vec<EditPoint>,
+
+    /// Full `<message …>…</message>` byte span per pushed unit, parallel to
+    /// [`Self::units`]. Pushed in lockstep with [`Self::units`] so the two
+    /// stay index-aligned even when a `<message>` parses to no unit.
+    message_spans: Vec<(usize, usize)>,
+
+    /// Completed contexts, in document order.
+    contexts: Vec<ContextSpan>,
+
+    /// The `<context>` currently being parsed: its block start byte (the `<`
+    /// of `<context>`) and the unit indices accumulated so far. Set on the
+    /// `<context>` open, finalized on the `</context>` close.
+    open_context: Option<OpenContext>,
+}
+
+/// In-flight bookkeeping for the `<context>` the parser is inside.
+struct OpenContext {
+    /// Byte offset of the `<` that opens `<context>`.
+    block_start: usize,
+    /// Indices into [`ParseState::units`] of messages parsed in this context.
+    member_unit_indices: Vec<usize>,
 }
 
 impl ParseState {
@@ -111,8 +139,19 @@ impl ParseState {
                     // <numerusform> need no special handling — byte stability
                     // handles them.
                 }
-                Event::End(_) => {
-                    // Likewise.
+                Event::End(e) => {
+                    if e.name() == QName(b"context")
+                        && let Some(open) = self.open_context.take()
+                    {
+                        // `buffer_position()` after reading `</context>` is the
+                        // byte just past its `>`. That, with the recorded `<`
+                        // of `<context>`, is the whole block span.
+                        let block_end = reader.buffer_position() as usize;
+                        self.contexts.push(ContextSpan {
+                            block: (open.block_start, block_end),
+                            member_unit_indices: open.member_unit_indices,
+                        });
+                    }
                 }
                 Event::Decl(_) | Event::DocType(_) | Event::PI(_) => {
                     // Preserved via byte stability.
@@ -152,6 +191,10 @@ impl ParseState {
             }
             QName(b"context") => {
                 self.current_context = None;
+                self.open_context = Some(OpenContext {
+                    block_start: event_start,
+                    member_unit_indices: Vec::new(),
+                });
             }
             QName(b"name") => {
                 // The <name> directly under <context> sets the context name.
@@ -165,20 +208,37 @@ impl ParseState {
                 let numerus = attr_value(e, b"numerus")?
                     .as_deref()
                     .is_some_and(|v| v == "yes");
-                let _ = (event_start, event_end); // available for future provenance enhancements.
-                self.parse_message(bytes, reader, numerus)?;
+                let _ = event_end; // available for future provenance enhancements.
+                // `event_start` is the `<` of `<message`; `parse_message`
+                // walks to `</message>` and returns the byte just past its
+                // `>` plus whether a unit was actually pushed.
+                let pushed = self.parse_message(bytes, reader, numerus)?;
+                if pushed {
+                    let unit_idx = self.units.len() - 1;
+                    let message_end = reader.buffer_position() as usize;
+                    self.message_spans.push((event_start, message_end));
+                    if let Some(open) = self.open_context.as_mut() {
+                        open.member_unit_indices.push(unit_idx);
+                    }
+                }
             }
             _ => {}
         }
         Ok(())
     }
 
+    /// Parse one `<message>` element, consuming the reader through the
+    /// matching `</message>`. Returns `true` if a [`Unit`] was pushed to
+    /// [`Self::units`] (and a parallel [`EditPoint`]), `false` if the message
+    /// was structurally incomplete (no `<source>` or no `<translation>`) and
+    /// therefore not represented as a unit. The caller uses the return value
+    /// to keep [`Self::message_spans`] index-aligned with [`Self::units`].
     fn parse_message(
         &mut self,
         bytes: &[u8],
         reader: &mut Reader<&[u8]>,
         numerus: bool,
-    ) -> Result<(), ParseError> {
+    ) -> Result<bool, ParseError> {
         let mut source_text: Option<String> = None;
         let mut comment: Option<String> = None; // disambiguation
         let mut extracomment: Option<String> = None; // developer comment; hashed but not stored
@@ -278,7 +338,7 @@ impl ParseState {
         // If we didn't find a <translation> element, skip; not a valid unit
         // for round-trip (but valid Qt: <message> with only <source>).
         let Some(translation_open) = translation_open else {
-            return Ok(());
+            return Ok(false);
         };
         let translation_body_start = translation_body_start.unwrap_or(translation_open.1);
         let translation_body_end = translation_body_end.unwrap_or(translation_body_start);
@@ -286,7 +346,7 @@ impl ParseState {
 
         let Some(source_text) = source_text else {
             // <message> without <source> is invalid; skip.
-            return Ok(());
+            return Ok(false);
         };
 
         // Build the unit id: context::source[::comment]
@@ -387,7 +447,7 @@ impl ParseState {
             original_translation_body: bytes[translation_body_start..translation_body_end].to_vec(),
             original_numerus_bodies: numerus_originals,
         });
-        Ok(())
+        Ok(true)
     }
 }
 

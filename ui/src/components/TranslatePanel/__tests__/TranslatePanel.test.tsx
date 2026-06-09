@@ -30,6 +30,7 @@ function makeSummary(locales: string[] = ["de", "fr"]): ProjectSummary {
     schema: 1,
     locales,
     catalogs,
+    references: [],
     glossary_path: null,
     backend: null,
     state_dir: "/project/.i18n-harness",

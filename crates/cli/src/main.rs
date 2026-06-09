@@ -18,7 +18,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
-use i18n_harness_adapter_qt::{apply, extract, render};
+use i18n_harness_adapter_qt::{apply, extract, render, write_subset};
 use i18n_harness_backend::{
     ManualBackend, ManualResponse, TranslatedText, TranslationBackend, TranslationOutcome,
     agent_batch,
@@ -35,6 +35,9 @@ use i18n_harness_gate::{
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use i18n_harness_project::Project;
+use i18n_harness_reuse::{
+    ReuseError, merge_back, reuse_from_references, writable_untranslated_ids,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -87,6 +90,22 @@ enum Command {
     /// `targets.jsonl` from an export folder, run the gate, and optionally
     /// write the post-translation catalog. Without `--out`, runs as dry-run.
     ImportBatch(ImportBatchArgs),
+
+    /// Copy expert translations from one or more reference catalogs into a
+    /// base catalog by exact unit-id match. Agreed references are applied;
+    /// conflicts are reported but left for a human to resolve. Writes the
+    /// result back in place unless `--out` is given (ad-hoc single-base mode).
+    Reuse(ReuseArgs),
+
+    /// Extract the writable-untranslated unit ids from a base catalog and
+    /// write them as a standalone Qt `.ts` remainder file. Run this right
+    /// after `reuse` to get the post-reuse leftover that needs translation.
+    SplitRemainder(SplitRemainderArgs),
+
+    /// Fold a translated remainder back into its base catalog. The remainder
+    /// must be a subset of the base (ids present in base); ids that are
+    /// finished-and-complete in both files are treated as an overlap error.
+    Merge(MergeArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -229,6 +248,77 @@ struct ImportBatchArgs {
     out_dir: Option<PathBuf>,
 }
 
+#[derive(Parser, Debug)]
+struct ReuseArgs {
+    /// Ad-hoc mode: base Qt `.ts` catalog to reuse translations into.
+    ///
+    /// Mutually exclusive with `--project`. The file is read; output goes to
+    /// `--out` if given, otherwise the base is overwritten in place.
+    #[arg(group = "source", required_unless_present = "project")]
+    path: Option<PathBuf>,
+
+    /// Project mode: project root directory containing `i18n-harness.toml`.
+    ///
+    /// Mutually exclusive with the positional `<PATH>` argument. The project
+    /// manifest determines both the base catalogs (filtered to `--locale`) and
+    /// the reference set for that locale; each matching base is written in
+    /// place. Non-Qt catalog entries are warned about and skipped.
+    #[arg(long, group = "source")]
+    project: Option<PathBuf>,
+
+    /// Target locale id (e.g. `de_DE`). Required in both modes.
+    #[arg(long)]
+    locale: String,
+
+    /// Ad-hoc mode only: one or more reference Qt `.ts` catalogs to pull
+    /// translations from. Repeated: `--reference a.ts --reference b.ts`.
+    /// Required in ad-hoc mode; ignored in project mode (the manifest
+    /// `[[references]]` for the locale are used instead).
+    #[arg(long = "reference", conflicts_with = "project")]
+    references: Vec<PathBuf>,
+
+    /// Ad-hoc single-base mode only: write the result here instead of
+    /// overwriting the base in place. Ignored in project mode.
+    #[arg(long, conflicts_with = "project")]
+    out: Option<PathBuf>,
+
+    /// Ad-hoc mode only: optional glossary TOML file. Threaded into the gate
+    /// so glossary-aware checks run on copied translations. Ignored in project
+    /// mode — the manifest glossary is used instead.
+    #[arg(long, conflicts_with = "project")]
+    glossary: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+struct SplitRemainderArgs {
+    /// Base Qt `.ts` catalog to split. Writable-untranslated units are written
+    /// to `--out`; the base itself is not modified.
+    ///
+    /// Running this right after `reuse` gives the post-reuse leftover whose
+    /// units still need translation.
+    base: PathBuf,
+
+    /// Write the remainder catalog here.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct MergeArgs {
+    /// Base Qt `.ts` catalog (the half that was not sent for translation).
+    base: PathBuf,
+
+    /// Translated remainder Qt `.ts` produced by a translator from the
+    /// split step. Its unit ids must be a subset of `<BASE>`'s ids and
+    /// disjoint from the base's finished-and-complete units.
+    #[arg(long = "with")]
+    remainder: PathBuf,
+
+    /// Write the merged catalog here (base + remainder translations applied).
+    #[arg(long)]
+    out: PathBuf,
+}
+
 /// Which backend to run.
 ///
 /// `ollama` is a `clap` value but only constructible when the CLI is built
@@ -267,6 +357,9 @@ fn run(cli: Cli) -> Result<()> {
         Command::Open(args) => open(args),
         Command::ExportBatch(args) => export_batch(args),
         Command::ImportBatch(args) => import_batch(args),
+        Command::Reuse(args) => reuse(args),
+        Command::SplitRemainder(args) => split_remainder(args),
+        Command::Merge(args) => merge(args),
     }
 }
 
@@ -1706,6 +1799,260 @@ fn format_locales(
     } else {
         locales.keys().cloned().collect::<Vec<_>>().join(", ")
     }
+}
+
+fn reuse(args: ReuseArgs) -> Result<()> {
+    match (args.path, args.project) {
+        (Some(path), None) => {
+            reuse_single(path, args.locale, args.references, args.out, args.glossary)
+        }
+        (None, Some(project_root)) => reuse_project(project_root, args.locale),
+        _ => Err(anyhow!(
+            "specify either a catalog path or --project, not both"
+        )),
+    }
+}
+
+fn reuse_single(
+    path: PathBuf,
+    locale_id: String,
+    reference_paths: Vec<PathBuf>,
+    out: Option<PathBuf>,
+    glossary_path: Option<PathBuf>,
+) -> Result<()> {
+    if reference_paths.is_empty() {
+        return Err(anyhow!(
+            "ad-hoc mode requires at least one --reference <path>"
+        ));
+    }
+    let locale = Locale::by_id(&locale_id).ok_or_else(|| anyhow!("unknown locale: {locale_id}"))?;
+    let glossary = load_optional_glossary(glossary_path.as_deref())?;
+
+    let outcome = reuse_from_references(&path, &reference_paths, locale, glossary.as_ref())
+        .map_err(|e| match e {
+            ReuseError::Extract { path: p, source } => {
+                anyhow!("extract {}: {source}", p.display())
+            }
+            other => anyhow!("{other}"),
+        })?;
+
+    let out_path = out.as_deref().unwrap_or(&path);
+    apply(&outcome.base, &outcome.units, out_path)
+        .with_context(|| format!("apply → {}", out_path.display()))?;
+
+    print_reuse_report(&path, &outcome.report);
+    Ok(())
+}
+
+fn reuse_project(project_root: PathBuf, locale_id: String) -> Result<()> {
+    use i18n_harness_project::CatalogFormat;
+
+    let (project, warnings) = Project::open(&project_root)
+        .with_context(|| format!("open project {}", project_root.display()))?;
+    for w in &warnings {
+        eprintln!("warning: {w}");
+    }
+
+    let locale = Locale::by_id(&locale_id).ok_or_else(|| anyhow!("unknown locale: {locale_id}"))?;
+
+    let matching_bases: Vec<_> = project
+        .catalogs()
+        .iter()
+        .filter(|c| c.locale == locale_id)
+        .collect();
+
+    if matching_bases.is_empty() {
+        let present: Vec<String> = {
+            let mut seen = std::collections::BTreeSet::new();
+            for c in project.catalogs() {
+                seen.insert(c.locale.clone());
+            }
+            seen.into_iter().collect()
+        };
+        return Err(anyhow!(
+            "no catalogs for locale `{locale_id}` in project {}; \
+             locales present: {}",
+            project_root.display(),
+            if present.is_empty() {
+                "(none)".to_owned()
+            } else {
+                present.join(", ")
+            },
+        ));
+    }
+
+    let reference_paths: Vec<PathBuf> = project
+        .references()
+        .iter()
+        .filter(|r| r.locale == locale_id && r.format == CatalogFormat::QtTs)
+        .map(|r| PathBuf::from(&r.absolute_path))
+        .collect();
+
+    if reference_paths.is_empty() {
+        eprintln!(
+            "note: no Qt references for locale `{locale_id}` in project {}; \
+             nothing to reuse",
+            project_root.display(),
+        );
+    }
+
+    let glossary = project.glossary();
+
+    for cat_ref in &matching_bases {
+        if cat_ref.format != CatalogFormat::QtTs {
+            eprintln!(
+                "warning: skipping {:?} catalog `{}` — only Qt catalogs are supported in \
+                 reuse for now",
+                cat_ref.format, cat_ref.manifest_path
+            );
+            continue;
+        }
+
+        let base_path = Path::new(&cat_ref.absolute_path);
+
+        let outcome = reuse_from_references(base_path, &reference_paths, locale, glossary)
+            .map_err(|e| match e {
+                ReuseError::Extract { path: p, source } => {
+                    anyhow!("extract {}: {source}", p.display())
+                }
+                other => anyhow!("{other}"),
+            })?;
+
+        apply(&outcome.base, &outcome.units, base_path)
+            .with_context(|| format!("apply → {}", base_path.display()))?;
+
+        print_reuse_report(base_path, &outcome.report);
+    }
+
+    Ok(())
+}
+
+fn print_reuse_report(base: &Path, report: &i18n_harness_reuse::ReuseReport) {
+    println!(
+        "\nreuse report: {}  copied_finished={}  copied_needs_review={}  conflicts={}  remaining={}",
+        base.display(),
+        report.copied_finished_count(),
+        report.copied_needs_review_count(),
+        report.conflict_count(),
+        report.remaining_count(),
+    );
+
+    if !report.copied.is_empty() {
+        println!("  copied provenance:");
+        for cu in &report.copied {
+            let disposition = match cu.disposition {
+                i18n_harness_reuse::CopiedDisposition::Finished => "finished",
+                i18n_harness_reuse::CopiedDisposition::NeedsReview => "needs-review",
+            };
+            println!(
+                "    {} ← {} [{disposition}]",
+                cu.id.as_str(),
+                cu.winning_reference.display(),
+            );
+        }
+    }
+
+    if !report.conflicts.is_empty() {
+        println!("  conflicts (left untranslated — pick a candidate manually):");
+        for conflict in &report.conflicts {
+            println!("    {}:", conflict.id.as_str());
+            for (i, cand) in conflict.candidates.iter().enumerate() {
+                let text_repr = match &cand.text {
+                    i18n_harness_reuse::ConflictText::Singular(s) => format!("{s:?}"),
+                    i18n_harness_reuse::ConflictText::Plural(forms) => {
+                        format!("{forms:?}")
+                    }
+                };
+                println!(
+                    "      candidate {}: {} → {text_repr}",
+                    i + 1,
+                    cand.reference.display(),
+                );
+                for also in &cand.also_from {
+                    println!("        (also from {})", also.display());
+                }
+            }
+        }
+    }
+}
+
+fn split_remainder(args: SplitRemainderArgs) -> Result<()> {
+    let catalog =
+        extract(&args.base).with_context(|| format!("extract {}", args.base.display()))?;
+    let keep = writable_untranslated_ids(&catalog);
+    let count = keep.len();
+
+    if let Some(parent) = args.out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create dirs {}", parent.display()))?;
+        }
+    }
+
+    write_subset(&catalog, &keep, &args.out)
+        .with_context(|| format!("write_subset → {}", args.out.display()))?;
+
+    println!(
+        "split-remainder: {} → {} ({count} writable-untranslated unit(s))",
+        args.base.display(),
+        args.out.display(),
+    );
+    Ok(())
+}
+
+fn merge(args: MergeArgs) -> Result<()> {
+    let outcome = merge_back(&args.base, &args.remainder).map_err(|e| match e {
+        ReuseError::MergeOverlap { base, ids } => {
+            anyhow!(
+                "{n} unit id(s) are finished in both base {base} and remainder; \
+                 re-derive the halves from the current base. ids: {ids}",
+                n = ids.len(),
+                base = base.display(),
+                ids = ids
+                    .iter()
+                    .map(|id| format!("`{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        }
+        ReuseError::MergeStrayIds { base, ids } => {
+            anyhow!(
+                "{n} remainder unit id(s) not present in base {base}; \
+                 re-run split-remainder from the current base and re-translate. ids: {ids}",
+                n = ids.len(),
+                base = base.display(),
+                ids = ids
+                    .iter()
+                    .map(|id| format!("`{id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+        }
+        ReuseError::Extract { path, source } => {
+            anyhow!("extract {}: {source}", path.display())
+        }
+        ReuseError::UnknownLocale(id) => anyhow!("unknown locale: {id}"),
+    })?;
+
+    if let Some(parent) = args.out.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create dirs {}", parent.display()))?;
+        }
+    }
+
+    apply(&outcome.base, &outcome.units, &args.out)
+        .with_context(|| format!("apply → {}", args.out.display()))?;
+
+    println!(
+        "merge: {} + {} → {} (merged={} merged_complete={})",
+        args.base.display(),
+        args.remainder.display(),
+        args.out.display(),
+        outcome.report.merged,
+        outcome.report.merged_complete,
+    );
+    Ok(())
 }
 
 fn file_hash(path: &std::path::Path) -> Result<String> {

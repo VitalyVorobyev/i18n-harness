@@ -22,16 +22,23 @@ import type {
 import type { UnitEditorHandle } from "./components/TranslatePanel/UnitEditor/UnitEditor";
 import type { CommitNowFn, CommitRegistry } from "./lib/pending-commits";
 import { PendingCommitsContext } from "./lib/pending-commits";
+import { basenameOf } from "./lib/reuse";
 import {
   acceptUnitInProject,
   cancelTranslation,
   closeProject,
   currentProjectSummary,
   discardChangesInProject,
+  mergeCatalogs,
   openCatalogInProject,
+  pickReferenceFiles,
+  pickRemainderFile,
+  pickTsSaveLocation,
+  reuseReferencesInProject,
   saveAllDirty,
   saveCatalogInProject,
   scanProjectReviewState,
+  splitRemainder,
   translateBatchInProject,
   translateUnitInProject,
   updateUnitTargetInProject,
@@ -114,6 +121,11 @@ export function App() {
   useEffect(() => {
     activeBatchRef.current = activeBatch;
   });
+
+  // ── Reference reuse / split / merge ───────────────────────────────────────
+  // Absolute paths with a reuse/split/merge IPC call in flight (drives the
+  // per-catalog actions-menu spinner).
+  const [reuseBusyPaths, setReuseBusyPaths] = useState<Set<string>>(new Set());
 
   // ── Review queue (M4.7) ───────────────────────────────────────────────────
   // null = not yet scanned; populated eagerly when a project is open and
@@ -304,6 +316,7 @@ export function App() {
       setActiveLocaleFilter(new Set());
       setError(null);
       setCloseConfirm({ kind: "none" });
+      setReuseBusyPaths(new Set());
       // Reset and immediately kick off a review-queue scan for the new project.
       setReviewQueue(null);
       scheduleRescan();
@@ -351,6 +364,7 @@ export function App() {
     setReviewQueue(null);
     setError(null);
     setCloseConfirm({ kind: "none" });
+    setReuseBusyPaths(new Set());
   }, [activeBatch]);
 
   // Public entry point — raises inline confirmation when there are unsaved catalogs.
@@ -1326,6 +1340,189 @@ export function App() {
     [handleCatalogSelect],
   );
 
+  // ── Reference reuse / remainder split / merge ─────────────────────────────
+  //
+  // These run synchronously (no model, no network). Each toggles the catalog
+  // into reuseBusyPaths for the actions-menu spinner, then refreshes UI state
+  // via the same paths an edit/translate/save uses.
+
+  const markReuseBusy = useCallback((path: string, busy: boolean) => {
+    setReuseBusyPaths((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  }, []);
+
+  const onApplyReferences = useCallback(
+    async (catalogPath: string) => {
+      markReuseBusy(catalogPath, true);
+      try {
+        let report = await reuseReferencesInProject(catalogPath, null).catch(
+          (e) => {
+            // No manifest references for the locale → fall back to an ad-hoc
+            // multi-select picker so the user can point at reference .ts files.
+            const msg = formatError(e);
+            if (!msg.includes("no references available")) throw e;
+            return null;
+          },
+        );
+
+        if (report === null) {
+          const picked = await pickReferenceFiles();
+          if (!picked || picked.length === 0) {
+            flashInfo("Apply references cancelled — no files selected.");
+            return;
+          }
+          report = await reuseReferencesInProject(catalogPath, picked);
+        }
+
+        // Re-pull the post-reuse catalog (the backend refreshed it in place but
+        // does not return units) and merge it into the cache.
+        const refreshed = await openCatalogInProject(catalogPath);
+        setOpenCatalogs((prev) => new Map(prev).set(catalogPath, refreshed));
+        if (catalogPath === activeCatalogPath) {
+          const stillThere = refreshed.units.some((u) => u.id === selectedId);
+          if (!stillThere) setSelectedId(refreshed.units[0]?.id ?? null);
+        }
+
+        // The review-queue scan now surfaces conflict units (with their
+        // candidate detail on the review note), so a rescan refreshes the
+        // Review conflict view. Reuse writes the base catalog to disk in
+        // place, so the in-memory entry is clean — do NOT mark it dirty.
+        scheduleRescan();
+
+        const summary =
+          `${report.copied_finished} finished, ` +
+          `${report.copied_needs_review} need review, ` +
+          `${report.conflict_count} conflict(s), ` +
+          `${report.remaining_count} remaining`;
+        if (report.conflict_count > 0) {
+          flashInfo(
+            `References applied: ${summary}. Resolve conflicts in Review.`,
+          );
+        } else {
+          flashInfo(`References applied: ${summary}.`);
+        }
+      } catch (e) {
+        flashError(`Apply references failed: ${formatError(e)}`);
+      } finally {
+        markReuseBusy(catalogPath, false);
+      }
+    },
+    [
+      markReuseBusy,
+      activeCatalogPath,
+      selectedId,
+      scheduleRescan,
+      flashInfo,
+      flashError,
+    ],
+  );
+
+  const onExportRemainder = useCallback(
+    async (catalogPath: string) => {
+      const base = basenameOf(catalogPath).replace(/\.ts$/i, "");
+      const outPath = await pickTsSaveLocation(
+        "Export remainder",
+        `${base}.remainder.ts`,
+      );
+      if (!outPath) return;
+      markReuseBusy(catalogPath, true);
+      try {
+        const report = await splitRemainder(catalogPath, outPath, null);
+        flashInfo(
+          `Wrote ${report.kept_count} unit(s) to ${shortenPath(report.out_path)}.`,
+        );
+      } catch (e) {
+        flashError(`Export remainder failed: ${formatError(e)}`);
+      } finally {
+        markReuseBusy(catalogPath, false);
+      }
+    },
+    [markReuseBusy, flashInfo, flashError],
+  );
+
+  const onMergeCatalog = useCallback(
+    async (catalogPath: string) => {
+      const withPath = await pickRemainderFile();
+      if (!withPath) return;
+      const base = basenameOf(catalogPath).replace(/\.ts$/i, "");
+      const outPath = await pickTsSaveLocation(
+        "Save merged catalog",
+        `${base}.merged.ts`,
+      );
+      if (!outPath) return;
+      markReuseBusy(catalogPath, true);
+      try {
+        const report = await mergeCatalogs(catalogPath, withPath, outPath);
+        flashInfo(
+          `Merged ${report.merged} unit(s) (${report.merged_complete} complete) into ${shortenPath(report.out_path)}.`,
+        );
+      } catch (e) {
+        // The backend rejects with a string naming the offending unit ids —
+        // render it directly.
+        flashError(`Merge failed: ${formatError(e)}`);
+      } finally {
+        markReuseBusy(catalogPath, false);
+      }
+    },
+    [markReuseBusy, flashInfo, flashError],
+  );
+
+  // ── Conflict resolution: "Use this" applies a candidate via the edit path ──
+  //
+  // Picking a candidate is normal editing: write the candidate text into the
+  // unit's target through the existing per-catalog edit IPC, then refresh the
+  // cache. The translator then accepts/saves as usual, which clears the
+  // conflict status. Plural candidates are written form-by-form.
+
+  const onUseConflictCandidate = useCallback(
+    async (catalogPath: string, unitId: UnitId, forms: string[]) => {
+      try {
+        await ensureCatalogLoaded(catalogPath);
+        const entry = openCatalogs.get(catalogPath);
+        const unit = entry?.units.find((u) => u.id === unitId);
+        const isPlural = unit ? unit.plural_arity != null : forms.length > 1;
+
+        let updated: Unit | null = null;
+        if (isPlural) {
+          for (let i = 0; i < forms.length; i++) {
+            updated = await updateUnitTargetInProject(catalogPath, unitId, {
+              kind: "plural",
+              form_index: i,
+              text: forms[i] ?? null,
+            });
+          }
+        } else {
+          updated = await updateUnitTargetInProject(catalogPath, unitId, {
+            kind: "singular",
+            text: forms[0] ?? null,
+          });
+        }
+
+        if (updated) replaceUnitFor(catalogPath, updated);
+        markDirty(unitId);
+        markCatalogDirty(catalogPath);
+        scheduleRescan();
+        flashInfo(`Applied candidate to ${unitId}. Review and save to accept.`);
+      } catch (e) {
+        flashError(`Could not apply candidate: ${formatError(e)}`);
+      }
+    },
+    [
+      ensureCatalogLoaded,
+      openCatalogs,
+      replaceUnitFor,
+      markDirty,
+      markCatalogDirty,
+      scheduleRescan,
+      flashInfo,
+      flashError,
+    ],
+  );
+
   // ── Home screen ───────────────────────────────────────────────────────────
 
   if (mode.kind === "home") {
@@ -1394,6 +1591,10 @@ export function App() {
               reviewQueueByCatalog={reviewQueueByCatalog}
               onOpenReviewQueue={() => setProjectView("review")}
               openCatalogs={openCatalogs}
+              reuseBusyPaths={reuseBusyPaths}
+              onApplyReferences={(p) => void onApplyReferences(p)}
+              onExportRemainder={(p) => void onExportRemainder(p)}
+              onMergeCatalog={(p) => void onMergeCatalog(p)}
             />
           )}
 
@@ -1512,6 +1713,9 @@ export function App() {
                 openCatalogs={openCatalogs}
                 reports={reports}
                 reviewQueue={reviewQueue}
+                onUseConflictCandidate={(catalogPath, unitId, forms) =>
+                  void onUseConflictCandidate(catalogPath, unitId, forms)
+                }
                 onOpenItem={onOpenReviewQueueItem}
                 onNavigateToUnit={async (catalogPath, unitId, locale) => {
                   await handleCatalogSelect(catalogPath);

@@ -6,6 +6,10 @@
 //!   preserved bytes needed for byte-stable round-trip.
 //! - [`apply`] — write a (possibly modified) catalog back to disk, preserving
 //!   every byte we did not deliberately change.
+//! - [`render_subset`] / [`write_subset`] — produce a valid `.ts` containing
+//!   only a chosen subset of units, by byte-subtraction. Kept messages come
+//!   out byte-identical; emptied contexts are pruned. The inverse discipline
+//!   of [`apply`].
 //! - [`placeholder`] — the Qt ↔ ICU placeholder normalizer (its own module
 //!   with a property-tested round trip).
 //!
@@ -62,11 +66,13 @@ mod catalog;
 mod error;
 mod parse;
 pub mod placeholder;
+mod subset;
 mod write;
 
 pub use catalog::Catalog;
 pub use error::{ApplyError, ExtractError};
 pub use parse::extract;
+pub use subset::{render_subset, write_subset};
 pub use write::{apply, render};
 
 pub use placeholder::{from_icu, to_icu};

@@ -42,6 +42,10 @@ pub struct ReviewQueueItem {
     pub review_status: Option<String>,
     /// Kebab-case unit state (`"untranslated"`, `"proposed"`, `"finished"`, …).
     pub state: String,
+    /// Reviewer note from the unit's last review event, if any. Carries the
+    /// JSON-encoded reference-conflict candidate list for `conflict` units so
+    /// the Review conflict view survives a project reopen.
+    pub reviewer_note: Option<String>,
 }
 
 /// Aggregated result of a project-wide review-queue scan.

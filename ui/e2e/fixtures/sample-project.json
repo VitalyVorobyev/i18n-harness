@@ -28,6 +28,7 @@
         "status": "ok"
       }
     ],
+    "references": [],
     "glossary_path": "/sample-project/glossary.toml",
     "backend": { "kind": "manual" },
     "state_dir": "/sample-project/.i18n-harness"

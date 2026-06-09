@@ -11,6 +11,7 @@ pub(crate) mod glossary;
 pub(crate) mod meta;
 pub mod project_catalog;
 pub mod project_lifecycle;
+pub(crate) mod reuse;
 pub mod review;
 pub(crate) mod settings;
 pub(crate) mod translate;
@@ -63,6 +64,11 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         settings::set_glossary_in_project,
         settings::set_prompts_in_project,
         review::scan_project_review_state,
+        reuse::reuse_references_in_project,
+        reuse::split_remainder,
+        reuse::merge_catalogs,
+        reuse::add_project_reference,
+        reuse::remove_project_reference,
         eval::run_evaluation_in_project,
         eval::list_evaluation_runs_in_project,
         tuning::export_tuning_bundle_in_project,
@@ -113,6 +119,11 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         settings::set_glossary_in_project,
         settings::set_prompts_in_project,
         review::scan_project_review_state,
+        reuse::reuse_references_in_project,
+        reuse::split_remainder,
+        reuse::merge_catalogs,
+        reuse::add_project_reference,
+        reuse::remove_project_reference,
         eval::list_evaluation_runs_in_project,
         tuning::export_tuning_bundle_in_project,
         tuning::list_tuning_bundles_in_project,

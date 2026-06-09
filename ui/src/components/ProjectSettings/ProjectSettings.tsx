@@ -7,9 +7,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   addCatalogToProject,
+  addProjectReference,
   pickCatalogFileForProject,
+  pickReferenceFiles,
   removeCatalogFromProject,
   removeLocaleFromProject,
+  removeProjectReference,
   setBackendInProject,
   updateLocaleInProject,
 } from "../../lib/tauri";
@@ -20,6 +23,7 @@ import type {
   LocaleConfig,
   ProjectOpenResponse,
   ProjectSummary,
+  ReferenceEntry,
   RegisterOverride,
 } from "../../lib/types";
 
@@ -1010,6 +1014,188 @@ function BackendCard({
   );
 }
 
+// ── Section — Reference files ────────────────────────────────────────────────
+//
+// Expert-translated catalogs whose finished translations may be reused (by
+// exact unit-id match) into project catalogs of the same locale. Add via a
+// `.ts` picker (one row per file) and remove by manifest-relative path. Both
+// mutations persist the manifest server-side and return a fresh summary, so
+// the list is read straight from `summary.references` and survives a reopen.
+
+function ReferencesCard({
+  summary,
+  onMutation,
+  flashError,
+  flashInfo,
+}: {
+  summary: ProjectSummary;
+  onMutation: (r: ProjectOpenResponse) => void;
+  flashError: (m: string) => void;
+  flashInfo: (m: string) => void;
+}) {
+  const [saved, flashSaved] = useSavedBadge();
+  const [busy, setBusy] = useState(false);
+  const [addLocale, setAddLocale] = useState<string>(summary.locales[0] ?? "");
+
+  const handleAdd = useCallback(async () => {
+    if (!addLocale.trim()) {
+      flashError("Pick a locale for the reference first.");
+      return;
+    }
+    let picked: string[] | null;
+    try {
+      picked = await pickReferenceFiles();
+    } catch (e) {
+      flashError(`File picker failed: ${formatError(e)}`);
+      return;
+    }
+    if (!picked || picked.length === 0) return;
+
+    setBusy(true);
+    let added = 0;
+    try {
+      for (const path of picked) {
+        const entry: ReferenceEntry = {
+          path: relativize(path, summary.root),
+          format: "qt-ts",
+          locale: addLocale.trim(),
+        };
+        const resp = await addProjectReference(entry);
+        onMutation(resp);
+        added += 1;
+      }
+      flashSaved();
+      flashInfo(
+        `Added ${added} reference${added === 1 ? "" : "s"} for ${addLocale}.`,
+      );
+    } catch (e) {
+      flashError(`Could not add reference: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [addLocale, summary.root, onMutation, flashError, flashInfo, flashSaved]);
+
+  const handleRemove = useCallback(
+    async (path: string) => {
+      const ok = window.confirm(
+        `Stop using "${path}" as a reference?\n\nThe file on disk is not deleted.`,
+      );
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const resp = await removeProjectReference(path);
+        onMutation(resp);
+        flashSaved();
+        flashInfo(`Removed reference "${path}".`);
+      } catch (e) {
+        flashError(`Could not remove reference: ${formatError(e)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onMutation, flashError, flashInfo, flashSaved],
+  );
+
+  // Group references by locale for a tidy, scannable list.
+  const byLocale = new Map<string, typeof summary.references>();
+  for (const r of summary.references) {
+    const group = byLocale.get(r.locale) ?? [];
+    group.push(r);
+    byLocale.set(r.locale, group);
+  }
+
+  return (
+    <Card title="Reference files" saved={saved}>
+      <p className="text-xs text-fg-tertiary leading-relaxed">
+        Expert-translated catalogs reused into same-locale project catalogs by
+        exact unit-id match. Use{" "}
+        <span className="font-medium text-fg-secondary">Apply references</span>{" "}
+        on a catalog (in the sidebar) to copy them in.
+      </p>
+
+      {summary.references.length === 0 ? (
+        <p className="text-xs text-fg-disabled italic">
+          No reference files declared yet. Add one to reuse its finished
+          translations into same-locale catalogs.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {[...byLocale.entries()].map(([locale, entries]) => (
+            <div key={locale} className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-loose text-fg-tertiary font-medium">
+                {locale}
+              </span>
+              <ul className="flex flex-col gap-1">
+                {entries.map((r) => (
+                  <li
+                    key={r.manifest_path}
+                    className="flex items-center gap-3 px-2 py-1.5 rounded border border-border-subtle bg-bg-base"
+                  >
+                    <span
+                      className="font-mono text-xs text-fg-primary flex-1 min-w-0 truncate"
+                      title={r.manifest_path}
+                    >
+                      {r.manifest_path}
+                    </span>
+                    <span className="text-[10px] text-fg-disabled shrink-0">
+                      {r.format}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove reference ${r.manifest_path}`}
+                      className={btnDangerCls}
+                      disabled={busy}
+                      onClick={() => void handleRemove(r.manifest_path)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add reference: pick locale, then a .ts file picker (multi-select). */}
+      <div className="flex items-end gap-2 flex-wrap">
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-fg-tertiary" htmlFor="add-ref-locale">
+            Locale
+          </label>
+          {summary.locales.length > 0 ? (
+            <select
+              id="add-ref-locale"
+              value={addLocale}
+              disabled={busy}
+              className={selectCls}
+              onChange={(e) => setAddLocale(e.target.value)}
+            >
+              {summary.locales.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-fg-disabled italic">
+              Add a locale first.
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          className={btnCls}
+          disabled={busy || summary.locales.length === 0}
+          onClick={() => void handleAdd()}
+        >
+          Add reference files…
+        </button>
+      </div>
+    </Card>
+  );
+}
+
 // ── Section 5 — Prompts (placeholder) ────────────────────────────────────────
 
 function PromptsCard() {
@@ -1045,6 +1231,12 @@ export function ProjectSettings({
         flashError={flashError}
       />
       <CatalogsCard
+        summary={summary}
+        onMutation={onMutation}
+        flashError={flashError}
+        flashInfo={flashInfo}
+      />
+      <ReferencesCard
         summary={summary}
         onMutation={onMutation}
         flashError={flashError}
