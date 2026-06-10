@@ -2,20 +2,20 @@
 //!
 //! Flags fall into three groups:
 //!
-//! 1. **Hard / gate-produced (M1).** These block write-back when the
+//! 1. **Hard / gate-produced.** These block write-back when the
 //!    validation gate runs: placeholder multiset mismatch, plural arity
 //!    mismatch, ICU parse failure. They are *facts* about the unit, not
 //!    opinions.
-//! 2. **Soft / gate-produced (M1).** These warn but do not block: accelerator
+//! 2. **Soft / gate-produced.** These warn but do not block: accelerator
 //!    mismatch, length expansion past `length_warn_ratio`, CJK punctuation
 //!    tolerance, placeholder agreement risk.
-//! 3. **Model-supplied semantic (M2+).** The translation backend can attach
+//! 3. **Model-supplied semantic.** The translation backend can attach
 //!    these to express uncertainty: ambiguous source, idiom, insufficient
 //!    context, low confidence. The gate does not produce them; the UI
 //!    surfaces them.
 //!
 //! Flags carry no payload here — they name the *kind* of issue. A separate
-//! `GateReport` (M1) carries the structured details (which placeholder,
+//! `GateReport` carries the structured details (which placeholder,
 //! observed vs expected, etc.). This keeps `Unit` cheap to serialize and
 //! keeps the gate's diagnostic output out of the on-disk intermediate.
 
@@ -32,7 +32,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Flag {
-    // ── Hard (M1, gate) ────────────────────────────────────────────────────
+    // ── Hard (gate) ────────────────────────────────────────────────────────
     /// The target's placeholder multiset does not match the source's.
     PlaceholderMismatch,
     /// The unit's plural arity does not match the target locale's CLDR
@@ -45,7 +45,7 @@ pub enum Flag {
     /// "finished" unit with missing text.
     EmptyTargetWhenFinished,
 
-    // ── Soft (M1, gate) ────────────────────────────────────────────────────
+    // ── Soft (gate) ────────────────────────────────────────────────────────
     /// The accelerator marker (`&`) is present in the source but not in the
     /// target (or vice versa, or in a different position).
     AccelMismatch,
@@ -74,7 +74,7 @@ pub enum Flag {
     /// backend error. Hard severity: there is no translation to ship.
     BackendMalformedResponse,
 
-    // ── Model-supplied semantic (M2+) ──────────────────────────────────────
+    // ── Model-supplied semantic ────────────────────────────────────────────
     /// The source is ambiguous; the model picked one reading but is not
     /// confident (e.g. "Record" — noun or verb?).
     AmbiguousSource,
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn new_semantic_variants_are_semantic_severity() {
-        // Pin the severity of the M4.6.1 additions so a future refactor
+        // Pin the severity of the semantic-flag additions so a future refactor
         // cannot silently demote them to Hard/Soft, which would change the
         // gate's write-back blocking semantics.
         assert_eq!(Flag::BrandTerm.severity(), FlagSeverity::Semantic);

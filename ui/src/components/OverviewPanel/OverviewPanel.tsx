@@ -7,10 +7,12 @@ import { loadGlossary, loadMetrics } from "../../lib/tauri";
 import type {
   CatalogRef,
   CatalogResponse,
+  CatalogStateCounts,
   GlossaryLoadResponse,
   MetricEvent,
   MetricsResponse,
   ProjectSummary,
+  ReferenceRef,
 } from "../../lib/types";
 import { Eyebrow, LocaleTag, SegmentBar } from "../primitives";
 
@@ -72,6 +74,12 @@ export interface OverviewPanelProps {
   summary: ProjectSummary;
   openCatalogs: Map<string, CatalogResponse>;
   dirtyCatalogPaths: Set<string>;
+  /**
+   * Per-catalog unit-state tally from the latest review scan, keyed by absolute
+   * catalog path. Covers every catalog (even unopened ones), so progress
+   * numbers are accurate without opening each file.
+   */
+  statsByCatalog: Record<string, CatalogStateCounts>;
   focusLocale: string | null;
   setFocusLocale: (locale: string | null) => void;
   setProjectView: (
@@ -120,13 +128,43 @@ function unitCounts(units: CatalogResponse["units"]): {
 }
 
 /**
- * Compute per-locale aggregated stats from the open catalog cache and the
- * project summary (for catalogs not yet opened).
+ * Resolve per-catalog counts, preferring the scan tally (covers unopened
+ * catalogs) and falling back to the open-catalog cache when the scan map has no
+ * entry for the path yet.
+ */
+function countsForCatalog(
+  ref: CatalogRef,
+  statsByCatalog: Record<string, CatalogStateCounts>,
+  openCatalogs: Map<string, CatalogResponse>,
+): {
+  finished: number;
+  proposed: number;
+  untranslated: number;
+  needsReview: number;
+} {
+  const scan = statsByCatalog[ref.absolute_path];
+  if (scan) {
+    return {
+      finished: scan.finished,
+      proposed: scan.proposed,
+      untranslated: scan.untranslated,
+      needsReview: scan.needs_review,
+    };
+  }
+  const cached = openCatalogs.get(ref.absolute_path);
+  if (cached) return unitCounts(cached.units);
+  return { finished: 0, proposed: 0, untranslated: 0, needsReview: 0 };
+}
+
+/**
+ * Compute per-locale aggregated stats, preferring the review-scan tally (which
+ * covers every catalog) and falling back to the open-catalog cache.
  */
 function buildLocaleStats(
   summary: ProjectSummary,
   openCatalogs: Map<string, CatalogResponse>,
   dirtyCatalogPaths: Set<string>,
+  statsByCatalog: Record<string, CatalogStateCounts>,
 ): LocaleStats[] {
   // Group catalog refs by locale.
   const byLocale = new Map<string, CatalogRef[]>();
@@ -145,14 +183,11 @@ function buildLocaleStats(
     let isDirty = false;
 
     for (const ref of refs) {
-      const cached = openCatalogs.get(ref.absolute_path);
-      if (cached) {
-        const counts = unitCounts(cached.units);
-        finished += counts.finished;
-        proposed += counts.proposed;
-        untranslated += counts.untranslated;
-        needsReview += counts.needsReview;
-      }
+      const counts = countsForCatalog(ref, statsByCatalog, openCatalogs);
+      finished += counts.finished;
+      proposed += counts.proposed;
+      untranslated += counts.untranslated;
+      needsReview += counts.needsReview;
       // Even without a cached catalog, count dirty state.
       if (dirtyCatalogPaths.has(ref.absolute_path)) isDirty = true;
     }
@@ -662,6 +697,317 @@ function LocaleProgressCard({
   );
 }
 
+// ── Per-file stats ────────────────────────────────────────────────────────────
+
+/**
+ * One row per translation-target catalog (references excluded), showing total /
+ * untranslated / needs-review counts from the latest review scan. Numbers
+ * populate for every catalog without opening each one.
+ */
+function FilesSection({
+  summary,
+  openCatalogs,
+  statsByCatalog,
+  onOpenCatalog,
+}: {
+  summary: ProjectSummary;
+  openCatalogs: Map<string, CatalogResponse>;
+  statsByCatalog: Record<string, CatalogStateCounts>;
+  onOpenCatalog: (locale: string) => void;
+}) {
+  // Exclude catalogs that are also registered as references (read-only memory).
+  const referencePaths = new Set(
+    summary.references.map((r) => r.absolute_path),
+  );
+  const catalogs = summary.catalogs.filter(
+    (c) => !referencePaths.has(c.absolute_path),
+  );
+
+  if (catalogs.length === 0) return null;
+
+  return (
+    <section aria-labelledby="overview-files-heading">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span id="overview-files-heading">
+          <Eyebrow>Files</Eyebrow>
+        </span>
+        <span style={{ fontSize: 11, color: "var(--color-fg-tertiary)" }}>
+          {catalogs.length} {catalogs.length === 1 ? "file" : "files"}
+        </span>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: "var(--radius-lg)",
+          background: "var(--color-bg-surface)",
+          overflow: "hidden",
+        }}
+      >
+        {catalogs.map((c, i) => {
+          const counts = countsForCatalog(c, statsByCatalog, openCatalogs);
+          const total = counts.finished + counts.proposed + counts.untranslated;
+          const loaded =
+            statsByCatalog[c.absolute_path] !== undefined ||
+            openCatalogs.has(c.absolute_path);
+          return (
+            <button
+              type="button"
+              key={c.manifest_path}
+              onClick={() => onOpenCatalog(c.locale)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 14px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                textAlign: "left",
+                borderBottom:
+                  i < catalogs.length - 1
+                    ? "1px solid var(--color-border-subtle)"
+                    : undefined,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--color-bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+              aria-label={`Open ${c.manifest_path}`}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11.5,
+                  color: "var(--color-fg-primary)",
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={c.manifest_path}
+              >
+                {c.manifest_path}
+              </span>
+              {loaded ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      color: "var(--color-fg-tertiary)",
+                    }}
+                    title="Total units"
+                  >
+                    {total} total
+                  </span>
+                  <BreakdownDot
+                    color="var(--color-state-untranslated)"
+                    count={counts.untranslated}
+                    label="untranslated"
+                  />
+                  {counts.needsReview > 0 && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontSize: 11.5,
+                        color: "var(--color-severity-soft)",
+                      }}
+                      title="Units needing review"
+                    >
+                      <FlagIcon size={11} />
+                      {counts.needsReview}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-fg-tertiary)",
+                  }}
+                >
+                  …
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ── References summary ────────────────────────────────────────────────────────
+
+function ReferencesSummarySection({
+  references,
+  onOpenSettings,
+}: {
+  references: ReferenceRef[];
+  onOpenSettings: () => void;
+}) {
+  // Group by locale for a tidy, scannable list.
+  const byLocale = new Map<string, ReferenceRef[]>();
+  for (const r of references) {
+    const group = byLocale.get(r.locale) ?? [];
+    group.push(r);
+    byLocale.set(r.locale, group);
+  }
+
+  return (
+    <section aria-labelledby="overview-refs-heading">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span id="overview-refs-heading">
+          <Eyebrow>Reference files</Eyebrow>
+        </span>
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "0 8px",
+            height: 24,
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border-subtle)",
+            background: "transparent",
+            fontSize: 11.5,
+            fontWeight: 500,
+            color: "var(--color-fg-tertiary)",
+            cursor: "pointer",
+          }}
+          aria-label="Edit reference files in Settings"
+        >
+          Edit in Settings →
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: "var(--radius-lg)",
+          background: "var(--color-bg-surface)",
+          overflow: "hidden",
+        }}
+      >
+        {[...byLocale.entries()].map(([locale, refs], groupIdx) => (
+          <div
+            key={locale}
+            style={{
+              padding: "10px 14px",
+              borderBottom:
+                groupIdx < byLocale.size - 1
+                  ? "1px solid var(--color-border-subtle)"
+                  : undefined,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              <LocaleTag locale={locale} tone="muted" />
+              <span style={{ fontSize: 11, color: "var(--color-fg-tertiary)" }}>
+                {refs.length} {refs.length === 1 ? "file" : "files"}
+              </span>
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 3,
+              }}
+            >
+              {refs.map((r) => (
+                <li
+                  key={r.manifest_path}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--color-fg-primary)",
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={r.manifest_path}
+                  >
+                    {r.manifest_path}
+                  </span>
+                  {r.status !== "ok" && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                        border: "1px solid var(--color-severity-hard-border)",
+                        background: "var(--color-severity-hard-bg)",
+                        color: "var(--color-severity-hard)",
+                        flexShrink: 0,
+                      }}
+                      title={`File status: ${r.status}`}
+                    >
+                      {r.status}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ── Activity dot colour by event kind ────────────────────────────────────────
 
 function activityDotColor(event: MetricEvent): string {
@@ -970,10 +1316,16 @@ export function OverviewPanel({
   summary,
   openCatalogs,
   dirtyCatalogPaths,
+  statsByCatalog,
   setFocusLocale,
   setProjectView,
 }: OverviewPanelProps) {
-  const stats = buildLocaleStats(summary, openCatalogs, dirtyCatalogPaths);
+  const stats = buildLocaleStats(
+    summary,
+    openCatalogs,
+    dirtyCatalogPaths,
+    statsByCatalog,
+  );
 
   // Metrics path: <state_dir>/metrics.jsonl (harness convention).
   const metricsPath = summary.state_dir
@@ -1092,6 +1444,22 @@ export function OverviewPanel({
             </ul>
           )}
         </section>
+
+        {/* Per-file stats */}
+        <FilesSection
+          summary={summary}
+          openCatalogs={openCatalogs}
+          statsByCatalog={statsByCatalog}
+          onOpenCatalog={handleContinue}
+        />
+
+        {/* Reference files (only when present) */}
+        {summary.references.length > 0 && (
+          <ReferencesSummarySection
+            references={summary.references}
+            onOpenSettings={() => setProjectView("settings")}
+          />
+        )}
 
         {/* Activity + glossary */}
         <div

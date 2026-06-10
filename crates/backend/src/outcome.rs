@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn failed_outcome_kind_defaults_to_unspecified_on_deserialize() {
-        // On-disk JSONL written before M4.6.1 added FailureKind has no
+        // On-disk JSONL written before FailureKind was added has no
         // `failure_kind` field on Failed; the deserializer must accept
         // that (the outer enum tag `"kind":"failed"` is the variant
         // selector and never collides with this inner field).

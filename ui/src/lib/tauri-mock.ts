@@ -11,6 +11,8 @@ const MOCK_TRANSLATE_DELAY_MS = 400;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 import type {
+  CatalogGateResponse,
+  CatalogGateStats,
   CatalogResponse,
   GlossaryLoadResponse,
   GlossaryPayload,
@@ -52,6 +54,10 @@ interface MockState {
   catalogs: Map<string, CatalogResponse>;
   // Dirty tracking (catalog path → dirty)
   dirtyCatalogs: Set<string>;
+  // Reviewer notes keyed by `${catalogPath}\u{1F}${unitId}`, mirroring the
+  // review.jsonl note the real backend surfaces on the review-queue item
+  // (carries conflict-candidate JSON for `conflict` units).
+  reviewNotes: Map<string, string>;
   glossaryPath: string | null;
   glossaryPayload: GlossaryPayload | null;
   // Batch event emitters keyed by job_id
@@ -69,6 +75,7 @@ const state: MockState = {
   openProject: null,
   catalogs: new Map(),
   dirtyCatalogs: new Set(),
+  reviewNotes: new Map(),
   glossaryPath: null,
   glossaryPayload: null,
   batchListeners: new Map(),
@@ -84,6 +91,7 @@ export async function initMock(fixture: FixtureData): Promise<void> {
     ]),
   );
   state.dirtyCatalogs = new Set();
+  state.reviewNotes = new Map();
   state.openProject = null;
   state.glossaryPath = fixture.glossary.path;
   state.glossaryPayload = JSON.parse(
@@ -101,6 +109,7 @@ export function resetMock(): void {
     ]),
   );
   state.dirtyCatalogs = new Set();
+  state.reviewNotes = new Map();
   state.openProject = null;
   state.glossaryPayload = JSON.parse(
     JSON.stringify(state.fixture.glossary.payload),
@@ -150,6 +159,38 @@ function cmdOpenCatalogInProject(args: {
   if (!catalog)
     throw new Error(`Catalog not found in mock: ${args.catalogPath}`);
   return JSON.parse(JSON.stringify(catalog)) as CatalogResponse;
+}
+
+function emptyGateStats(): CatalogGateStats {
+  return {
+    total: 0,
+    finished: 0,
+    proposed: 0,
+    untranslated: 0,
+    vanished_obsolete: 0,
+    hard: 0,
+    soft: 0,
+  };
+}
+
+// The mock does not run the real validation gate; it derives state counts
+// from the catalog's units and reports no findings. Enough for component
+// tests that only exercise the per-file stats wiring.
+function cmdGateCatalogInProject(args: {
+  catalogPath: string;
+}): CatalogGateResponse {
+  const catalog = state.catalogs.get(args.catalogPath);
+  if (!catalog)
+    throw new Error(`Catalog not found in mock: ${args.catalogPath}`);
+  const stats = emptyGateStats();
+  stats.total = catalog.units.length;
+  for (const u of catalog.units) {
+    if (u.state === "finished") stats.finished++;
+    else if (u.state === "proposed") stats.proposed++;
+    else if (u.state === "untranslated") stats.untranslated++;
+    else stats.vanished_obsolete++;
+  }
+  return { path: args.catalogPath, reports: [], stats };
 }
 
 function cmdUpdateUnitTargetInProject(args: {
@@ -361,6 +402,7 @@ function cmdCancelTranslation(_args: { jobId: string }): boolean {
 function cmdScanProjectReviewState(): ReviewQueueResponse {
   const items: ReviewQueueResponse["items"] = [];
   const byCatalog: Record<string, number> = {};
+  const statsByCatalog: ReviewQueueResponse["stats_by_catalog"] = {};
 
   for (const [catalogPath, catalog] of state.catalogs) {
     const project = state.openProject;
@@ -368,11 +410,27 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
       (c) => c.absolute_path === catalogPath,
     );
     let count = 0;
+    const counts = {
+      total: 0,
+      finished: 0,
+      proposed: 0,
+      untranslated: 0,
+      vanished_obsolete: 0,
+      needs_review: 0,
+    };
     for (const unit of catalog.units) {
+      counts.total++;
+      if (unit.state === "finished") counts.finished++;
+      else if (unit.state === "proposed") counts.proposed++;
+      else if (unit.state === "untranslated") counts.untranslated++;
+      else counts.vanished_obsolete++;
       const needsReview =
-        unit.review_status === "needs-review" || unit.flags.length > 0;
+        unit.review_status === "needs-review" ||
+        unit.review_status === "conflict" ||
+        unit.flags.length > 0;
       if (!needsReview) continue;
       count++;
+      counts.needs_review++;
       items.push({
         catalog_path: catalogPath,
         catalog_manifest_path: catRef?.manifest_path ?? catalogPath,
@@ -386,14 +444,18 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
         flags: unit.flags,
         review_status: unit.review_status ?? null,
         state: unit.state,
+        reviewer_note:
+          state.reviewNotes.get(`${catalogPath}\u{1F}${unit.id}`) ?? null,
       });
     }
     if (count > 0) byCatalog[catalogPath] = count;
+    statsByCatalog[catalogPath] = counts;
   }
 
   return {
     total_count: items.length,
     by_catalog: byCatalog,
+    stats_by_catalog: statsByCatalog,
     items,
   };
 }
@@ -439,6 +501,13 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   close_project: () => cmdCloseProject(),
   open_catalog_in_project: (a) =>
     cmdOpenCatalogInProject(a as { catalogPath: string }),
+  gate_catalog_in_project: (a) =>
+    cmdGateCatalogInProject(a as { catalogPath: string }),
+  gate_catalog: () => ({
+    path: "",
+    reports: [],
+    stats: emptyGateStats(),
+  }),
   update_unit_target_in_project: (a) =>
     cmdUpdateUnitTargetInProject(
       a as { catalogPath: string; unitId: UnitId; edit: TargetEdit },
@@ -475,6 +544,10 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   }),
   create_project: () => ({ summary: state.openProject, warnings: [] }),
   add_catalog_to_project: () => ({ summary: state.openProject, warnings: [] }),
+  add_catalogs_from_folder: () => ({
+    summary: state.openProject,
+    warnings: ["Added 0 catalog(s); skipped 0 already-present."],
+  }),
   remove_catalog_from_project: () => ({
     summary: state.openProject,
     warnings: [],
@@ -506,6 +579,159 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   }),
   list_tuning_bundles_in_project: () => [],
   write_text_file: () => undefined,
+  // Reference reuse / remainder / merge — browser-mode stubs (the real work is
+  // local file IO in the Rust library; not exercised by browser-only tests).
+  reuse_references_in_project: (a) => {
+    const args = a as { catalogPath: string; referencePaths: string[] | null };
+    const catalog = state.catalogs.get(args.catalogPath);
+    const refs = args.referencePaths ?? ["/sample-project/refs/expert_de.ts"];
+
+    // Synthesize a representative outcome: copy a finished candidate into the
+    // first untranslated singular unit, mark the second as a conflict (two
+    // disagreeing candidates). This exercises the conflict view end-to-end.
+    const untranslated = (catalog?.units ?? []).filter(
+      (u) => u.state === "untranslated" && u.target.kind === "singular",
+    );
+    const conflicts: Array<{
+      unit_id: string;
+      candidates: Array<{
+        reference: string;
+        also_from: string[];
+        is_plural: boolean;
+        text: string;
+      }>;
+    }> = [];
+
+    let copiedFinished = 0;
+    const first = untranslated[0];
+    if (first && catalog) {
+      const unit = catalog.units.find((u) => u.id === first.id);
+      if (unit) {
+        unit.target = { kind: "singular", text: `[ref] ${unit.source}` };
+        unit.state = "finished";
+        unit.review_status = "reviewed";
+        copiedFinished = 1;
+      }
+    }
+
+    const second = untranslated[1];
+    if (second && catalog) {
+      const unit = catalog.units.find((u) => u.id === second.id);
+      if (unit) {
+        unit.review_status = "conflict";
+      }
+      const candidates = [
+        {
+          reference: refs[0] ?? "/sample-project/refs/expert_de.ts",
+          also_from: [],
+          is_plural: false,
+          text: `[ref-A] ${second.source}`,
+        },
+        {
+          reference: refs[1] ?? "/sample-project/refs/legacy_de.ts",
+          also_from: [],
+          is_plural: false,
+          text: `[ref-B] ${second.source}`,
+        },
+      ];
+      // Persist the candidate JSON as the review note, mirroring the real
+      // backend — the scan surfaces it on the queue item's reviewer_note.
+      state.reviewNotes.set(
+        `${args.catalogPath}\u{1F}${second.id}`,
+        JSON.stringify(candidates),
+      );
+      conflicts.push({ unit_id: second.id, candidates });
+    }
+
+    if (catalog) state.dirtyCatalogs.delete(args.catalogPath);
+
+    // Everything untranslated except the copied-finished first unit and the
+    // conflicted second unit is the remaining set (conflicts excluded, matching
+    // the real reuse contract).
+    const consumedIds = new Set(
+      [first?.id, second?.id].filter((id): id is string => id != null),
+    );
+    const remainingIds = untranslated
+      .filter((u) => !consumedIds.has(u.id))
+      .map((u) => u.id);
+    return {
+      catalog_path: args.catalogPath,
+      references: refs,
+      copied_finished: copiedFinished,
+      copied_needs_review: 0,
+      conflict_count: conflicts.length,
+      remaining_count: remainingIds.length,
+      remaining_ids: remainingIds,
+      conflicts,
+    };
+  },
+  split_remainder: (a) => {
+    const args = a as {
+      catalogPath: string;
+      outPath: string;
+      onlyIds: string[] | null;
+    };
+    const catalog = state.catalogs.get(args.catalogPath);
+    const writableUntranslated = (catalog?.units ?? []).filter(
+      (u) => u.state === "untranslated",
+    ).length;
+    return {
+      base_path: args.catalogPath,
+      out_path: args.outPath,
+      kept_count: args.onlyIds?.length ?? writableUntranslated,
+    };
+  },
+  split_all_remainders: (a) => {
+    const args = a as { outDir: string };
+    const project = state.openProject;
+    const referencePaths = new Set(
+      (project?.references ?? []).map((r) => r.absolute_path),
+    );
+    const written: {
+      base_path: string;
+      out_path: string;
+      kept_count: number;
+    }[] = [];
+    const skipped: string[] = [];
+    for (const c of project?.catalogs ?? []) {
+      if (c.format !== "qt-ts" || referencePaths.has(c.absolute_path)) continue;
+      const catalog = state.catalogs.get(c.absolute_path);
+      const keptCount = (catalog?.units ?? []).filter(
+        (u) => u.state === "untranslated",
+      ).length;
+      if (keptCount === 0) {
+        skipped.push(c.manifest_path);
+        continue;
+      }
+      const base =
+        c.absolute_path.split("/").pop()?.replace(/\.ts$/i, "") ?? "catalog";
+      written.push({
+        base_path: c.absolute_path,
+        out_path: `${args.outDir}/${base}.remainder.ts`,
+        kept_count: keptCount,
+      });
+    }
+    return { written, skipped };
+  },
+  merge_catalogs: (a) => {
+    const args = a as {
+      basePath: string;
+      withPath: string;
+      outPath: string;
+    };
+    return {
+      base_path: args.basePath,
+      with_path: args.withPath,
+      out_path: args.outPath,
+      merged: 0,
+      merged_complete: 0,
+    };
+  },
+  add_project_reference: () => ({ summary: state.openProject, warnings: [] }),
+  remove_project_reference: () => ({
+    summary: state.openProject,
+    warnings: [],
+  }),
   load_metrics: () => ({ path: "", events: [], error_count: 0, line_count: 0 }),
   open_catalog: () => ({ path: "", unit_count: 0, language: null, units: [] }),
   update_unit_target: () => {

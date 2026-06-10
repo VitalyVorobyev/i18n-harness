@@ -130,7 +130,7 @@ impl UnitState {
 /// Most messages are singular (`Singular(target)`). Plural messages have one
 /// target per CLDR plural category for the target locale, in CLDR's
 /// canonical category order: `zero, one, two, few, many, other`. The number
-/// of slots equals the locale's plural arity; the gate (M1) enforces this.
+/// of slots equals the locale's plural arity; the gate enforces this.
 ///
 /// Each slot is `Option<String>`: `None` = not yet filled; `Some("")` = filled
 /// but empty (a valid translation choice in some languages).
@@ -254,11 +254,11 @@ pub struct Unit {
     /// source for this unit.
     ///
     /// Populated by the adapter on extract; `None` when the adapter does not
-    /// (yet) compute one (PO and ICU-JSON adapters in early M4 ship `None` and
-    /// start filling it in later milestones without a `Unit` schema bump).
+    /// (yet) compute one (early adapters ship `None` and start filling it in
+    /// later without a `Unit` schema bump).
     ///
     /// Format: `"sha256:<12 hex chars>"` — the first 48 bits of a SHA-256 over
-    /// the components defined in the M4.1.5 design §2.
+    /// the components defined in the source-hash / review-status design doc.
     ///
     /// # What this guarantees
     ///
@@ -354,7 +354,7 @@ impl Unit {
     }
 }
 
-/// Compute the M4.1.5 source hash for a unit.
+/// Compute the source hash for a unit.
 ///
 /// `disambiguation` and `extracomment` are the empty string when the catalog
 /// format does not record them (PO has no Qt-style comment distinction;
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn unit_with_confidence_and_flag_notes_round_trips() {
-        // M4.6.1: confidence + flag_notes must survive a full serde
+        // confidence + flag_notes must survive a full serde
         // round-trip and stay byte-stable across re-encodes.
         let mut unit = Unit::untranslated_singular("ctx::greeting", "Hello");
         unit.confidence = Some(0.87);

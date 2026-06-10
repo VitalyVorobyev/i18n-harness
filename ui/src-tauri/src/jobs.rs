@@ -21,8 +21,8 @@
 //!    completion, internal failure, and observed-cancellation all
 //!    deregister; the registry never garbage-collects on its own.
 //!    Leaks would only happen if the worker panics without unwind
-//!    cleanup; for the M4.2c.2 surface (Ollama-backed translates) this
-//!    is treated as best-effort.
+//!    cleanup; for the bulk-translate surface (Ollama-backed translates)
+//!    this is treated as best-effort.
 //! 4. **No reuse of cancelled ids.** A cancelled job that the worker
 //!    later removes can never be re-registered with the same id (UUIDs
 //!    are not recycled). The frontend re-issues a fresh job on retry.

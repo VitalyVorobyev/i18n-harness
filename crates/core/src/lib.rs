@@ -4,7 +4,7 @@
 //! These types are the **contract** between every other crate in the workspace.
 //! Adapters produce `Unit`s, backends consume and fill them, the gate validates
 //! them, and the intermediate JSONL representation is how units flow between
-//! processes (export-batch / import-batch in M4). Nothing in this crate names
+//! processes (export-batch / import-batch). Nothing in this crate names
 //! a specific catalog format, locale, or translation engine — those concerns
 //! belong to adapters, locale records, and backend implementations
 //! respectively (see `docs/initial_design.md` §1).
@@ -29,7 +29,7 @@
 //!   the Qt adapter. That guarantee lives in `adapter-qt`, where the catalog
 //!   carries enough preserved fragments to do so.
 //! - That a target string is well-formed ICU, has the right placeholders, or
-//!   satisfies a locale's plural arity. Those are gate concerns (M1).
+//!   satisfies a locale's plural arity. Those are gate concerns.
 
 #![forbid(unsafe_code)]
 

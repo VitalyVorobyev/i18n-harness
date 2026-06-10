@@ -1,7 +1,7 @@
 //! Stability snapshot for `.i18n-harness/metrics.jsonl` on-wire shape.
 //!
 //! The metrics file is a public on-disk contract: downstream readers
-//! (dashboards, the M3 UI's metrics view, future exporters) parse it.
+//! (dashboards, the metrics view, future exporters) parse it.
 //! This test pins the JSON shape of every event kind. A breaking change
 //! must bump `METRICS_SCHEMA_VERSION` and update the assertions below — the
 //! point is that the change is intentional and reviewed, not silent.

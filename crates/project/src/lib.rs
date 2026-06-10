@@ -48,8 +48,8 @@ pub use locale::{ResolvedLocale, ResolvedLocaleView};
 
 pub use manifest::{
     BackendBlock, BackendConfig, BackendKind, CatalogEntry, CatalogFormat, GlossaryConfig,
-    LocaleConfig, PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, RegisterOverride,
-    SCHEMA_VERSION,
+    LocaleConfig, PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, ReferenceEntry,
+    RegisterOverride, SCHEMA_VERSION,
 };
 
 // `FormatGuess` is canonically defined in `manifest.rs` and re-exported from
@@ -70,7 +70,7 @@ pub use memory::{
 
 pub use paths::ProjectPaths;
 
-pub use project::{CatalogRef, CatalogStatus, Project, ProjectSummary};
+pub use project::{CatalogRef, CatalogStatus, Project, ProjectSummary, ReferenceRef};
 
 pub use review::{ReviewEvent, ReviewRecord, ReviewStore};
 

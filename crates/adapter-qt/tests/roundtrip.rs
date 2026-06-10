@@ -1,7 +1,7 @@
 //! Round-trip integration test: every fixture under `fixtures/qt/` must
 //! satisfy `apply(extract(f), f.units(), out) == f` byte-for-byte.
 //!
-//! This is the M0 contract. If a fixture is added that does not round-trip,
+//! This is the round-trip contract. If a fixture is added that does not round-trip,
 //! the test fails — do not relax the assertion; either fix the adapter or
 //! document the limitation in `fixtures/README.md` and add a hand-crafted
 //! variant that excludes the offending construct.

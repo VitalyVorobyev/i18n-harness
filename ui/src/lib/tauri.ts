@@ -9,7 +9,9 @@ import {
 import type {
   BackendConfig,
   BatchScope,
+  BatchSplitReport,
   CatalogEntry,
+  CatalogGateResponse,
   CatalogResponse,
   Correction,
   CuratedExample,
@@ -23,13 +25,17 @@ import type {
   GlossarySaveResponse,
   LocaleConfig,
   LocaleInfo,
+  MergeReport,
   MetricsResponse,
   ProjectOpenResponse,
   ProjectSummary,
   PromptsConfig,
+  ReferenceEntry,
+  ReuseReport,
   ReviewQueueResponse,
   SaveAllDirtyResponse,
   SaveSummary,
+  SplitReport,
   TargetEdit,
   TranslateBatchStarted,
   TranslateResult,
@@ -64,6 +70,10 @@ export async function discardChanges(): Promise<CatalogResponse> {
 
 export async function translateUnit(unitId: UnitId): Promise<TranslateResult> {
   return await invoke<TranslateResult>("translate_unit", { unitId });
+}
+
+export async function gateCatalog(): Promise<CatalogGateResponse> {
+  return await invoke<CatalogGateResponse>("gate_catalog");
 }
 
 export async function pickCatalogFile(): Promise<string | null> {
@@ -174,7 +184,7 @@ export async function writeTextFile(
   return await invoke<void>("write_text_file", { path, content });
 }
 
-// ── M4.2 project-mode wrappers ────────────────────────────────────────────────
+// ── Project-mode wrappers ─────────────────────────────────────────────────────
 
 export async function openProject(root: string): Promise<ProjectOpenResponse> {
   return await invoke<ProjectOpenResponse>("open_project", { root });
@@ -211,6 +221,14 @@ export async function openCatalogInProject(
   catalogPath: string,
 ): Promise<CatalogResponse> {
   return await invoke<CatalogResponse>("open_catalog_in_project", {
+    catalogPath,
+  });
+}
+
+export async function gateCatalogInProject(
+  catalogPath: string,
+): Promise<CatalogGateResponse> {
+  return await invoke<CatalogGateResponse>("gate_catalog_in_project", {
     catalogPath,
   });
 }
@@ -289,12 +307,42 @@ export async function pickProjectFolder(): Promise<string | null> {
   return null;
 }
 
-// ── M4.3c — Settings view mutation wrappers ───────────────────────────────────
+/// Pick a folder to recursively scan for catalogs to add to the project.
+export async function pickCatalogFolder(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+/// Pick a destination folder for a batch remainder export.
+export async function pickRemainderOutputFolder(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+// ── Settings view mutation wrappers ───────────────────────────────────────────
 
 export async function addCatalogToProject(
   entry: CatalogEntry,
 ): Promise<ProjectOpenResponse> {
   return await invoke<ProjectOpenResponse>("add_catalog_to_project", { entry });
+}
+
+/// Recursively scan `folder` for `.ts`/`.po`/`.json` catalogs and add each new
+/// one to the project, inferring locale from the filename. Persists once.
+export async function addCatalogsFromFolder(
+  folder: string,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("add_catalogs_from_folder", {
+    folder,
+  });
 }
 
 export async function removeCatalogFromProject(
@@ -362,7 +410,7 @@ export async function pickCatalogFileForProject(): Promise<string | null> {
   return null;
 }
 
-// ── M4.3d — Quality view wrappers ─────────────────────────────────────────────
+// ── Quality view wrappers ─────────────────────────────────────────────────────
 
 /** Filter shape for listCorrectionsInProject. All fields optional (AND semantics). */
 export interface ListCorrectionsFilter {
@@ -396,7 +444,7 @@ export async function listCuratedInProject(): Promise<CuratedExample[]> {
   return await invoke<CuratedExample[]>("list_curated_in_project");
 }
 
-// ── M4.6.2 — Accept (clear flags, mark Reviewed) ─────────────────────────────
+// ── Accept (clear flags, mark Reviewed) ───────────────────────────────────────
 
 /// Mark the unit as reviewed: clears model flags + flag_notes in memory and
 /// appends a `Reviewed` event to `review.jsonl`. Returns the updated unit.
@@ -407,7 +455,7 @@ export async function acceptUnitInProject(
   return await invoke<Unit>("accept_unit_in_project", { catalogPath, unitId });
 }
 
-// ── M4.2c.2 — bulk translate with cancellation ──────────────────────────────
+// ── Bulk translate with cancellation ────────────────────────────────────────
 
 /// Start a background bulk translation of in-scope units in `catalogPath`.
 ///
@@ -447,9 +495,9 @@ export async function cancelTranslation(jobId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_translation", { jobId });
 }
 
-// ── M4.7 — Project-wide review queue ─────────────────────────────────────────
+// ── Project-wide review queue ─────────────────────────────────────────────────
 
-// ── M4.9 — Quality eval wrappers ─────────────────────────────────────────────
+// ── Quality eval wrappers ─────────────────────────────────────────────────────
 
 /// Start a background evaluation run over all curated examples in the project.
 ///
@@ -476,7 +524,7 @@ export async function cancelEvaluation(jobId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_translation", { jobId });
 }
 
-// ── M4.10 — Tuning bundle wrappers ───────────────────────────────────────────
+// ── Tuning bundle wrappers ────────────────────────────────────────────────────
 
 /// Export a tuning bundle to `.i18n-harness/tuning/<timestamp>/`.
 ///
@@ -513,4 +561,129 @@ export async function listTuningBundlesInProject(): Promise<
 /// side effect (same as `openCatalogInProject`, but without returning the catalog).
 export async function scanProjectReviewState(): Promise<ReviewQueueResponse> {
   return await invoke<ReviewQueueResponse>("scan_project_review_state");
+}
+
+// ── Reference reuse / remainder split / merge wrappers ───────────────────────
+
+/// Reuse expert translations from reference catalogs into a project catalog by
+/// exact unit-id match. Runs synchronously and locally (no model, no network).
+///
+/// When `referencePaths` is omitted the manifest's references matching the base
+/// catalog's locale are used (in declaration / priority order); pass an explicit
+/// list to override that selection ad-hoc.
+///
+/// On success the in-memory catalog entry for `catalogPath` is refreshed
+/// server-side, so re-open / re-list the catalog to pull the copied
+/// translations. Review-status events are persisted for conflicts (`conflict`,
+/// with the candidate list stored as the review note so it survives a reopen)
+/// and copied-needs-review units (`needs-review`).
+export async function reuseReferencesInProject(
+  catalogPath: string,
+  referencePaths?: string[] | null,
+): Promise<ReuseReport> {
+  return await invoke<ReuseReport>("reuse_references_in_project", {
+    catalogPath,
+    referencePaths: referencePaths ?? null,
+  });
+}
+
+/// Carve a remainder subset of `catalogPath` into `outPath`, keeping only the
+/// untranslated leftovers.
+///
+/// Pass `onlyIds` (e.g. the reuse report's remaining ids) to keep an exact set;
+/// omit it to keep the catalog's writable-untranslated units (standalone split).
+export async function splitRemainder(
+  catalogPath: string,
+  outPath: string,
+  onlyIds?: string[] | null,
+): Promise<SplitReport> {
+  return await invoke<SplitReport>("split_remainder", {
+    catalogPath,
+    outPath,
+    onlyIds: onlyIds ?? null,
+  });
+}
+
+/// Carve a remainder for every non-reference Qt catalog in the project into
+/// `outDir`, one `<base>.remainder.ts` per catalog. Fully-translated catalogs
+/// are skipped and reported in the response.
+export async function splitAllRemainders(
+  outDir: string,
+): Promise<BatchSplitReport> {
+  return await invoke<BatchSplitReport>("split_all_remainders", { outDir });
+}
+
+/// Merge a translated remainder back into its base, writing the result to
+/// `outPath`.
+///
+/// Rejects with an error string that names the offending unit ids when the merge
+/// guards fail (remainder contains ids not in the base, or an id is finished in
+/// both halves) so the UI can show which units broke the merge.
+export async function mergeCatalogs(
+  basePath: string,
+  withPath: string,
+  outPath: string,
+): Promise<MergeReport> {
+  return await invoke<MergeReport>("merge_catalogs", {
+    basePath,
+    withPath,
+    outPath,
+  });
+}
+
+/// Declare a reference catalog in the project manifest and persist it.
+/// Errors if the path already exists in the references list or the file is not
+/// found on disk. Returns a fresh project response so the UI can re-render.
+export async function addProjectReference(
+  entry: ReferenceEntry,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("add_project_reference", { entry });
+}
+
+/// Remove the reference at `path` (manifest-relative) from the project manifest
+/// and persist it. Idempotent — succeeds whether or not an entry matched.
+export async function removeProjectReference(
+  path: string,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("remove_project_reference", {
+    path,
+  });
+}
+
+/// Pick one or more Qt Linguist `.ts` reference files (ad-hoc reuse / manifest
+/// declaration). Returns absolute paths, or null when the dialog was dismissed.
+export async function pickReferenceFiles(): Promise<string[] | null> {
+  const selected = await openDialog({
+    multiple: true,
+    directory: false,
+    filters: [{ name: "Qt Linguist (.ts)", extensions: ["ts"] }],
+  });
+  if (Array.isArray(selected)) return selected;
+  if (typeof selected === "string") return [selected];
+  return null;
+}
+
+/// Pick a single translated-remainder `.ts` file to merge back into a base.
+export async function pickRemainderFile(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Qt Linguist (.ts)", extensions: ["ts"] }],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+/// Save-dialog for a remainder / merged-output `.ts` path. `defaultName` seeds
+/// the suggested filename (e.g. `app_de.remainder.ts`).
+export async function pickTsSaveLocation(
+  title: string,
+  defaultName: string,
+): Promise<string | null> {
+  const selected = await saveDialog({
+    title,
+    defaultPath: defaultName,
+    filters: [{ name: "Qt Linguist (.ts)", extensions: ["ts"] }],
+  });
+  return selected ?? null;
 }

@@ -50,6 +50,10 @@ pub struct ProjectManifest {
     /// `[[catalogs]]` array — registered catalog files.
     #[serde(default)]
     pub catalogs: Vec<CatalogEntry>,
+    /// `[[references]]` array — expert-translated catalogs that may be used as
+    /// translation-memory sources. Absent in older manifests; defaults to empty.
+    #[serde(default)]
+    pub references: Vec<ReferenceEntry>,
     /// `[glossary]` table — optional glossary config.
     pub glossary: Option<GlossaryConfig>,
     /// `[backend]` table — backend selection and options.
@@ -117,6 +121,21 @@ pub struct CatalogEntry {
     /// Declared format of the catalog.
     pub format: CatalogFormat,
     /// Locale id this catalog serves (e.g. `"de_DE"`).
+    pub locale: String,
+}
+
+/// One entry in the `[[references]]` array — an expert-translated catalog
+/// whose translations may be reused into other catalogs of the same locale.
+///
+/// References are read-only at runtime; the harness never writes back to them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceEntry {
+    /// Path to the reference catalog file, relative to the project root.
+    pub path: PathBuf,
+    /// Declared format of the reference catalog.
+    pub format: CatalogFormat,
+    /// Locale id this reference serves (e.g. `"de_DE"`).
     pub locale: String,
 }
 
@@ -373,5 +392,76 @@ name = "test"
             matches!(err, ProjectError::MissingRequiredField { ref field } if field == "project.schema"),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn references_round_trips_through_from_toml() {
+        let toml = r#"
+[project]
+name = "test"
+schema = 1
+
+[[references]]
+path = "expert/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+
+[[references]]
+path = "expert/app_es.po"
+format = "gettext-po"
+locale = "es_ES"
+"#;
+        let (manifest, _) = ProjectManifest::from_toml(toml).expect("parse");
+        assert_eq!(manifest.references.len(), 2);
+        assert_eq!(
+            manifest.references[0].path,
+            PathBuf::from("expert/app_de.ts")
+        );
+        assert_eq!(manifest.references[0].format, CatalogFormat::QtTs);
+        assert_eq!(manifest.references[0].locale, "de_DE");
+        assert_eq!(manifest.references[1].format, CatalogFormat::GettextPo);
+    }
+
+    #[test]
+    fn manifest_without_references_defaults_to_empty() {
+        let toml = r#"
+[project]
+name = "test"
+schema = 1
+
+[[catalogs]]
+path = "translations/app_de.ts"
+format = "qt-ts"
+locale = "de_DE"
+"#;
+        let (manifest, _) = ProjectManifest::from_toml(toml).expect("parse");
+        assert!(
+            manifest.references.is_empty(),
+            "references should default to empty when absent"
+        );
+    }
+
+    #[test]
+    fn old_style_manifest_unaffected_by_references_field() {
+        // A manifest with no [[references]] section parses cleanly and has
+        // catalogs, locales, and other fields intact.
+        let toml = r#"
+[project]
+name = "legacy"
+schema = 1
+
+[locales.de_DE]
+register = "formal"
+
+[[catalogs]]
+path = "app.ts"
+format = "qt-ts"
+locale = "de_DE"
+"#;
+        let (manifest, warnings) = ProjectManifest::from_toml(toml).expect("parse");
+        assert!(manifest.references.is_empty());
+        assert_eq!(manifest.catalogs.len(), 1);
+        assert!(manifest.locales.contains_key("de_DE"));
+        assert!(warnings.is_empty());
     }
 }

@@ -23,7 +23,8 @@ use crate::fs::{ProjectFs, RealFs};
 use crate::locale::ResolvedLocale;
 use crate::manifest::{
     BackendConfig, BackendKind, CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig,
-    PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, RegisterOverride, SCHEMA_VERSION,
+    PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, ReferenceEntry, RegisterOverride,
+    SCHEMA_VERSION,
 };
 use crate::memory::{
     Correction, CorrectionFilter, CorrectionId, CorrectionStore, CuratedExample, CuratedSet,
@@ -51,6 +52,9 @@ pub struct ProjectSummary {
     pub locales: Vec<String>,
     /// All registered catalogs.
     pub catalogs: Vec<CatalogRef>,
+    /// All declared `[[references]]` entries (expert catalogs reused into
+    /// same-locale catalogs). Empty when none are declared.
+    pub references: Vec<ReferenceRef>,
     /// Absolute path to the glossary file, if declared.
     pub glossary_path: Option<String>,
     /// Default backend config, if declared.
@@ -85,12 +89,30 @@ pub enum CatalogStatus {
     Ok,
     /// File is missing on disk. `Project::open` returns `CatalogNotFound` for
     /// this case; this variant is reserved for the discovery / draft path
-    /// (M4.1c) where a missing catalog is a soft warning, not a hard error.
+    /// discovery path where a missing catalog is a soft warning, not a hard error.
     Missing,
     /// File is present but the content sniffer disagrees with the declared
-    /// format. Not produced in M4.1b (the sniffer lands in M4.1c); the
+    /// format. Not yet produced (the sniffer is not yet wired in); the
     /// variant is defined so the error enum compiles.
     FormatMismatch,
+}
+
+/// One reference entry as resolved to absolute paths.
+///
+/// Parallel to [`CatalogRef`] but for `[[references]]` entries. Paths are
+/// `String` (not `PathBuf`) for TS-interop consistency with [`ProjectSummary`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ReferenceRef {
+    /// Absolute path to the reference catalog file on disk.
+    pub absolute_path: String,
+    /// Path as stored in the manifest (project-relative).
+    pub manifest_path: String,
+    /// Declared format.
+    pub format: CatalogFormat,
+    /// Locale id this reference serves.
+    pub locale: String,
+    /// Health of the reference entry as determined at open time.
+    pub status: CatalogStatus,
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────
@@ -119,6 +141,7 @@ pub struct Project {
     glossary: Option<Glossary>,
     paths: ProjectPaths,
     catalogs: Vec<CatalogRef>,
+    references: Vec<ReferenceRef>,
     /// Lazy correction store — the file is not opened until first use.
     correction_store: CorrectionStore,
     /// In-memory curated set. Reloaded on every promote/un-curate.
@@ -140,6 +163,7 @@ impl std::fmt::Debug for Project {
             .field("manifest", &self.manifest)
             .field("paths", &self.paths)
             .field("catalogs", &self.catalogs)
+            .field("references", &self.references)
             .finish_non_exhaustive()
     }
 }
@@ -246,6 +270,10 @@ impl Project {
         // Validate every catalog entry.
         let catalogs = build_catalog_refs(&manifest, &paths, &*fs, &mut warnings)?;
 
+        // Validate every reference entry (soft — missing or mismatched files
+        // emit warnings, not errors, so the project still opens).
+        let references = build_reference_refs(&manifest, &paths, &*fs, &mut warnings);
+
         // Emit warnings for locale ids that don't resolve.
         for locale_id in manifest.locales.keys() {
             if Locale::by_id(locale_id).is_none() {
@@ -297,6 +325,7 @@ impl Project {
             glossary,
             paths,
             catalogs,
+            references,
             correction_store,
             curated,
             review_store,
@@ -326,6 +355,11 @@ impl Project {
         self.catalogs
             .iter()
             .find(|c| Path::new(&c.manifest_path) == path || Path::new(&c.absolute_path) == path)
+    }
+
+    /// Borrow the reference index (no I/O; pre-resolved on open).
+    pub fn references(&self) -> &[ReferenceRef] {
+        &self.references
     }
 
     /// All resolved paths under the project.
@@ -370,6 +404,7 @@ impl Project {
             schema: self.manifest.project.schema,
             locales: self.locale_ids().map(str::to_owned).collect(),
             catalogs: self.catalogs.clone(),
+            references: self.references.clone(),
             glossary_path: self.paths.glossary().map(|p| p.display().to_string()),
             backend: self.manifest.backends.default.clone(),
             state_dir: self.paths.state_dir().display().to_string(),
@@ -452,6 +487,97 @@ impl Project {
         let before = aot.len();
         // toml_edit ArrayOfTables does not have a retain method; we rebuild by
         // collecting the indices to remove, then removing in reverse order.
+        let to_remove: Vec<usize> = aot
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                t.get("path")
+                    .and_then(Item::as_str)
+                    .map(|p| p == path_str)
+                    .unwrap_or(false)
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        for idx in to_remove.iter().rev() {
+            aot.remove(*idx);
+        }
+
+        let removed = aot.len() < before;
+        if removed {
+            self.sync_manifest()?;
+        }
+        Ok(removed)
+    }
+
+    /// Append a new entry to `[[references]]`.
+    ///
+    /// Preserves all existing comments and blank lines around the array.
+    /// Uses canonical key order: `path`, `format`, `locale`.
+    ///
+    /// # Errors
+    ///
+    /// - `DuplicateCatalogPath` if `entry.path` already appears in the
+    ///   references list.
+    /// - `CatalogNotFound` if the reference file does not exist on disk.
+    pub fn add_reference(&mut self, entry: ReferenceEntry) -> Result<(), ProjectError> {
+        for existing in &self.manifest.references {
+            if existing.path == entry.path {
+                return Err(ProjectError::DuplicateCatalogPath {
+                    path: self.paths.catalog(&entry.path),
+                });
+            }
+        }
+
+        let abs = self.paths.catalog(&entry.path);
+        if !self.fs.exists(&abs) {
+            return Err(ProjectError::CatalogNotFound { path: abs });
+        }
+
+        let mut new_table = Table::new();
+        new_table.insert(
+            "path",
+            Item::Value(Value::String(toml_edit::Formatted::new(
+                entry.path.display().to_string(),
+            ))),
+        );
+        new_table.insert(
+            "format",
+            Item::Value(Value::String(toml_edit::Formatted::new(
+                catalog_format_str(entry.format).to_owned(),
+            ))),
+        );
+        new_table.insert(
+            "locale",
+            Item::Value(Value::String(toml_edit::Formatted::new(
+                entry.locale.clone(),
+            ))),
+        );
+
+        let doc = &mut self.doc;
+        let references_item = doc
+            .entry("references")
+            .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
+        if let Some(aot) = references_item.as_array_of_tables_mut() {
+            aot.push(new_table);
+        }
+
+        self.sync_manifest()
+    }
+
+    /// Remove the reference whose manifest-relative path matches `path`.
+    ///
+    /// Idempotent — returns `Ok(false)` if no entry matched, `Ok(true)` if
+    /// one was removed.
+    pub fn remove_reference(&mut self, path: &Path) -> Result<bool, ProjectError> {
+        let path_str = path.display().to_string();
+
+        let references_item = self.doc.get_mut("references");
+        let Some(Item::ArrayOfTables(aot)) = references_item else {
+            return Ok(false);
+        };
+
+        let before = aot.len();
         let to_remove: Vec<usize> = aot
             .iter()
             .enumerate()
@@ -931,7 +1057,7 @@ impl Project {
     /// for every unit in `units` based on the current fold and each unit's
     /// `source_hash`.
     ///
-    /// This is the load-bearing helper for the M4.2 Tauri layer — every
+    /// This is the load-bearing helper for the Tauri layer — every
     /// catalog-open call site routes the extracted units through it before
     /// handing them to the UI.
     ///
@@ -993,6 +1119,10 @@ impl Project {
         let mut dummy_warnings = Vec::new();
         self.catalogs =
             build_catalog_refs_no_check(&self.manifest, &self.paths, &mut dummy_warnings);
+
+        // Rebuild reference refs from the new manifest (same no-check policy).
+        self.references =
+            build_reference_refs_no_check(&self.manifest, &self.paths, &mut dummy_warnings);
 
         Ok(())
     }
@@ -1121,6 +1251,91 @@ fn build_catalog_refs_no_check(
         .collect()
 }
 
+/// Build the reference index, validating existence and format on disk.
+///
+/// Unlike `build_catalog_refs`, a missing or mismatched file emits a
+/// [`ProjectWarning`] rather than a hard error — references are read-only
+/// supplemental data and a broken path should not prevent the project from
+/// opening.
+fn build_reference_refs(
+    manifest: &ProjectManifest,
+    paths: &ProjectPaths,
+    fs: &dyn ProjectFs,
+    warnings: &mut Vec<ProjectWarning>,
+) -> Vec<ReferenceRef> {
+    use crate::discovery::sniff::{confirms_format, guess_format};
+
+    let mut refs = Vec::with_capacity(manifest.references.len());
+
+    for entry in &manifest.references {
+        let abs = paths.catalog(&entry.path);
+
+        if !fs.exists(&abs) {
+            warnings.push(ProjectWarning::ReferenceNotFound {
+                path: entry.path.clone(),
+            });
+            refs.push(ReferenceRef {
+                absolute_path: abs.display().to_string(),
+                manifest_path: entry.path.display().to_string(),
+                format: entry.format,
+                locale: entry.locale.clone(),
+                status: CatalogStatus::Missing,
+            });
+            continue;
+        }
+
+        let status = match fs.read(&abs) {
+            Ok(bytes) => {
+                let prefix = &bytes[..bytes.len().min(64 * 1024)];
+                if confirms_format(prefix, entry.format) {
+                    CatalogStatus::Ok
+                } else {
+                    let sniffed = guess_format(prefix);
+                    warnings.push(ProjectWarning::ReferenceFormatMismatch {
+                        path: abs.clone(),
+                        declared: entry.format,
+                        sniffed,
+                    });
+                    CatalogStatus::FormatMismatch
+                }
+            }
+            Err(_) => CatalogStatus::Ok, // I/O error on sniff: accept, surface later on read
+        };
+
+        refs.push(ReferenceRef {
+            absolute_path: abs.display().to_string(),
+            manifest_path: entry.path.display().to_string(),
+            format: entry.format,
+            locale: entry.locale.clone(),
+            status,
+        });
+    }
+
+    refs
+}
+
+/// Build the reference index without disk-existence checks (used after mutations).
+fn build_reference_refs_no_check(
+    manifest: &ProjectManifest,
+    paths: &ProjectPaths,
+    _warnings: &mut Vec<ProjectWarning>,
+) -> Vec<ReferenceRef> {
+    manifest
+        .references
+        .iter()
+        .map(|entry| {
+            let abs = paths.catalog(&entry.path);
+            ReferenceRef {
+                absolute_path: abs.display().to_string(),
+                manifest_path: entry.path.display().to_string(),
+                format: entry.format,
+                locale: entry.locale.clone(),
+                status: CatalogStatus::Ok,
+            }
+        })
+        .collect()
+}
+
 fn catalog_format_str(f: CatalogFormat) -> &'static str {
     match f {
         CatalogFormat::QtTs => "qt-ts",
@@ -1166,6 +1381,7 @@ pub(crate) fn manifest_from_parts(name: &str) -> ProjectManifest {
         },
         locales: Default::default(),
         catalogs: Default::default(),
+        references: Default::default(),
         glossary: None,
         backends: Default::default(),
         prompts: None,

@@ -5,8 +5,7 @@
 //! This is the format used to:
 //!
 //! - persist batches between runs (resumability),
-//! - hand units to an out-of-process agent (`export-batch` / `import-batch`
-//!   in M4),
+//! - hand units to an out-of-process agent (`export-batch` / `import-batch`),
 //! - and snapshot a catalog into a textual form a human can `diff`.
 //!
 //! Per-line schema versioning (rather than file-level) lets a future binary

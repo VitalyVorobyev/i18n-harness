@@ -3,7 +3,7 @@
 // schema is stable, and a hand-written file documents the wire format
 // in one place.
 //
-// M4.2 project-mode additions are grouped at the bottom of this file.
+// Project-mode additions are grouped at the bottom of this file.
 
 export type UnitId = string;
 
@@ -52,10 +52,10 @@ export interface Unit {
   flags: AnyFlag[];
   provenance: Provenance;
   state: UnitState;
-  // Added by M4.1.5 — may be absent on older JSONL.
+  // May be absent on older JSONL.
   review_status?: ReviewStatus | null;
   source_hash?: string | null;
-  // Added by M4.6.1 — may be absent when the v1 backend was used.
+  // May be absent when the v1 backend was used.
   confidence?: number | null;
   // flag_notes is a map from kebab-case flag name to the model's note.
   flag_notes?: Record<AnyFlag, string> | null;
@@ -156,12 +156,33 @@ export interface TranslateResult {
   report: GateReport;
 }
 
+/** Per-catalog state + severity breakdown from {@link CatalogGateResponse}. */
+export interface CatalogGateStats {
+  total: number;
+  finished: number;
+  proposed: number;
+  untranslated: number;
+  vanished_obsolete: number;
+  /** Units with at least one hard finding. */
+  hard: number;
+  /** Units with findings but no hard finding (soft/semantic only). */
+  soft: number;
+}
+
+/** Result of gating a whole open catalog (inspector reasons + per-file stats). */
+export interface CatalogGateResponse {
+  path: string;
+  /** Reports for flagged units only; clean units are omitted. */
+  reports: GateReport[];
+  stats: CatalogGateStats;
+}
+
 const HARD_FLAGS = new Set([
   "placeholder-mismatch",
   "plural-arity-mismatch",
   "icu-parse-error",
   "empty-target-when-finished",
-  // M4.6.1: backend returned a non-parseable response (hard: no translation to ship).
+  // Backend returned a non-parseable response (hard: no translation to ship).
   "backend-malformed-response",
 ]);
 
@@ -178,7 +199,7 @@ const SEMANTIC_FLAGS = new Set([
   "idiom",
   "insufficient-context",
   "low-confidence",
-  // M4.6.1: new semantic flag variants.
+  // New semantic flag variants.
   "brand-term",
   "tone-mismatch",
 ]);
@@ -271,7 +292,7 @@ function assertNever(x: never): never {
   throw new Error(`Unhandled ModelFlag variant: ${String(x)}`);
 }
 
-// ── M4.2 project-mode types ───────────────────────────────────────────────────
+// ── Project-mode types ────────────────────────────────────────────────────────
 
 // ReviewStatus mirrors crates/core/src/review.rs — serde(rename_all = "kebab-case").
 export type ReviewStatus =
@@ -338,6 +359,16 @@ export interface CatalogRef {
   status: CatalogStatus;
 }
 
+// ReferenceRef mirrors crates/project/src/project.rs.
+// Parallel to CatalogRef but for [[references]] entries. Field names snake_case.
+export interface ReferenceRef {
+  absolute_path: string;
+  manifest_path: string;
+  format: CatalogFormat;
+  locale: string;
+  status: CatalogStatus;
+}
+
 // ProjectSummary mirrors crates/project/src/project.rs.
 // All path fields are String (not PathBuf), already resolved.
 export interface ProjectSummary {
@@ -346,6 +377,7 @@ export interface ProjectSummary {
   schema: number;
   locales: string[];
   catalogs: CatalogRef[];
+  references: ReferenceRef[];
   glossary_path: string | null;
   backend: BackendConfig | null;
   state_dir: string;
@@ -391,7 +423,7 @@ export interface DraftManifest {
   backend: BackendConfig | null;
 }
 
-// ── M4.7 — Project-wide review queue types ───────────────────────────────────
+// ── Project-wide review queue types ──────────────────────────────────────────
 
 // ReviewQueueItem mirrors the Rust struct of the same name in ui/src-tauri/src/lib.rs.
 export interface ReviewQueueItem {
@@ -413,14 +445,33 @@ export interface ReviewQueueItem {
   review_status: ReviewStatus | null;
   /** Kebab-case unit state. */
   state: UnitState;
+  /**
+   * Reviewer note from the unit's last review event, if any. For `conflict`
+   * units this carries the JSON-encoded ReferenceConflictCandidate[] so the
+   * conflict view survives a project reopen.
+   */
+  reviewer_note: string | null;
+}
+
+// CatalogStateCounts mirrors the Rust struct of the same name — a per-catalog
+// unit-state tally computed during the review scan.
+export interface CatalogStateCounts {
+  total: number;
+  finished: number;
+  proposed: number;
+  untranslated: number;
+  vanished_obsolete: number;
+  needs_review: number;
 }
 
 // ReviewQueueResponse mirrors the Rust struct of the same name.
 export interface ReviewQueueResponse {
   /** Total units that need review across all catalogs. */
   total_count: number;
-  /** Per-catalog unit count, keyed by absolute catalog path. */
+  /** Per-catalog needs-review unit count, keyed by absolute catalog path. */
   by_catalog: Record<string, number>;
+  /** Per-catalog unit-state tally, keyed by absolute catalog path. */
+  stats_by_catalog: Record<string, CatalogStateCounts>;
   /** All items, sorted by catalog path then unit id. */
   items: ReviewQueueItem[];
 }
@@ -467,7 +518,7 @@ export interface CuratedExample {
   correction: Correction | null;
 }
 
-// ── M4.9 — Quality eval types ────────────────────────────────────────────────
+// ── Quality eval types ────────────────────────────────────────────────────────
 
 // LocaleScore mirrors crates/project/src/evaluation.rs.
 export interface LocaleScore {
@@ -514,7 +565,7 @@ export interface EvaluationTerminalPayload {
   run: EvaluationRun | null;
 }
 
-// ── M4.10 — Tuning bundle types ───────────────────────────────────────────────
+// ── Tuning bundle types ───────────────────────────────────────────────────────
 
 // ExportTuningBundleResponse mirrors ui/src-tauri/src/lib.rs ExportTuningBundleResponse.
 export interface ExportTuningBundleResponse {
@@ -530,7 +581,100 @@ export interface ExportTuningBundleResponse {
   prompt_template_version: string;
 }
 
-// ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
+// ── Reference reuse / remainder split / merge types ──────────────────────────
+
+// ReferenceEntry mirrors crates/project/src/manifest.rs — the input shape for
+// addProjectReference. path is PathBuf in Rust, serialized as a string.
+export interface ReferenceEntry {
+  path: string;
+  format: CatalogFormat;
+  locale: string;
+}
+
+// ReferenceConflictCandidateDto mirrors ui/src-tauri/src/dto/reuse.rs.
+// `text` joins plural CLDR forms with the unit separator U+001F; split on it
+// when `is_plural` is true.
+export interface ReferenceConflictCandidate {
+  /** Absolute path of the reference catalog this candidate came from. */
+  reference: string;
+  /** Other references that supplied this exact same translation. */
+  also_from: string[];
+  /** Whether `text` is a plural target (forms joined with U+001F) or singular. */
+  is_plural: boolean;
+  /** Candidate translation; plural forms joined with U+001F. */
+  text: string;
+}
+
+// ReferenceConflictDto mirrors ui/src-tauri/src/dto/reuse.rs.
+export interface ReferenceConflict {
+  /** The base unit id where references disagreed. */
+  unit_id: string;
+  /** Distinct candidate translations, in declaration order. */
+  candidates: ReferenceConflictCandidate[];
+}
+
+// ReuseReportDto mirrors ui/src-tauri/src/dto/reuse.rs.
+// The in-memory catalog entry is refreshed server-side before this returns;
+// re-open / re-list the catalog to pull the post-reuse units.
+export interface ReuseReport {
+  /** Absolute path of the base catalog the reuse was applied to. */
+  catalog_path: string;
+  /** Absolute paths of the reference catalogs consulted, in priority order. */
+  references: string[];
+  /** Units promoted to Finished (agreed candidate, gate-clean, complete). */
+  copied_finished: number;
+  /** Units that received an agreed candidate but kept at Proposed for review. */
+  copied_needs_review: number;
+  /** Units where references disagreed; nothing copied. Detail in `conflicts`. */
+  conflict_count: number;
+  /** Writable units with no candidate — feed a subsequent split. */
+  remaining_count: number;
+  /**
+   * The exact remaining-set ids (catalog order), conflicts excluded. Pass these
+   * to `splitRemainder` as `onlyIds` so an Export Remainder right after a reuse
+   * pass carves out precisely the leftovers and never the conflicted units.
+   */
+  remaining_ids: string[];
+  /** Full per-unit conflict detail. */
+  conflicts: ReferenceConflict[];
+}
+
+// SplitReportDto mirrors ui/src-tauri/src/dto/reuse.rs.
+export interface SplitReport {
+  /** Absolute path of the base catalog the subset was carved from. */
+  base_path: string;
+  /** Absolute path the remainder subset was written to. */
+  out_path: string;
+  /** Number of units written into the remainder. */
+  kept_count: number;
+}
+
+// BatchSplitReportDto mirrors ui/src-tauri/src/dto/reuse.rs — one batch run
+// over every non-reference Qt catalog in the project.
+export interface BatchSplitReport {
+  /** One entry per catalog that had untranslated units and was written. */
+  written: SplitReport[];
+  /** Manifest-relative paths of catalogs skipped (fully translated). */
+  skipped: string[];
+}
+
+// MergeReportDto mirrors ui/src-tauri/src/dto/reuse.rs.
+// Overlap / stray-id guard failures come back as a rejected promise (Err
+// string) that names the offending ids, not in this struct.
+export interface MergeReport {
+  /** Absolute path of the base catalog the remainder was folded into. */
+  base_path: string;
+  /** Absolute path of the translated remainder that was merged. */
+  with_path: string;
+  /** Absolute path the merged result was written to. */
+  out_path: string;
+  /** Remainder units folded into the base as override translations. */
+  merged: number;
+  /** Of `merged`, how many carried a complete (finished-ready) target. */
+  merged_complete: number;
+}
+
+// ── Bulk translate with cancellation ─────────────────────────────────────────
 
 // BatchScope mirrors ui/src-tauri/src/lib.rs. Kebab-case enum on the wire.
 export type BatchScope = "untranslated" | "untranslated-and-proposed";

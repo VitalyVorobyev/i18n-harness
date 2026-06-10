@@ -42,11 +42,14 @@ built for translators, not developers. `i18n-harness` flips both.
 
 ## Status
 
-**Pre-alpha.** Core, multi-catalog project mode, all three target
-catalog formats (Qt `.ts`, PO, ICU-JSON), the validation gate, the
-local Ollama and `openai-compatible` backends, the Tauri desktop UI,
-quality evaluation, and the two-phase agent translation CLI are all
-in. UI integration of the agent flow is the next visible step. See
+**Pre-alpha.** Core, multi-catalog project mode (with reference
+catalogs), all three target catalog formats (Qt `.ts`, PO, ICU-JSON),
+the validation gate, the local Ollama and `openai-compatible` backends,
+the Tauri desktop UI, quality evaluation, the two-phase agent
+translation CLI, and deterministic reference reuse / remainder split /
+merge for Qt (copy expert translations by exact unit-id match, carve
+the leftover, merge it back — no model) are all in. UI integration of
+the agent flow is the next visible step. See
 [`docs/roadmap-product.md`](docs/roadmap-product.md) for the
 translator-facing milestone log and
 [`docs/initial_design.md`](docs/initial_design.md) for the full design.
@@ -112,9 +115,12 @@ i18n-harness/
 │   ├── glossary/       # per-project TOML glossary
 │   ├── backend/        # TranslationBackend trait + impls
 │   ├── catalog/        # CatalogFormat trait + PO/ICU-JSON serializers
-│   ├── adapter-qt/     # Qt .ts adapter (reference adapter)
+│   ├── adapter-qt/     # Qt .ts adapter (reference adapter) + subset writer
 │   ├── adapter-react/  # React adapter over catalog serializers
+│   ├── project/        # project manifest (multi-catalog + references), state
+│   ├── reuse/          # reference reuse / remainder split / merge (Qt, no model)
 │   └── cli/            # `harness` binary
+├── ui/                 # Tauri 2 + Vite + React desktop shell
 ├── docs/               # design + plan
 ├── fixtures/           # round-trip + gate test inputs
 └── .claude/            # subagents + project skills

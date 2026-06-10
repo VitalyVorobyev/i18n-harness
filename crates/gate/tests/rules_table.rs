@@ -295,7 +295,7 @@ fn gate_rule_table_drives_every_check() {
             name: "length-warn/positive/long-german",
             unit: make_singular(
                 "msg::long",
-                "Save",
+                "Open file",
                 Some("Speichern und Sicherheitskopie anlegen wirklich jetzt"),
                 UnitState::Proposed,
             ),
@@ -312,6 +312,20 @@ fn gate_rule_table_drives_every_check() {
                 UnitState::Proposed,
             ),
             locale: de_de(),
+            expected: &[],
+            forbidden: &[Flag::LengthWarn],
+        },
+        Fixture {
+            // Short sources (< 8 chars) are exempt: one extra character in
+            // "Red" → "Rojo" is 33% ratio noise, not a runaway translation.
+            name: "length-warn/negative/short-source-exempt",
+            unit: make_singular(
+                "CColorCalibrationSupplierGuiComp::Red",
+                "Red",
+                Some("Rojo"),
+                UnitState::Proposed,
+            ),
+            locale: es_es(),
             expected: &[],
             forbidden: &[Flag::LengthWarn],
         },
@@ -515,6 +529,21 @@ fn gate_rule_table_drives_every_check() {
                 // Even a stray `<` in the target shouldn't flag when source
                 // had no tags — see comment in `markup_tag_check`.
                 Some("Einfache Nachricht mit 1 < 2"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[],
+            forbidden: &[Flag::MarkupTagMismatch],
+        },
+        Fixture {
+            name: "markup-tag/negative/literal-angle-bracket-label",
+            unit: make_singular(
+                "msg::literal-label",
+                // `<No ID>` is a literal UI label, not markup: `no` is not a
+                // recognized tag name, so translating it to `<sin ID>` must
+                // not register as a tag mismatch.
+                "<No ID>",
+                Some("<sin ID>"),
                 UnitState::Proposed,
             ),
             locale: de_de(),

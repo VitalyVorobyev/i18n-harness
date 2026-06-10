@@ -21,7 +21,7 @@ use crate::unit::Unit;
 ///
 /// Chosen for Gemma 4 E4B at 128K context with glossary injection: 32 units
 /// of ~20 tokens each = ~640 tokens, plus prompt + glossary block = comfortable
-/// margin. Override via CLI flag once the M2 quality metric tells us what
+/// margin. Override via CLI flag once quality metrics tell us what
 /// works.
 pub const DEFAULT_BATCH_SIZE: usize = 32;
 
@@ -68,7 +68,7 @@ impl BatchKey {
 ///   is a default, not a contract.
 /// - That all units come from the same catalog file. In practice they do
 ///   (the resume key references a single file hash), but the type does not
-///   enforce it — that lets the M4 export-batch path pack units from
+///   enforce it — that lets the export-batch path pack units from
 ///   multiple files into one off-line batch without redesigning this type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Batch {

@@ -13,7 +13,7 @@
 //!   `serde_yaml::from_str` overhead on every CLI invocation.
 //! - **No new dependency.** The crate stays free of `serde_yaml` / `serde`,
 //!   keeping the dep graph minimal.
-//! - **The dataset is small.** Two rows now, perhaps a dozen by M4. The
+//! - **The dataset is small.** Two rows now, perhaps a dozen later. The
 //!   ergonomic argument for YAML kicks in around tens of rows with many
 //!   reviewers; we are far from that. If/when we add the full CLDR locale
 //!   list we will revisit this — the `Locale::by_id` API is the abstraction
@@ -160,7 +160,7 @@ impl Locale {
 /// - `en` — source locale. `length_warn_ratio = 1.0` because expansion is
 ///   measured *from* English, not into it. `Register::Neutral` because the
 ///   source side does not have a single formality pick.
-/// - `de_DE` — first target locale (M0–M3). German runs 30–40 % longer than
+/// - `de_DE` — first target locale. German runs 30–40 % longer than
 ///   English in UI strings; `1.4` matches the reference table in
 ///   `.claude/skills/add-locale/SKILL.md`. CLDR cardinal arity is 2
 ///   (`[one, other]`). The maintainer ships `Sie`/formal as default.

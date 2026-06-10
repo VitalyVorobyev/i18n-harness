@@ -39,14 +39,14 @@ pub enum ReviewStatus {
     /// Set when `Project::set_review_status` is called with
     /// `MachineTranslated` at the end of a successful `translate_unit` /
     /// `translate_batch` when the gate is clean and no `Flag` triggered a
-    /// review request. The bulk-translate flow in M4.8 lands units here.
+    /// review request. The bulk-translate flow lands units here.
     MachineTranslated,
 
     /// A machine translation produced flags, or a translator/reviewer
     /// explicitly requested a second look.
     ///
     /// Set when the gate or backend produced any [`crate::Flag`] of severity
-    /// Hard or Warn on the unit's MT proposal (M4.6), or the UI invokes
+    /// Hard or Warn on the unit's MT proposal, or the UI invokes
     /// `Project::set_review_status(..., NeedsReview)` explicitly.
     NeedsReview,
 
@@ -67,7 +67,7 @@ pub enum ReviewStatus {
     /// `Approved` plus "do not re-translate by machine".
     ///
     /// Set when `Project::set_review_status(..., Locked)` is called explicitly
-    /// from the UI. Bulk-translate (M4.8) skips locked units; `translate_unit`
+    /// from the UI. Bulk-translate skips locked units; `translate_unit`
     /// on a locked unit returns the existing target unchanged. Treated as
     /// `Approved` everywhere else.
     Locked,
@@ -81,7 +81,7 @@ pub enum ReviewStatus {
     /// Two or more reviewers gave the same unit contradictory edits since the
     /// last save.
     ///
-    /// Reserved for M4.x multi-reviewer extensions; for v1 the variant exists
+    /// Reserved for future multi-reviewer extensions; for v1 the variant exists
     /// in the enum but is never set automatically — leaving it in the API
     /// surface now prevents a breaking change later.
     Conflict,

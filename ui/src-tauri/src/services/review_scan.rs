@@ -8,9 +8,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use i18n_harness_core::ReviewStatus;
+use i18n_harness_core::{ReviewStatus, UnitId, UnitState};
 
-use crate::dto::project::{ReviewQueueItem, ReviewQueueResponse};
+use crate::dto::project::{CatalogStateCounts, ReviewQueueItem, ReviewQueueResponse};
 use crate::error;
 use crate::state::AppState;
 use crate::{OpenCatalogEntry, backing::extract_for_format};
@@ -30,19 +30,38 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     // Collect the list of catalog refs from the project while holding the
     // project lock; drop the lock before any I/O so we do not hold it across
     // extract calls.
-    let catalog_refs: Vec<i18n_harness_project::CatalogRef> = {
+    // Snapshot the catalog list and the folded reviewer notes under one brief
+    // project lock, then drop it before any I/O. The note map is keyed by the
+    // manifest-relative catalog path + unit id, matching the review store's
+    // fold; it carries the reference-conflict candidate JSON so the conflict
+    // view survives a reopen.
+    let (catalog_refs, review_notes): (
+        Vec<i18n_harness_project::CatalogRef>,
+        BTreeMap<(PathBuf, UnitId), String>,
+    ) = {
         let project_guard = state
             .project
             .lock()
             .map_err(error::lock_poisoned("project"))?;
         let project = project_guard.as_ref().ok_or_else(error::no_project)?;
-        project.catalogs().to_vec()
+        let refs = project.catalogs().to_vec();
+        let notes = project
+            .review_map()
+            .iter()
+            .filter_map(|((catalog, unit_id), record)| {
+                record
+                    .reviewer_note
+                    .clone()
+                    .map(|note| ((catalog.clone(), unit_id.clone()), note))
+            })
+            .collect();
+        (refs, notes)
     };
 
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // M4.4 wired gettext-po and M4.5 added icu-json; all manifest
+        // gettext-po and icu-json are both wired; all manifest
         // formats are now handled through `extract_for_format`. The guard
         // remains in case future formats land in the manifest enum before
         // their wiring is finished — surface the gap loudly rather than
@@ -121,6 +140,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
 
     let mut items: Vec<ReviewQueueItem> = Vec::new();
     let mut by_catalog: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stats_by_catalog: BTreeMap<String, CatalogStateCounts> = BTreeMap::new();
 
     // Iterate in BTreeMap order (= absolute path order) for deterministic output.
     for (abs, entry) in store.iter() {
@@ -132,8 +152,17 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
         let locale = locale_of.get(&abs_str).cloned().unwrap_or_default();
 
         let mut catalog_count: usize = 0;
+        let mut counts = CatalogStateCounts::default();
 
         for unit in entry.catalog.units() {
+            counts.total += 1;
+            match unit.state {
+                UnitState::Finished => counts.finished += 1,
+                UnitState::Proposed => counts.proposed += 1,
+                UnitState::Untranslated => counts.untranslated += 1,
+                UnitState::Vanished | UnitState::Obsolete => counts.vanished_obsolete += 1,
+            }
+
             // Serialize flags via serde to get the kebab-case strings that the
             // `#[serde(rename_all = "kebab-case")]` attribute on `Flag` produces.
             // `format!("{:?}")` would give PascalCase debug output instead.
@@ -147,11 +176,14 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 })
                 .collect();
 
-            let needs_review =
-                unit.review_status == Some(ReviewStatus::NeedsReview) || !flags.is_empty();
+            let needs_review = matches!(
+                unit.review_status,
+                Some(ReviewStatus::NeedsReview | ReviewStatus::Conflict)
+            ) || !flags.is_empty();
             if !needs_review {
                 continue;
             }
+            counts.needs_review += 1;
 
             let source_preview = truncate_preview(&unit.source, 120);
             let target_preview = extract_target_text(&unit.target, 120);
@@ -169,6 +201,10 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_else(|| "unknown".to_string());
 
+            let reviewer_note = review_notes
+                .get(&(PathBuf::from(&manifest_path), unit.id.clone()))
+                .cloned();
+
             items.push(ReviewQueueItem {
                 catalog_path: abs_str.clone(),
                 catalog_manifest_path: manifest_path.clone(),
@@ -179,13 +215,15 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 flags,
                 review_status: review_status_str,
                 state: state_str.to_string(),
+                reviewer_note,
             });
             catalog_count += 1;
         }
 
         if catalog_count > 0 {
-            by_catalog.insert(abs_str, catalog_count);
+            by_catalog.insert(abs_str.clone(), catalog_count);
         }
+        stats_by_catalog.insert(abs_str, counts);
     }
 
     // Sort: by catalog_path then unit_id (both strings, BTreeMap already gave
@@ -202,6 +240,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     Ok(ReviewQueueResponse {
         total_count,
         by_catalog,
+        stats_by_catalog,
         items,
     })
 }

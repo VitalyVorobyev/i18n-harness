@@ -1,7 +1,7 @@
 //! Round-trip integration test: every fixture under `fixtures/icu-json/` must
 //! satisfy `apply(extract(f), f.units(), out) == f` byte-for-byte.
 //!
-//! This is the M4.5 ICU-JSON contract — analogous to M0 (Qt) and M4.4 (PO).
+//! This is the ICU-JSON round-trip contract — analogous to the Qt and PO contracts.
 //! Regressions here are immediate rollback.
 
 use std::path::{Path, PathBuf};

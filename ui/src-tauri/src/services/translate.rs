@@ -50,18 +50,33 @@ pub(crate) fn unit_matches_scope(unit: &Unit, scope: BatchScope) -> bool {
 
 // ── Context resolution ───────────────────────────────────────────────────────
 
-/// Resolve `(locale, glossary)` for a project-routed translate command.
+/// Manifest-sourced Ollama overrides.
+///
+/// All fields are `None` when the manifest has no `[backend.default]` block
+/// or when the block omits that field. `build_ollama_backend` applies only
+/// the `Some` variants, leaving `OllamaBackend::new`'s env-var/built-in
+/// defaults in place for the `None` ones.
+#[cfg(feature = "ollama")]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OllamaSettings {
+    pub model: Option<String>,
+    pub host: Option<String>,
+    pub num_ctx: Option<u32>,
+}
+
+/// Resolve `(locale, glossary, OllamaSettings)` for a project-routed translate
+/// command.
 ///
 /// Holds the project lock for as short a window as possible: enough to look up
 /// the catalog's declared locale, merge it with the project's locale config,
 /// validate the declared backend kind, and clone the glossary. Drops the lock
 /// before returning. The result is used both by the single-unit translate
-/// command and by the bulk-translate worker (M4.2c.2), so the locale/glossary
-/// view stays consistent across the two paths.
+/// command and by the bulk-translate worker, so the locale/glossary view stays
+/// consistent across the two paths.
 ///
 /// Returns the workspace-resolved [`Locale`] (a `&'static` reference held by
-/// the `locales` crate, so it crosses the lock boundary trivially) and an
-/// owned [`Glossary`] clone.
+/// the `locales` crate, so it crosses the lock boundary trivially), an owned
+/// [`Glossary`] clone, and the manifest-derived [`OllamaSettings`].
 ///
 /// # Errors
 ///
@@ -76,7 +91,7 @@ pub(crate) fn unit_matches_scope(unit: &Unit, scope: BatchScope) -> bool {
 pub(crate) fn resolve_project_translate_context(
     state: &tauri::State<'_, crate::AppState>,
     abs: &Path,
-) -> Result<(&'static Locale, Option<Glossary>), String> {
+) -> Result<(&'static Locale, Option<Glossary>, OllamaSettings), String> {
     use i18n_harness_project::BackendKind;
 
     let project_guard = state
@@ -98,17 +113,49 @@ pub(crate) fn resolve_project_translate_context(
         .or_else(|| Locale::by_id(locale_id))
         .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
 
-    if let Some(backend_cfg) = &project.manifest().backends.default {
+    let ollama_settings = if let Some(backend_cfg) = &project.manifest().backends.default {
         if backend_cfg.kind != BackendKind::Ollama {
             return Err(format!(
                 "backend kind {:?} not supported yet",
                 backend_cfg.kind,
             ));
         }
-    }
+        OllamaSettings {
+            model: backend_cfg.model.clone(),
+            host: backend_cfg.host.clone(),
+            num_ctx: backend_cfg.num_ctx,
+        }
+    } else {
+        OllamaSettings::default()
+    };
 
     let glossary = project.glossary().cloned();
-    Ok((locale, glossary))
+    Ok((locale, glossary, ollama_settings))
+}
+
+/// Construct an [`OllamaBackend`][i18n_harness_backend::OllamaBackend] using
+/// env-var/built-in defaults from `new()`, then overlay any `Some` fields from
+/// `settings`.
+///
+/// Precedence: manifest field (if `Some`) → `OLLAMA_*` env var → built-in
+/// default. The env-var/default layer is already baked into the fields by
+/// `OllamaBackend::new()`; each builder call here unconditionally wins over it.
+#[cfg(feature = "ollama")]
+pub(crate) fn build_ollama_backend(
+    settings: &OllamaSettings,
+) -> Result<i18n_harness_backend::OllamaBackend, String> {
+    let mut backend = i18n_harness_backend::OllamaBackend::new()
+        .map_err(|e| format!("ollama backend construction failed: {e}"))?;
+    if let Some(model) = &settings.model {
+        backend = backend.with_model(model.clone());
+    }
+    if let Some(host) = &settings.host {
+        backend = backend.with_host(host.clone());
+    }
+    if let Some(num_ctx) = settings.num_ctx {
+        backend = backend.with_num_ctx(num_ctx);
+    }
+    Ok(backend)
 }
 
 // ── Glossary helpers ─────────────────────────────────────────────────────────
@@ -247,10 +294,10 @@ pub(crate) fn merge_outcome(
                     forms: forms.into_iter().map(Some).collect(),
                 },
             };
-            // M4.3a.1: translate always lands as Proposed; the human
-            // explicitly promotes to Finished via save/accept. Auto-
-            // promoting hid model output behind a "done" badge before
-            // the translator could review.
+            // Translate always lands as Proposed; the human explicitly
+            // promotes to Finished via save/accept. Auto-promoting hid
+            // model output behind a "done" badge before the translator
+            // could review.
             merged.state = UnitState::Proposed;
             let mut flagset = FlagSet::new();
             for f in flags {
@@ -300,7 +347,7 @@ pub(crate) fn merge_outcome(
 /// review event.
 ///
 /// This is the shared body of both `translate_unit_in_project` (single click)
-/// and the per-iteration step of `translate_batch_in_project` (M4.2c.2); the
+/// and the per-iteration step of `translate_batch_in_project` (bulk translate); the
 /// two paths must agree on flag merging, state transitions, review-status
 /// side effects, and lock ordering, so they live in one place.
 ///
@@ -376,7 +423,7 @@ pub(crate) fn translate_one(
         flagged: needs_review,
     } = merge_outcome(original, outcome, locale)?;
 
-    // M4.6.1: flagged units land in the review queue automatically. Set
+    // Flagged units land in the review queue automatically. Set
     // `merged.review_status` on the in-memory unit BEFORE writing to the
     // catalog slot and BEFORE returning, so the UI sees the queued state
     // immediately rather than only after the next review-map fold.
@@ -422,6 +469,115 @@ pub(crate) fn translate_one(
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(all(test, feature = "ollama"))]
+mod ollama_settings_tests {
+    use super::{OllamaSettings, build_ollama_backend};
+
+    #[test]
+    fn build_with_default_settings_succeeds() {
+        // All-None settings must produce a valid backend using env/built-in
+        // defaults. The test does not make a network call; construction is
+        // pure in-process.
+        let settings = OllamaSettings::default();
+        assert!(
+            build_ollama_backend(&settings).is_ok(),
+            "build_ollama_backend with default (all-None) settings must succeed"
+        );
+    }
+
+    #[test]
+    fn build_with_all_overrides_succeeds() {
+        // All three manifest fields set; each builder method must be
+        // accepted by the type. Fields on OllamaBackend are private so we
+        // can only assert construction succeeds; the builder chain compiles
+        // and runs without panicking.
+        let settings = OllamaSettings {
+            model: Some("gemma4:e4b".to_owned()),
+            host: Some("http://127.0.0.1:11434".to_owned()),
+            num_ctx: Some(16384),
+        };
+        assert!(
+            build_ollama_backend(&settings).is_ok(),
+            "build_ollama_backend with all fields Some must succeed"
+        );
+    }
+
+    #[test]
+    fn build_with_partial_overrides_succeeds() {
+        let settings = OllamaSettings {
+            model: Some("gemma4:e2b".to_owned()),
+            host: None,
+            num_ctx: Some(4096),
+        };
+        assert!(
+            build_ollama_backend(&settings).is_ok(),
+            "build_ollama_backend with partial overrides must succeed"
+        );
+    }
+}
+
+/// Live wiring smoke for the project-mode translate path. Ignored by default
+/// so CI stays offline; run explicitly against a local ollama serving the
+/// configured model:
+///
+/// ```sh
+/// cargo test -p i18n-harness-ui --features ollama -- --ignored --nocapture gemma
+/// ```
+#[cfg(all(test, feature = "ollama"))]
+mod live_smoke_tests {
+    use super::{MergeOutcome, OllamaSettings, build_ollama_backend, merge_outcome};
+    use i18n_harness_backend::TranslationBackend;
+    use i18n_harness_core::{Batch, BatchKey, Target, Unit};
+    use i18n_harness_locales::Locale;
+
+    #[test]
+    #[ignore = "requires a local ollama server with the gemma4:e4b model pulled"]
+    fn gemma4_e4b_translates_one_unit_through_ui_path() {
+        // Build the backend exactly as the Tauri translate commands do, with
+        // the model the project manifest configures. A wrong or missing model
+        // surfaces here as a backend error rather than a silent fallback.
+        let settings = OllamaSettings {
+            model: Some("gemma4:e4b".to_owned()),
+            host: None,
+            num_ctx: None,
+        };
+        let backend = build_ollama_backend(&settings).expect("backend constructs");
+        let locale = Locale::by_id("es_ES").expect("es_ES locale present");
+
+        // A real English UI string from the es_ES catalogs.
+        let unit = Unit::untranslated_singular("smoke::file-selector", "File Selector");
+        let batch = Batch::new(BatchKey::new("smoke", 0), vec![unit.clone()]);
+        let outcome = backend
+            .translate_batch(&batch, locale, None)
+            .expect("translate_batch succeeds")
+            .into_iter()
+            .next()
+            .expect("one outcome returned");
+
+        // merge_outcome runs the validation gate — the same path translate_one
+        // drives behind the UI's Translate button.
+        let MergeOutcome { merged, report, .. } =
+            merge_outcome(unit, outcome, locale).expect("merge succeeds");
+        let target = match &merged.target {
+            Target::Singular { text } => text.clone().expect("singular target present"),
+            other => panic!("expected singular target, got {other:?}"),
+        };
+        assert!(
+            !target.trim().is_empty(),
+            "model returned an empty translation"
+        );
+        assert_ne!(
+            target.trim(),
+            "File Selector",
+            "expected a Spanish translation, not the source echoed back"
+        );
+        eprintln!(
+            "gemma4:e4b: \"File Selector\" -> \"{target}\" ({} gate finding(s))",
+            report.findings.len()
+        );
+    }
+}
 
 #[cfg(all(test, feature = "ollama"))]
 mod glossary_term_translation_tests {

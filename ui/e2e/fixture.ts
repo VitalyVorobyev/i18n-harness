@@ -88,6 +88,10 @@ export const test = base.extend<Fixtures>({
       > = JSON.parse(JSON.stringify(fixture.catalogs));
       let openProject: typeof fixtureData.summary | null = null;
       const dirtyCatalogs = new Set<string>();
+      // Reviewer notes keyed by `${catalogPath}\u{1F}${unitId}`, mirroring the
+      // review.jsonl note the backend surfaces on each review-queue item
+      // (conflict-candidate JSON for `conflict` units).
+      const reviewNotes = new Map<string, string>();
       let glossaryPayload = JSON.parse(
         JSON.stringify(fixture.glossary.payload),
       );
@@ -238,6 +242,7 @@ export const test = base.extend<Fixtures>({
             for (const unit of cat.units) {
               const needs =
                 unit.review_status === "needs-review" ||
+                unit.review_status === "conflict" ||
                 (unit.flags as string[]).length > 0;
               if (!needs) continue;
               count++;
@@ -251,6 +256,8 @@ export const test = base.extend<Fixtures>({
                 flags: unit.flags,
                 review_status: unit.review_status ?? null,
                 state: unit.state,
+                reviewer_note:
+                  reviewNotes.get(`${path}\u{1F}${unit.id}`) ?? null,
               });
             }
             if (count > 0) byCatalog[path] = count;
@@ -346,6 +353,99 @@ export const test = base.extend<Fixtures>({
           prompt_template_version: "mock-v1",
         }),
         list_tuning_bundles_in_project: () => [],
+        // Reference reuse / remainder / merge. The reuse stub copies a finished
+        // candidate into the first untranslated singular unit and reports a
+        // conflict (two disagreeing candidates) on the second so the conflict
+        // view is exercisable end-to-end.
+        reuse_references_in_project: (a) => {
+          const catalogPath = a.catalogPath as string;
+          const referencePaths = a.referencePaths as string[] | null;
+          const cat = catalogs[catalogPath];
+          const refs = referencePaths ?? [
+            "/sample-project/refs/expert.ts",
+            "/sample-project/refs/legacy.ts",
+          ];
+          const untranslated = (cat?.units ?? []).filter(
+            (u) => u.state === "untranslated" && u.target.kind === "singular",
+          );
+          let copiedFinished = 0;
+          const conflicts: unknown[] = [];
+          const first = untranslated[0];
+          if (first && cat) {
+            const u = cat.units.find((x) => x.id === first.id);
+            if (u) {
+              u.target = { kind: "singular", text: `[ref] ${u.source}` };
+              u.state = "finished";
+              u.review_status = "reviewed";
+              copiedFinished = 1;
+            }
+          }
+          const second = untranslated[1];
+          if (second && cat) {
+            const u = cat.units.find((x) => x.id === second.id);
+            if (u) u.review_status = "conflict";
+            const candidates = [
+              {
+                reference: refs[0] ?? "/sample-project/refs/expert.ts",
+                also_from: [],
+                is_plural: false,
+                text: `[ref-A] ${second.source}`,
+              },
+              {
+                reference: refs[1] ?? "/sample-project/refs/legacy.ts",
+                also_from: [],
+                is_plural: false,
+                text: `[ref-B] ${second.source}`,
+              },
+            ];
+            reviewNotes.set(
+              `${catalogPath}\u{1F}${second.id}`,
+              JSON.stringify(candidates),
+            );
+            conflicts.push({ unit_id: second.id, candidates });
+          }
+          dirtyCatalogs.delete(catalogPath);
+          const consumedIds = new Set(
+            [first?.id, second?.id].filter((id): id is string => id != null),
+          );
+          const remainingIds = untranslated
+            .filter((u) => !consumedIds.has(u.id))
+            .map((u) => u.id);
+          return {
+            catalog_path: catalogPath,
+            references: refs,
+            copied_finished: copiedFinished,
+            copied_needs_review: 0,
+            conflict_count: conflicts.length,
+            remaining_count: remainingIds.length,
+            remaining_ids: remainingIds,
+            conflicts,
+          };
+        },
+        split_remainder: (a) => {
+          const onlyIds = a.onlyIds as string[] | null;
+          const cat = catalogs[a.catalogPath as string];
+          const writableUntranslated = (cat?.units ?? []).filter(
+            (u) => u.state === "untranslated",
+          ).length;
+          return {
+            base_path: a.catalogPath as string,
+            out_path: a.outPath as string,
+            kept_count: onlyIds?.length ?? writableUntranslated,
+          };
+        },
+        merge_catalogs: (a) => ({
+          base_path: a.basePath as string,
+          with_path: a.withPath as string,
+          out_path: a.outPath as string,
+          merged: 0,
+          merged_complete: 0,
+        }),
+        add_project_reference: () => ({ summary: openProject, warnings: [] }),
+        remove_project_reference: () => ({
+          summary: openProject,
+          warnings: [],
+        }),
         load_metrics: () => ({
           path: "",
           events: [],

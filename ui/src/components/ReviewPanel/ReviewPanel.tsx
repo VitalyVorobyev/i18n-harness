@@ -27,6 +27,12 @@ export interface ReviewPanelProps {
   openCatalogs: Map<string, CatalogResponse>;
   reports: Record<UnitId, GateReport>;
   reviewQueue: ReviewQueueResponse | null;
+  /** Apply a candidate's text into the unit via the normal edit path. */
+  onUseConflictCandidate?: (
+    catalogPath: string,
+    unitId: UnitId,
+    forms: string[],
+  ) => void;
   onOpenItem: (catalogPath: string, unitId: UnitId) => void;
   /** Called when the user clicks a unit in Proofread to jump to Translate. */
   onNavigateToUnit: (
@@ -49,6 +55,7 @@ export function ReviewPanel({
   openCatalogs,
   reports,
   reviewQueue,
+  onUseConflictCandidate,
   onOpenItem,
   onNavigateToUnit,
   onOpenHardFlags,
@@ -118,7 +125,11 @@ export function ReviewPanel({
         }}
       >
         {reviewQueue ? (
-          <ReviewQueue reviewQueue={reviewQueue} onOpenItem={onOpenItem} />
+          <ReviewQueue
+            reviewQueue={reviewQueue}
+            onUseConflictCandidate={onUseConflictCandidate}
+            onOpenItem={onOpenItem}
+          />
         ) : (
           <div
             style={{
