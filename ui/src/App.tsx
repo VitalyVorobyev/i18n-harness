@@ -106,7 +106,7 @@ export function App() {
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
 
-  // ── Batch translate state (M4.8) ─────────────────────────────────────────
+  // ── Batch translate state ────────────────────────────────────────────────
   // Single active batch slot; the Rust side enforces one job per (catalog,
   // locale) pair — if a second start arrives for the same pair, the IPC call
   // errors and we toast it. The UI only tracks one batch at a time (the one
@@ -127,7 +127,19 @@ export function App() {
   // per-catalog actions-menu spinner).
   const [reuseBusyPaths, setReuseBusyPaths] = useState<Set<string>>(new Set());
 
-  // ── Review queue (M4.7) ───────────────────────────────────────────────────
+  // Per-catalog remaining-set ids captured from the last reuse pass. A reuse
+  // pass leaves conflicted units writable-but-untranslated, yet excludes them
+  // from its remaining set (they await human resolution). Export Remainder
+  // passes these exact ids so it carves out only the reuse leftovers, never the
+  // conflicts. Overwritten by the next reuse pass and cleared on project
+  // open/close; intentionally *not* cleared on edit so that resolving conflicts
+  // before exporting does not fall back to the standalone recompute (which would
+  // re-include the still-unresolved conflicts).
+  const [reuseRemainingIds, setReuseRemainingIds] = useState<
+    Map<string, string[]>
+  >(new Map());
+
+  // ── Review queue ──────────────────────────────────────────────────────────
   // null = not yet scanned; populated eagerly when a project is open and
   // refreshed after every significant mutation (translate / accept / save /
   // discard). Debounced 200ms to avoid hammering the IPC bridge during
@@ -317,6 +329,7 @@ export function App() {
       setError(null);
       setCloseConfirm({ kind: "none" });
       setReuseBusyPaths(new Set());
+      setReuseRemainingIds(new Map());
       // Reset and immediately kick off a review-queue scan for the new project.
       setReviewQueue(null);
       scheduleRescan();
@@ -365,6 +378,7 @@ export function App() {
     setError(null);
     setCloseConfirm({ kind: "none" });
     setReuseBusyPaths(new Set());
+    setReuseRemainingIds(new Map());
   }, [activeBatch]);
 
   // Public entry point — raises inline confirmation when there are unsaved catalogs.
@@ -481,7 +495,7 @@ export function App() {
         replaceUnit(updated);
         markDirty(id);
         markCatalogDirty(activeCatalogPath);
-        // M4.7: edits don't affect review status today, but rescan so the
+        // Edits don't affect review status today, but rescan so the
         // badge stays accurate if the gate is re-run in the future.
         scheduleRescan();
       } catch (e) {
@@ -515,7 +529,7 @@ export function App() {
         setReports((prev) => ({ ...prev, [id]: result.report }));
         markDirty(id);
         markCatalogDirty(activeCatalogPath);
-        // M4.7: translation may add flags → rescan the review queue.
+        // Translation may add flags — rescan the review queue.
         scheduleRescan();
         const findings = result.report.findings.length;
         flashInfo(
@@ -571,7 +585,7 @@ export function App() {
         next.delete(activeCatalogPath);
         return next;
       });
-      // M4.7: state transitions on save may change the review queue.
+      // State transitions on save may change the review queue.
       scheduleRescan();
       flashInfo(
         `Saved ${summary.unit_count} units to ${shortenPath(summary.path)}`,
@@ -619,7 +633,7 @@ export function App() {
           for (const s of resp.saved) next.delete(s.path);
           return next;
         });
-        // M4.7: state transitions on save may change the review queue.
+        // State transitions on save may change the review queue.
         scheduleRescan();
         flashInfo(
           `Saved ${savedCount} ${savedCount === 1 ? "catalog" : "catalogs"}.`,
@@ -672,7 +686,7 @@ export function App() {
       if (!stillThere) {
         setSelectedId(response.units[0]?.id ?? null);
       }
-      // M4.7: discard resets state from disk; review queue may change.
+      // Discard resets state from disk; review queue may change.
       scheduleRescan();
       flashInfo("Reverted to disk state.");
     } catch (e) {
@@ -688,7 +702,7 @@ export function App() {
     flashError,
   ]);
 
-  // ── Accept (M4.6.2) ─────────────────────────────────────────────────────────
+  // ── Accept ───────────────────────────────────────────────────────────────────
 
   const onAccept = useCallback(
     async (id: UnitId) => {
@@ -708,7 +722,7 @@ export function App() {
           next.add(id);
           return next;
         });
-        // M4.7: Accept clears flags → unit leaves the review queue.
+        // Accept clears flags — unit leaves the review queue.
         scheduleRescan();
         flashInfo(`Marked unit ${id} as reviewed`);
       } catch (e) {
@@ -882,7 +896,7 @@ export function App() {
     [replaceUnitFor, markCatalogDirty, scheduleRescan, flashInfo, flashError],
   );
 
-  // ── Batch translate (M4.8) ───────────────────────────────────────────────
+  // ── Batch translate ──────────────────────────────────────────────────────
 
   // Called from the "Translate all" button in CatalogList (focus-mode
   // fallback) and the "Run model on selected" button in Matrix mode. The
@@ -904,7 +918,7 @@ export function App() {
       // the gap between the Rust handler spawning the worker and our
       // `listenBatchProgress` call resolving (possible with instant backends;
       // impossible with Ollama's network latency). Tracked for a cleaner fix
-      // in M4.8.1 (reserve-job-id command so subscribe can precede start).
+      // tracked as a follow-up (reserve-job-id command so subscribe can precede start).
       let started: { job_id: string; total: number };
       try {
         started = await translateBatchInProject(catalogPath, scope);
@@ -928,7 +942,7 @@ export function App() {
       // cancelled the moment any terminal event lands.
       //
       // A proper fix requires a Rust-side protocol change (reserve a job slot
-      // and return the job_id before starting the worker; tracked in M4.8.1).
+      // and return the job_id before starting the worker; tracked as a follow-up).
       let terminalReceived = false;
       const stuckGuardMs = 10_000;
       let stuckGuardTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1378,6 +1392,13 @@ export function App() {
           report = await reuseReferencesInProject(catalogPath, picked);
         }
 
+        // Capture the exact remaining set so an immediate Export Remainder
+        // carves out only these (conflicts excluded), not the standalone
+        // writable-untranslated set that would re-include conflicted units.
+        setReuseRemainingIds((prev) =>
+          new Map(prev).set(catalogPath, report.remaining_ids),
+        );
+
         // Re-pull the post-reuse catalog (the backend refreshed it in place but
         // does not return units) and merge it into the cache.
         const refreshed = await openCatalogInProject(catalogPath);
@@ -1431,7 +1452,10 @@ export function App() {
       if (!outPath) return;
       markReuseBusy(catalogPath, true);
       try {
-        const report = await splitRemainder(catalogPath, outPath, null);
+        // Prefer the remaining set captured by the last reuse pass (conflicts
+        // excluded); fall back to a standalone recompute when no reuse ran.
+        const onlyIds = reuseRemainingIds.get(catalogPath) ?? null;
+        const report = await splitRemainder(catalogPath, outPath, onlyIds);
         flashInfo(
           `Wrote ${report.kept_count} unit(s) to ${shortenPath(report.out_path)}.`,
         );
@@ -1441,7 +1465,7 @@ export function App() {
         markReuseBusy(catalogPath, false);
       }
     },
-    [markReuseBusy, flashInfo, flashError],
+    [markReuseBusy, reuseRemainingIds, flashInfo, flashError],
   );
 
   const onMergeCatalog = useCallback(
@@ -1675,7 +1699,7 @@ export function App() {
               )}
             </div>
 
-            {/* Settings view — M4.3c manifest editor */}
+            {/* Settings view — manifest editor */}
             <div
               className={
                 projectView === "settings" ? "flex-1 flex min-h-0" : "hidden"
@@ -1689,7 +1713,7 @@ export function App() {
               />
             </div>
 
-            {/* Quality view — M4.3d */}
+            {/* Quality view */}
             <div
               className={
                 projectView === "quality" ? "flex-1 flex min-h-0" : "hidden"
@@ -1800,8 +1824,8 @@ export function App() {
         )}
 
         {/* Discard shortcut handler — accessible via onDiscard (no visible button
-          in M4.3a; the per-catalog discard action is wired and callable via
-          keyboard in later slices). */}
+          in project mode; the per-catalog discard action is wired and callable via
+          keyboard). */}
         <span
           className="sr-only"
           aria-hidden="true"

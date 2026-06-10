@@ -17,7 +17,7 @@
 //!
 //! For any file in `fixtures/qt/`, `apply(extract(f), &units, out)` with
 //! `units` unchanged from `extract(f).units()` produces a file whose bytes
-//! are **identical** to the input. This is the M0 contract; the integration
+//! are **identical** to the input. This is the round-trip contract; the integration
 //! test `roundtrip_byte_identical` in `tests/` is the executable form.
 //!
 //! # Design choice: original bytes + edit list

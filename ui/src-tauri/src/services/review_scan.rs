@@ -61,7 +61,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // M4.4 wired gettext-po and M4.5 added icu-json; all manifest
+        // gettext-po and icu-json are both wired; all manifest
         // formats are now handled through `extract_for_format`. The guard
         // remains in case future formats land in the manifest enum before
         // their wiring is finished — surface the gap loudly rather than

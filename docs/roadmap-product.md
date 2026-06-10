@@ -664,6 +664,62 @@ opens separately; the harness never spawns it.
 
 ---
 
+# M6 — Reference reuse, remainder split & merge (Qt)
+
+**Status:** shipped (CLI + UI).
+
+Three deterministic catalog-to-catalog workflows that move *existing*
+translations between catalogs without ever calling a model — invariant
+#2 in practice. The engine lives in `crates/reuse`; the CLI prints its
+reports and the Tauri layer persists them. Qt `.ts` only this cut: the
+reuse/merge *algorithm* is format-agnostic over `Unit` / `UnitId`, but
+the catalog read/write is hard-wired to the Qt adapter, keeping every
+write behind the round-trip contract.
+
+### M6.0 — `crates/reuse` engine ✓ shipped
+
+- **Reuse** (`reuse_from_references`) — copy expert translations from
+  one or more reference catalogs into a base by exact unit-id match.
+  Agreement across references decides a copy; disagreement surfaces a
+  `ReferenceConflict` for a human and the base unit is left
+  untranslated. Copied units run the gate: clean + complete →
+  `Finished`, flagged or incomplete → kept `Proposed` (needs-review).
+- **Split** (`ReuseReport::remaining_ids` / `writable_untranslated_ids`)
+  — the leftover untranslated set, **conflicts excluded**, fed to
+  `adapter_qt::write_subset` to carve a standalone remainder `.ts`.
+- **Merge** (`merge_back`) — fold a translated remainder back into its
+  base with subset + disjointness guards (overlap / stray ids rejected,
+  the offending ids returned verbatim).
+
+`adapter-qt` gained `write_subset`, a byte-subtraction subset writer:
+kept messages are byte-identical, empty contexts are pruned, and
+keep-all is the identity — all under its own round-trip property tests.
+
+### M6.1 — Project references ✓ shipped
+
+`crates/project` gained `[[references]]` manifest entries
+(`ReferenceEntry` / `ReferenceRef`: path + format + locale), with
+declaration order = reuse priority order, plus add / remove mutation
+and persistence through the comment-preserving `toml_edit` document.
+
+### M6.2 — CLI `reuse` / `split-remainder` / `merge` ✓ shipped
+
+`harness reuse` runs over a project (filtering references to the base
+locale **and** Qt format) or ad-hoc against explicit `--reference`
+files; `harness split-remainder` carves the leftover; `harness merge`
+folds a translated remainder back. Each prints the report struct.
+
+### M6.3 — UI surface ✓ shipped
+
+A per-catalog actions menu exposes **Apply References**, **Export
+Remainder**, and **Merge Remainder**. Conflicts land in the Review
+queue with the candidate list persisted on the review note (survives a
+reopen). Export Remainder carries the reuse pass's exact remaining ids
+so it never hands conflicted units to translators; a standalone export
+(no preceding reuse) recomputes the writable-untranslated set from disk.
+
+---
+
 ## Verification (rolling)
 
 After each M4.x / M5.x:

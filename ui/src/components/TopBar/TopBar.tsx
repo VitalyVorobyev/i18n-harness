@@ -33,7 +33,7 @@ function Spinner({ size = 14 }: { size?: number }) {
 
 // Views available in project mode.
 // "translate" is the default; "glossary" reuses the existing GlossaryPanel.
-// "settings" and "quality" are placeholders for M4.3c/d.
+// "settings" and "quality" are placeholders for the Settings and Quality views.
 export type View =
   | "catalog"
   | "glossary"
@@ -42,7 +42,7 @@ export type View =
   | "settings"
   | "quality";
 
-// ── File-centric TopBar (pre-M4.3a; keeps the old single-file UI working) ─────
+// ── File-centric TopBar (legacy; keeps the old single-file UI working) ────────
 
 interface LegacyProps {
   view: View;
@@ -59,7 +59,7 @@ interface LegacyProps {
   onToggleTheme: () => void;
 }
 
-/** @deprecated Use ProjectTopBar for M4.3+ project mode. */
+/** @deprecated Use ProjectTopBar for project mode. */
 export function TopBar({
   view,
   onViewChange,
@@ -210,7 +210,7 @@ export function TopBar({
   );
 }
 
-// ── Project-mode TopBar (M4.3a) ───────────────────────────────────────────────
+// ── Project-mode TopBar ────────────────────────────────────────────────────────
 
 export type ProjectView =
   | "overview"

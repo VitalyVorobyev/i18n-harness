@@ -250,6 +250,11 @@ fn build_reuse_report_dto(
         copied_needs_review: report.copied_needs_review_count(),
         conflict_count: report.conflict_count(),
         remaining_count: report.remaining_count(),
+        remaining_ids: report
+            .remaining_ids
+            .iter()
+            .map(|id| id.as_str().to_owned())
+            .collect(),
         conflicts: report.conflicts.iter().map(conflict_to_dto).collect(),
     }
 }

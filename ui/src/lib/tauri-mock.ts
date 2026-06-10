@@ -583,26 +583,40 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
 
     if (catalog) state.dirtyCatalogs.delete(args.catalogPath);
 
-    const remaining = Math.max(
-      0,
-      untranslated.length - copiedFinished - conflicts.length,
+    // Everything untranslated except the copied-finished first unit and the
+    // conflicted second unit is the remaining set (conflicts excluded, matching
+    // the real reuse contract).
+    const consumedIds = new Set(
+      [first?.id, second?.id].filter((id): id is string => id != null),
     );
+    const remainingIds = untranslated
+      .filter((u) => !consumedIds.has(u.id))
+      .map((u) => u.id);
     return {
       catalog_path: args.catalogPath,
       references: refs,
       copied_finished: copiedFinished,
       copied_needs_review: 0,
       conflict_count: conflicts.length,
-      remaining_count: remaining,
+      remaining_count: remainingIds.length,
+      remaining_ids: remainingIds,
       conflicts,
     };
   },
   split_remainder: (a) => {
-    const args = a as { catalogPath: string; outPath: string };
+    const args = a as {
+      catalogPath: string;
+      outPath: string;
+      onlyIds: string[] | null;
+    };
+    const catalog = state.catalogs.get(args.catalogPath);
+    const writableUntranslated = (catalog?.units ?? []).filter(
+      (u) => u.state === "untranslated",
+    ).length;
     return {
       base_path: args.catalogPath,
       out_path: args.outPath,
-      kept_count: 0,
+      kept_count: args.onlyIds?.length ?? writableUntranslated,
     };
   },
   merge_catalogs: (a) => {

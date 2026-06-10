@@ -1,9 +1,9 @@
 // Quality view — headline numbers, translation memory, curated set,
-// and prompt evaluation. (M4.9)
+// and prompt evaluation.
 //
 // Part 1: Per-locale headline cards + 30-day acceptance-rate sparkline.
 // Part 2: Translation memory (corrections table) + curated set — carried
-//         forward from M4.3d.
+//         forward from the corrections/curated-set work.
 // Part 3: Prompt evaluation — Run evaluation button, progress widget,
 //         latest run summary, run history.
 

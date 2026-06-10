@@ -2,7 +2,7 @@
 //!
 //! The manual backend is the one any test can drive without HTTP, files,
 //! or a model installed. It is also the backend the **two-phase CLI flow**
-//! (M4) will use to import translations produced out-of-band (by an agent,
+//! uses to import translations produced out-of-band (by an agent,
 //! by a human filling a JSONL file, etc.): the CLI passes a closure that
 //! reads from disk; the backend turns each input unit into the
 //! corresponding outcome.

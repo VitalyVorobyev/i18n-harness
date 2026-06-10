@@ -3,7 +3,7 @@
 // schema is stable, and a hand-written file documents the wire format
 // in one place.
 //
-// M4.2 project-mode additions are grouped at the bottom of this file.
+// Project-mode additions are grouped at the bottom of this file.
 
 export type UnitId = string;
 
@@ -52,10 +52,10 @@ export interface Unit {
   flags: AnyFlag[];
   provenance: Provenance;
   state: UnitState;
-  // Added by M4.1.5 — may be absent on older JSONL.
+  // May be absent on older JSONL.
   review_status?: ReviewStatus | null;
   source_hash?: string | null;
-  // Added by M4.6.1 — may be absent when the v1 backend was used.
+  // May be absent when the v1 backend was used.
   confidence?: number | null;
   // flag_notes is a map from kebab-case flag name to the model's note.
   flag_notes?: Record<AnyFlag, string> | null;
@@ -161,7 +161,7 @@ const HARD_FLAGS = new Set([
   "plural-arity-mismatch",
   "icu-parse-error",
   "empty-target-when-finished",
-  // M4.6.1: backend returned a non-parseable response (hard: no translation to ship).
+  // Backend returned a non-parseable response (hard: no translation to ship).
   "backend-malformed-response",
 ]);
 
@@ -178,7 +178,7 @@ const SEMANTIC_FLAGS = new Set([
   "idiom",
   "insufficient-context",
   "low-confidence",
-  // M4.6.1: new semantic flag variants.
+  // New semantic flag variants.
   "brand-term",
   "tone-mismatch",
 ]);
@@ -271,7 +271,7 @@ function assertNever(x: never): never {
   throw new Error(`Unhandled ModelFlag variant: ${String(x)}`);
 }
 
-// ── M4.2 project-mode types ───────────────────────────────────────────────────
+// ── Project-mode types ────────────────────────────────────────────────────────
 
 // ReviewStatus mirrors crates/core/src/review.rs — serde(rename_all = "kebab-case").
 export type ReviewStatus =
@@ -402,7 +402,7 @@ export interface DraftManifest {
   backend: BackendConfig | null;
 }
 
-// ── M4.7 — Project-wide review queue types ───────────────────────────────────
+// ── Project-wide review queue types ──────────────────────────────────────────
 
 // ReviewQueueItem mirrors the Rust struct of the same name in ui/src-tauri/src/lib.rs.
 export interface ReviewQueueItem {
@@ -484,7 +484,7 @@ export interface CuratedExample {
   correction: Correction | null;
 }
 
-// ── M4.9 — Quality eval types ────────────────────────────────────────────────
+// ── Quality eval types ────────────────────────────────────────────────────────
 
 // LocaleScore mirrors crates/project/src/evaluation.rs.
 export interface LocaleScore {
@@ -531,7 +531,7 @@ export interface EvaluationTerminalPayload {
   run: EvaluationRun | null;
 }
 
-// ── M4.10 — Tuning bundle types ───────────────────────────────────────────────
+// ── Tuning bundle types ───────────────────────────────────────────────────────
 
 // ExportTuningBundleResponse mirrors ui/src-tauri/src/lib.rs ExportTuningBundleResponse.
 export interface ExportTuningBundleResponse {
@@ -595,6 +595,12 @@ export interface ReuseReport {
   conflict_count: number;
   /** Writable units with no candidate — feed a subsequent split. */
   remaining_count: number;
+  /**
+   * The exact remaining-set ids (catalog order), conflicts excluded. Pass these
+   * to `splitRemainder` as `onlyIds` so an Export Remainder right after a reuse
+   * pass carves out precisely the leftovers and never the conflicted units.
+   */
+  remaining_ids: string[];
   /** Full per-unit conflict detail. */
   conflicts: ReferenceConflict[];
 }
@@ -625,7 +631,7 @@ export interface MergeReport {
   merged_complete: number;
 }
 
-// ── M4.2c.2 — bulk translate with cancellation ───────────────────────────────
+// ── Bulk translate with cancellation ─────────────────────────────────────────
 
 // BatchScope mirrors ui/src-tauri/src/lib.rs. Kebab-case enum on the wire.
 export type BatchScope = "untranslated" | "untranslated-and-proposed";

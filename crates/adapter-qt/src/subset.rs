@@ -36,7 +36,7 @@
 //! - It does not validate `keep` against ids not present in the catalog; ids
 //!   in `keep` that the catalog does not contain are simply ignored (the
 //!   result still contains every catalog unit that *is* in `keep`).
-//! - A `<message>` that parsed to no [`Unit`] (e.g. one with no `<source>`)
+//! - A `<message>` that parsed to no [`Unit`](i18n_harness_core::Unit) (e.g. one with no `<source>`)
 //!   is not individually addressable; it survives unless the whole context it
 //!   lives in is pruned.
 

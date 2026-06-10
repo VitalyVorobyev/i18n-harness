@@ -24,8 +24,8 @@ pub struct TranslateResult {
 /// The harness must never overwrite catalog entries the source no longer
 /// references. `Finished` units are also always excluded; a "re-translate
 /// everything including human-accepted" variant is a meaningful policy
-/// decision that belongs to the M4.8 UI design, not this primitive, and
-/// would require pre-demoting Finished → Proposed to honour
+/// decision that belongs to the bulk-translate UI design, not this primitive,
+/// and would require pre-demoting Finished → Proposed to honour
 /// [`UnitState::is_writable`]. Adding a new scope variant later is
 /// backward-compatible.
 ///

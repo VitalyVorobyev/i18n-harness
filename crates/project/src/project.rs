@@ -89,10 +89,10 @@ pub enum CatalogStatus {
     Ok,
     /// File is missing on disk. `Project::open` returns `CatalogNotFound` for
     /// this case; this variant is reserved for the discovery / draft path
-    /// (M4.1c) where a missing catalog is a soft warning, not a hard error.
+    /// discovery path where a missing catalog is a soft warning, not a hard error.
     Missing,
     /// File is present but the content sniffer disagrees with the declared
-    /// format. Not produced in M4.1b (the sniffer lands in M4.1c); the
+    /// format. Not yet produced (the sniffer is not yet wired in); the
     /// variant is defined so the error enum compiles.
     FormatMismatch,
 }
@@ -1057,7 +1057,7 @@ impl Project {
     /// for every unit in `units` based on the current fold and each unit's
     /// `source_hash`.
     ///
-    /// This is the load-bearing helper for the M4.2 Tauri layer — every
+    /// This is the load-bearing helper for the Tauri layer — every
     /// catalog-open call site routes the extracted units through it before
     /// handing them to the UI.
     ///

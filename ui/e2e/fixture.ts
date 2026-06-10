@@ -405,24 +405,35 @@ export const test = base.extend<Fixtures>({
             conflicts.push({ unit_id: second.id, candidates });
           }
           dirtyCatalogs.delete(catalogPath);
+          const consumedIds = new Set(
+            [first?.id, second?.id].filter((id): id is string => id != null),
+          );
+          const remainingIds = untranslated
+            .filter((u) => !consumedIds.has(u.id))
+            .map((u) => u.id);
           return {
             catalog_path: catalogPath,
             references: refs,
             copied_finished: copiedFinished,
             copied_needs_review: 0,
             conflict_count: conflicts.length,
-            remaining_count: Math.max(
-              0,
-              untranslated.length - copiedFinished - conflicts.length,
-            ),
+            remaining_count: remainingIds.length,
+            remaining_ids: remainingIds,
             conflicts,
           };
         },
-        split_remainder: (a) => ({
-          base_path: a.catalogPath as string,
-          out_path: a.outPath as string,
-          kept_count: 0,
-        }),
+        split_remainder: (a) => {
+          const onlyIds = a.onlyIds as string[] | null;
+          const cat = catalogs[a.catalogPath as string];
+          const writableUntranslated = (cat?.units ?? []).filter(
+            (u) => u.state === "untranslated",
+          ).length;
+          return {
+            base_path: a.catalogPath as string,
+            out_path: a.outPath as string,
+            kept_count: onlyIds?.length ?? writableUntranslated,
+          };
+        },
         merge_catalogs: (a) => ({
           base_path: a.basePath as string,
           with_path: a.withPath as string,

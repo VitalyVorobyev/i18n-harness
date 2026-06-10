@@ -24,7 +24,7 @@ use crate::subset::write_atomic;
 /// - Units the harness actually filled (target promoted from empty to
 ///   non-empty *and* state is currently writable) are promoted to
 ///   [`UnitState::Finished`] in the open tag (the `type="unfinished"`
-///   attribute is removed), per the M0 contract.
+///   attribute is removed), per the round-trip contract.
 /// - Units whose target is unchanged from what `extract` produced are left
 ///   alone — no spurious diffs, no spurious state transitions.
 /// - The output file is written atomically: we write to `<out>.tmp` then

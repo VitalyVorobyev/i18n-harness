@@ -178,7 +178,7 @@ export async function writeTextFile(
   return await invoke<void>("write_text_file", { path, content });
 }
 
-// ── M4.2 project-mode wrappers ────────────────────────────────────────────────
+// ── Project-mode wrappers ─────────────────────────────────────────────────────
 
 export async function openProject(root: string): Promise<ProjectOpenResponse> {
   return await invoke<ProjectOpenResponse>("open_project", { root });
@@ -293,7 +293,7 @@ export async function pickProjectFolder(): Promise<string | null> {
   return null;
 }
 
-// ── M4.3c — Settings view mutation wrappers ───────────────────────────────────
+// ── Settings view mutation wrappers ───────────────────────────────────────────
 
 export async function addCatalogToProject(
   entry: CatalogEntry,
@@ -366,7 +366,7 @@ export async function pickCatalogFileForProject(): Promise<string | null> {
   return null;
 }
 
-// ── M4.3d — Quality view wrappers ─────────────────────────────────────────────
+// ── Quality view wrappers ─────────────────────────────────────────────────────
 
 /** Filter shape for listCorrectionsInProject. All fields optional (AND semantics). */
 export interface ListCorrectionsFilter {
@@ -400,7 +400,7 @@ export async function listCuratedInProject(): Promise<CuratedExample[]> {
   return await invoke<CuratedExample[]>("list_curated_in_project");
 }
 
-// ── M4.6.2 — Accept (clear flags, mark Reviewed) ─────────────────────────────
+// ── Accept (clear flags, mark Reviewed) ───────────────────────────────────────
 
 /// Mark the unit as reviewed: clears model flags + flag_notes in memory and
 /// appends a `Reviewed` event to `review.jsonl`. Returns the updated unit.
@@ -411,7 +411,7 @@ export async function acceptUnitInProject(
   return await invoke<Unit>("accept_unit_in_project", { catalogPath, unitId });
 }
 
-// ── M4.2c.2 — bulk translate with cancellation ──────────────────────────────
+// ── Bulk translate with cancellation ────────────────────────────────────────
 
 /// Start a background bulk translation of in-scope units in `catalogPath`.
 ///
@@ -451,9 +451,9 @@ export async function cancelTranslation(jobId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_translation", { jobId });
 }
 
-// ── M4.7 — Project-wide review queue ─────────────────────────────────────────
+// ── Project-wide review queue ─────────────────────────────────────────────────
 
-// ── M4.9 — Quality eval wrappers ─────────────────────────────────────────────
+// ── Quality eval wrappers ─────────────────────────────────────────────────────
 
 /// Start a background evaluation run over all curated examples in the project.
 ///
@@ -480,7 +480,7 @@ export async function cancelEvaluation(jobId: string): Promise<boolean> {
   return await invoke<boolean>("cancel_translation", { jobId });
 }
 
-// ── M4.10 — Tuning bundle wrappers ───────────────────────────────────────────
+// ── Tuning bundle wrappers ────────────────────────────────────────────────────
 
 /// Export a tuning bundle to `.i18n-harness/tuning/<timestamp>/`.
 ///

@@ -14,8 +14,8 @@ use crate::outcome::TranslationOutcome;
 /// The translation engine extension point.
 ///
 /// Implementations: built into this crate, [`crate::manual::ManualBackend`]
-/// (always); the `ollama` HTTP backend (M2 follow-up, behind the
-/// `ollama` feature); `openai-compatible` (M4, behind `openai-compatible`).
+/// (always); the `ollama` HTTP backend (behind the
+/// `ollama` feature); `openai-compatible` (behind `openai-compatible`).
 /// Third-party crates implement this trait the same way.
 ///
 /// # The contract

@@ -760,7 +760,7 @@ fn state_from_type_attr(attr: Option<&TypeAttr>) -> UnitState {
 /// Minimal scanner for placeholders inside an ICU-form string. We only need
 /// the placeholder *occurrences* for the gate's multiset check; we do not
 /// need to parse arbitrary ICU MessageFormat here. (Full ICU parsing is a
-/// gate concern, M1.)
+/// gate concern.)
 fn scan_placeholders(icu: &str) -> Vec<Placeholder> {
     let bytes = icu.as_bytes();
     let mut out = Vec::new();

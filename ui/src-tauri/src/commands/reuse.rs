@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use i18n_harness_core::UnitId;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
-use i18n_harness_project::{ReferenceEntry, ReferenceRef};
+use i18n_harness_project::{CatalogFormat, ReferenceEntry, ReferenceRef};
 
 use crate::backing::BackingCatalog;
 use crate::dto::{MergeReportDto, ProjectOpenResponse, ReuseReportDto, SplitReportDto};
@@ -54,10 +54,15 @@ fn resolve_reuse_context(
     Ok((locale, glossary))
 }
 
-/// Collect the absolute paths of all references serving `locale_id`, in manifest
-/// declaration order (which is reuse's priority order). Holds the project lock
-/// only briefly. Returns the paths even for references whose on-disk status is
-/// not `Ok`; reuse's own extract surfaces a bad reference as a clear error.
+/// Collect the absolute paths of all Qt references serving `locale_id`, in
+/// manifest declaration order (which is reuse's priority order). Holds the
+/// project lock only briefly. Returns the paths even for references whose
+/// on-disk status is not `Ok`; reuse's own extract surfaces a bad reference as a
+/// clear error.
+///
+/// Non-Qt references (e.g. a `gettext-po` entry for the same locale) are
+/// filtered out: the reuse engine is Qt-only and would abort on a non-Qt file,
+/// so passing only Qt references mirrors the CLI's selection.
 fn references_for_locale(
     state: &tauri::State<'_, AppState>,
     locale_id: &str,
@@ -70,7 +75,7 @@ fn references_for_locale(
     Ok(project
         .references()
         .iter()
-        .filter(|r: &&ReferenceRef| r.locale == locale_id)
+        .filter(|r: &&ReferenceRef| r.locale == locale_id && r.format == CatalogFormat::QtTs)
         .map(|r| PathBuf::from(&r.absolute_path))
         .collect())
 }

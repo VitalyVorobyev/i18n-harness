@@ -64,8 +64,7 @@ pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
         // specifically rather than calling `is_writable()`. Finished units
         // MUST be rewritten when the user edits them — `is_writable` excludes
         // Finished for the CLI batch contract, but the PO apply path is the
-        // UI write side and follows the `is_ui_editable` semantics from
-        // M4.3a.1.
+        // UI write side and follows the `is_ui_editable` semantics.
         if matches!(unit.state, UnitState::Obsolete | UnitState::Vanished) {
             continue;
         }

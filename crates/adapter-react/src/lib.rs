@@ -16,7 +16,7 @@
 //! format (Lingui's native JSON dialect, etc.) is one match arm here plus
 //! one new module in `i18n-harness-catalog`.
 //!
-//! # Supported formats in M4.5
+//! # Supported formats
 //!
 //! - `.json` → [`IcuJsonFormat`] (react-intl / format.js / i18next / Lingui
 //!   string maps).

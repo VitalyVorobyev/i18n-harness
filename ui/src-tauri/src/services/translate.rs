@@ -294,10 +294,10 @@ pub(crate) fn merge_outcome(
                     forms: forms.into_iter().map(Some).collect(),
                 },
             };
-            // M4.3a.1: translate always lands as Proposed; the human
-            // explicitly promotes to Finished via save/accept. Auto-
-            // promoting hid model output behind a "done" badge before
-            // the translator could review.
+            // Translate always lands as Proposed; the human explicitly
+            // promotes to Finished via save/accept. Auto-promoting hid
+            // model output behind a "done" badge before the translator
+            // could review.
             merged.state = UnitState::Proposed;
             let mut flagset = FlagSet::new();
             for f in flags {
@@ -347,7 +347,7 @@ pub(crate) fn merge_outcome(
 /// review event.
 ///
 /// This is the shared body of both `translate_unit_in_project` (single click)
-/// and the per-iteration step of `translate_batch_in_project` (M4.2c.2); the
+/// and the per-iteration step of `translate_batch_in_project` (bulk translate); the
 /// two paths must agree on flag merging, state transitions, review-status
 /// side effects, and lock ordering, so they live in one place.
 ///
@@ -423,7 +423,7 @@ pub(crate) fn translate_one(
         flagged: needs_review,
     } = merge_outcome(original, outcome, locale)?;
 
-    // M4.6.1: flagged units land in the review queue automatically. Set
+    // Flagged units land in the review queue automatically. Set
     // `merged.review_status` on the in-memory unit BEFORE writing to the
     // catalog slot and BEFORE returning, so the UI sees the queued state
     // immediately rather than only after the next review-map fold.

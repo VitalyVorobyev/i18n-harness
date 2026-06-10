@@ -1,8 +1,8 @@
 //! Tauri-side adapter over the two catalog backing implementations.
 //!
 //! Background. The translator-facing crate splits catalog handling between
-//! `i18n_harness_adapter_qt::Catalog` (the M0 XML round-tripper) and
-//! `i18n_harness_catalog::Catalog` (the M4.4 PO / M4.5 ICU-JSON
+//! `i18n_harness_adapter_qt::Catalog` (the XML round-tripper) and
+//! `i18n_harness_catalog::Catalog` (the PO / ICU-JSON
 //! serializer). Their data model is the same — both expose a slice of
 //! [`i18n_harness_core::Unit`], both byte-stably round-trip — but their
 //! types are distinct because the underlying parsers are unrelated. The

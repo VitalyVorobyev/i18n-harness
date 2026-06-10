@@ -37,10 +37,9 @@
 //!
 //! # Stability
 //!
-//! [`Glossary`] is the type the rest of the workspace took a dependency on in
-//! M1 (the gate's `Option<&Glossary>` signature). The shape grows fields
-//! between M1 and M2 but never loses its name; downstream signatures stay
-//! valid across the upgrade.
+//! [`Glossary`] is the type the rest of the workspace depends on via the
+//! gate's `Option<&Glossary>` signature. The shape may grow fields over time
+//! but never loses its name; downstream signatures stay valid across upgrades.
 
 #![forbid(unsafe_code)]
 

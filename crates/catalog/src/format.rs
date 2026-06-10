@@ -17,7 +17,7 @@
 //! > `apply(extract(f), extract(f).units(), out)` produces bytes identical
 //! > to `f` on disk.
 //!
-//! This is the load-bearing M0 contract carried into M4.4. New fixtures get
+//! This is the load-bearing round-trip contract. New fixtures get
 //! added to the round-trip suite; they never get carved out.
 //!
 //! # What this trait does NOT guarantee
@@ -94,7 +94,7 @@ pub trait CatalogFormat: std::fmt::Debug {
     /// MessageFormat.
     ///
     /// Exposed on the trait (in addition to being called internally during
-    /// `extract`) so the M4.6 prompt pipeline can run any user-supplied text
+    /// `extract`) so the prompt pipeline can run any user-supplied text
     /// through the same converter the catalog uses.
     fn placeholders_to_icu(&self, native: &str) -> Result<String, PlaceholderError>;
 

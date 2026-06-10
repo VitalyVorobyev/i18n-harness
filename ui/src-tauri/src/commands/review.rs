@@ -60,8 +60,8 @@ pub(crate) fn set_review_status_in_project(
 /// Accept a unit as reviewed: clear its flags and flag notes, then append a
 /// `Reviewed` event to `review.jsonl`.
 ///
-/// The unit's `state` is left unchanged (per M4.3a.1: the human controls the
-/// `Proposed → Finished` transition via Save/accept flows). The catalog is
+/// The unit's `state` is left unchanged; the human controls the
+/// `Proposed → Finished` transition via Save/accept flows. The catalog is
 /// marked dirty because clearing flags is a meaningful edit that the next Save
 /// will persist.
 ///
@@ -170,7 +170,7 @@ pub fn accept_unit_in_project_impl(
 /// `open_catalog_in_project`.
 ///
 /// Only `qt-ts` catalogs are supported today. Non-`qt-ts` catalogs are
-/// skipped with a `tracing::warn!` and will be wired in M4.4/M4.5.
+/// skipped with a `tracing::warn!` and will be wired in for the PO / ICU-JSON adapters.
 #[tauri::command]
 pub(crate) fn scan_project_review_state(
     state: tauri::State<'_, AppState>,

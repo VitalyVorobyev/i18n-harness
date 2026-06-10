@@ -65,6 +65,12 @@ pub struct ReuseReportDto {
     pub conflict_count: usize,
     /// Writable units with no candidate — feed a subsequent split.
     pub remaining_count: usize,
+    /// The exact ids in the remaining set, in catalog order. Conflicted units
+    /// are **excluded** (they are left for human resolution, not handed to
+    /// translators). The caller passes these straight to `split_remainder` as
+    /// `only_ids` so an Export Remainder right after a reuse pass carves out
+    /// precisely the reuse leftovers — never the conflicts.
+    pub remaining_ids: Vec<String>,
     /// Full per-unit conflict detail.
     pub conflicts: Vec<ReferenceConflictDto>,
 }
