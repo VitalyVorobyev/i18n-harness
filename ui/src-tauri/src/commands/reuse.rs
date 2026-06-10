@@ -18,7 +18,9 @@ use i18n_harness_locales::Locale;
 use i18n_harness_project::{CatalogFormat, ReferenceEntry, ReferenceRef};
 
 use crate::backing::BackingCatalog;
-use crate::dto::{MergeReportDto, ProjectOpenResponse, ReuseReportDto, SplitReportDto};
+use crate::dto::{
+    BatchSplitReportDto, MergeReportDto, ProjectOpenResponse, ReuseReportDto, SplitReportDto,
+};
 use crate::error;
 use crate::services::reuse as svc;
 use crate::state::{AppState, OpenCatalogEntry};
@@ -247,6 +249,61 @@ pub(crate) fn split_remainder(
     };
 
     svc::split_remainder(&abs, &keep_ids, &out_abs)
+}
+
+/// Carve a remainder for **every** non-reference Qt catalog in the project into
+/// `out_dir`, one `<base>.remainder.ts` per catalog. Catalogs with nothing to
+/// export (no writable-untranslated units) are skipped and reported.
+///
+/// Snapshots the catalog list under a brief project lock, then does all file
+/// work with no locks held — mirroring the single-catalog reuse commands.
+/// Available regardless of the `ollama` feature.
+#[tauri::command]
+pub(crate) fn split_all_remainders(
+    out_dir: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<BatchSplitReportDto, String> {
+    // Snapshot non-reference Qt catalogs under a brief lock, then drop it.
+    let catalogs: Vec<(PathBuf, String)> = {
+        let guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = guard.as_ref().ok_or_else(error::no_project)?;
+        let reference_paths: HashSet<String> = project
+            .references()
+            .iter()
+            .map(|r| r.absolute_path.clone())
+            .collect();
+        project
+            .catalogs()
+            .iter()
+            .filter(|c| c.format == CatalogFormat::QtTs)
+            .filter(|c| !reference_paths.contains(&c.absolute_path))
+            .map(|c| (PathBuf::from(&c.absolute_path), c.manifest_path.clone()))
+            .collect()
+    };
+
+    let out_dir = PathBuf::from(&out_dir);
+    let mut written = Vec::new();
+    let mut skipped = Vec::new();
+
+    for (abs, manifest_path) in catalogs {
+        let keep_ids = svc::standalone_remainder_ids(&abs)?;
+        if keep_ids.is_empty() {
+            skipped.push(manifest_path);
+            continue;
+        }
+        let base = abs
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "catalog".to_string());
+        let out_abs = out_dir.join(format!("{base}.remainder.ts"));
+        let report = svc::split_remainder(&abs, &keep_ids, &out_abs)?;
+        written.push(report);
+    }
+
+    Ok(BatchSplitReportDto { written, skipped })
 }
 
 /// Merge a translated remainder back into its base, writing the result to

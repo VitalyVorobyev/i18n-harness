@@ -17,3 +17,9 @@ ui/coverage/
 .DS_Store
 *.swp
 *.swo
+
+# Local scratch translation projects (private data)
+data/
+
+# Codegraph index (generated, machine-local)
+.codegraph/

@@ -86,6 +86,17 @@ pub struct SplitReportDto {
     pub kept_count: usize,
 }
 
+/// Wire response from `split_all_remainders` — one batch run over every
+/// non-reference Qt catalog in the project.
+#[derive(Debug, Serialize)]
+pub struct BatchSplitReportDto {
+    /// One entry per catalog that had untranslated units and was written.
+    pub written: Vec<SplitReportDto>,
+    /// Manifest-relative paths of catalogs skipped because they had nothing to
+    /// export (fully translated) — surfaced so the UI can report them.
+    pub skipped: Vec<String>,
+}
+
 /// Wire response from `merge_catalogs`.
 ///
 /// `overlap_ids` / `stray_ids` are empty on success. On a merge guard failure

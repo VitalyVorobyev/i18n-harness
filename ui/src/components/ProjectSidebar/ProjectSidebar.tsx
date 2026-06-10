@@ -77,6 +77,11 @@ export function ProjectSidebar({
       ? summary.catalogs
       : summary.catalogs.filter((c) => activeLocaleFilter.has(c.locale));
 
+  // refAbsPaths: catalogs that ARE reference sources (show a badge).
+  // refLocales: locales that have at least one reference (make ⋯ always visible).
+  const refAbsPaths = new Set(summary.references.map((r) => r.absolute_path));
+  const refLocales = new Set(summary.references.map((r) => r.locale));
+
   return (
     <aside
       className={cn(
@@ -146,6 +151,8 @@ export function ProjectSidebar({
                   catalogStats={
                     loaded !== undefined ? catalogStatsOf(loaded) : null
                   }
+                  isRefSource={refAbsPaths.has(ref.absolute_path)}
+                  hasReferences={refLocales.has(ref.locale)}
                   onClick={() => onCatalogSelect(ref.absolute_path)}
                   reuseBusy={reuseBusyPaths?.has(ref.absolute_path) ?? false}
                   onApplyReferences={onApplyReferences}
@@ -169,6 +176,8 @@ function CatalogItem({
   isDirty,
   reviewCount,
   catalogStats: stats,
+  isRefSource = false,
+  hasReferences = false,
   onClick,
   reuseBusy,
   onApplyReferences,
@@ -184,6 +193,10 @@ function CatalogItem({
    * Populated as soon as the catalog is extracted and cached.
    */
   catalogStats: CatalogProgressStats | null;
+  /** True when this catalog itself is registered as a reference source. */
+  isRefSource?: boolean;
+  /** True when the project has reference files for this catalog's locale. */
+  hasReferences?: boolean;
   onClick: () => void;
   reuseBusy: boolean;
   onApplyReferences?: (catalogPath: string) => void;
@@ -275,6 +288,20 @@ function CatalogItem({
                   <span aria-hidden="true">{reviewCount}</span>
                 </span>
               )}
+
+              {/* Reference source badge — only on catalogs registered as references */}
+              {isRefSource && (
+                <span
+                  className={cn(
+                    "shrink-0 inline-flex items-center h-4 px-1 rounded-sm border",
+                    "text-[10px] font-medium leading-none",
+                    "bg-accent/10 border-accent/30 text-accent",
+                  )}
+                  title="This catalog is registered as a reference source"
+                >
+                  ref
+                </span>
+              )}
             </div>
 
             {/* Format label */}
@@ -310,7 +337,14 @@ function CatalogItem({
         onApplyReferences &&
         onExportRemainder &&
         onMergeCatalog && (
-          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 transition-opacity duration-75">
+          <div
+            className={cn(
+              "absolute top-2 right-2 transition-opacity duration-75",
+              hasReferences
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100",
+            )}
+          >
             <CatalogActions
               catalogPath={catalogRef.absolute_path}
               displayName={displayPath}

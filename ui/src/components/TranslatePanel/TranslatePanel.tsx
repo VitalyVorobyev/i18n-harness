@@ -16,6 +16,7 @@ import { useCallback, useState } from "react";
 import { cn } from "../../lib/cn";
 import type {
   BatchScope,
+  CatalogGateStats,
   CatalogResponse,
   GateReport,
   ProjectSummary,
@@ -23,6 +24,7 @@ import type {
   Unit,
   UnitId,
 } from "../../lib/types";
+import { CatalogStatsBar } from "./CatalogStatsBar";
 import { FocusView } from "./FocusView";
 import { MatrixView } from "./MatrixView";
 import type { ScopePair, StartPairFn } from "./RunOnScopeModal";
@@ -43,6 +45,8 @@ interface Props {
   search: string;
   dirtyIds: Set<UnitId>;
   reports: Record<UnitId, GateReport>;
+  /** Per-file gate stats for the active catalog; null until gated. */
+  stats: CatalogGateStats | null;
   busyIds: Set<UnitId>;
   batchActive: boolean;
   error: string | null;
@@ -76,6 +80,7 @@ export function TranslatePanel({
   openCatalogs,
   dirtyIds,
   reports,
+  stats,
   busyIds,
   batchActive,
   search,
@@ -216,6 +221,9 @@ export function TranslatePanel({
 
       {/* Spacer */}
       <span className="flex-1" />
+
+      {/* Per-file statistics for the active catalog */}
+      <CatalogStatsBar stats={stats} />
 
       {/* Status filter — always visible, selection persists across mode switches */}
       <StatusFilter value={statusFilter} onChange={setStatusFilter} />

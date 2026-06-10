@@ -8,9 +8,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use i18n_harness_core::{ReviewStatus, UnitId};
+use i18n_harness_core::{ReviewStatus, UnitId, UnitState};
 
-use crate::dto::project::{ReviewQueueItem, ReviewQueueResponse};
+use crate::dto::project::{CatalogStateCounts, ReviewQueueItem, ReviewQueueResponse};
 use crate::error;
 use crate::state::AppState;
 use crate::{OpenCatalogEntry, backing::extract_for_format};
@@ -140,6 +140,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
 
     let mut items: Vec<ReviewQueueItem> = Vec::new();
     let mut by_catalog: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stats_by_catalog: BTreeMap<String, CatalogStateCounts> = BTreeMap::new();
 
     // Iterate in BTreeMap order (= absolute path order) for deterministic output.
     for (abs, entry) in store.iter() {
@@ -151,8 +152,17 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
         let locale = locale_of.get(&abs_str).cloned().unwrap_or_default();
 
         let mut catalog_count: usize = 0;
+        let mut counts = CatalogStateCounts::default();
 
         for unit in entry.catalog.units() {
+            counts.total += 1;
+            match unit.state {
+                UnitState::Finished => counts.finished += 1,
+                UnitState::Proposed => counts.proposed += 1,
+                UnitState::Untranslated => counts.untranslated += 1,
+                UnitState::Vanished | UnitState::Obsolete => counts.vanished_obsolete += 1,
+            }
+
             // Serialize flags via serde to get the kebab-case strings that the
             // `#[serde(rename_all = "kebab-case")]` attribute on `Flag` produces.
             // `format!("{:?}")` would give PascalCase debug output instead.
@@ -173,6 +183,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
             if !needs_review {
                 continue;
             }
+            counts.needs_review += 1;
 
             let source_preview = truncate_preview(&unit.source, 120);
             let target_preview = extract_target_text(&unit.target, 120);
@@ -210,8 +221,9 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
         }
 
         if catalog_count > 0 {
-            by_catalog.insert(abs_str, catalog_count);
+            by_catalog.insert(abs_str.clone(), catalog_count);
         }
+        stats_by_catalog.insert(abs_str, counts);
     }
 
     // Sort: by catalog_path then unit_id (both strings, BTreeMap already gave
@@ -228,6 +240,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     Ok(ReviewQueueResponse {
         total_count,
         by_catalog,
+        stats_by_catalog,
         items,
     })
 }

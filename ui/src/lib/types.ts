@@ -156,6 +156,27 @@ export interface TranslateResult {
   report: GateReport;
 }
 
+/** Per-catalog state + severity breakdown from {@link CatalogGateResponse}. */
+export interface CatalogGateStats {
+  total: number;
+  finished: number;
+  proposed: number;
+  untranslated: number;
+  vanished_obsolete: number;
+  /** Units with at least one hard finding. */
+  hard: number;
+  /** Units with findings but no hard finding (soft/semantic only). */
+  soft: number;
+}
+
+/** Result of gating a whole open catalog (inspector reasons + per-file stats). */
+export interface CatalogGateResponse {
+  path: string;
+  /** Reports for flagged units only; clean units are omitted. */
+  reports: GateReport[];
+  stats: CatalogGateStats;
+}
+
 const HARD_FLAGS = new Set([
   "placeholder-mismatch",
   "plural-arity-mismatch",
@@ -432,12 +453,25 @@ export interface ReviewQueueItem {
   reviewer_note: string | null;
 }
 
+// CatalogStateCounts mirrors the Rust struct of the same name — a per-catalog
+// unit-state tally computed during the review scan.
+export interface CatalogStateCounts {
+  total: number;
+  finished: number;
+  proposed: number;
+  untranslated: number;
+  vanished_obsolete: number;
+  needs_review: number;
+}
+
 // ReviewQueueResponse mirrors the Rust struct of the same name.
 export interface ReviewQueueResponse {
   /** Total units that need review across all catalogs. */
   total_count: number;
-  /** Per-catalog unit count, keyed by absolute catalog path. */
+  /** Per-catalog needs-review unit count, keyed by absolute catalog path. */
   by_catalog: Record<string, number>;
+  /** Per-catalog unit-state tally, keyed by absolute catalog path. */
+  stats_by_catalog: Record<string, CatalogStateCounts>;
   /** All items, sorted by catalog path then unit id. */
   items: ReviewQueueItem[];
 }
@@ -613,6 +647,15 @@ export interface SplitReport {
   out_path: string;
   /** Number of units written into the remainder. */
   kept_count: number;
+}
+
+// BatchSplitReportDto mirrors ui/src-tauri/src/dto/reuse.rs — one batch run
+// over every non-reference Qt catalog in the project.
+export interface BatchSplitReport {
+  /** One entry per catalog that had untranslated units and was written. */
+  written: SplitReport[];
+  /** Manifest-relative paths of catalogs skipped (fully translated). */
+  skipped: string[];
 }
 
 // MergeReportDto mirrors ui/src-tauri/src/dto/reuse.rs.

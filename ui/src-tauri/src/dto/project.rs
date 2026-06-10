@@ -48,13 +48,35 @@ pub struct ReviewQueueItem {
     pub reviewer_note: Option<String>,
 }
 
+/// Per-catalog unit-state tally, computed during the review-queue scan so the
+/// UI can show progress numbers for every catalog (including unopened ones)
+/// without a second extract pass.
+#[derive(Debug, Default, Serialize)]
+pub struct CatalogStateCounts {
+    /// Every unit in the catalog, regardless of state.
+    pub total: usize,
+    /// `UnitState::Finished` units.
+    pub finished: usize,
+    /// `UnitState::Proposed` units.
+    pub proposed: usize,
+    /// `UnitState::Untranslated` units.
+    pub untranslated: usize,
+    /// `UnitState::Vanished` + `UnitState::Obsolete` units.
+    pub vanished_obsolete: usize,
+    /// Units flagged for human attention (`NeedsReview`/`Conflict` or any flag).
+    pub needs_review: usize,
+}
+
 /// Aggregated result of a project-wide review-queue scan.
 #[derive(Debug, Serialize)]
 pub struct ReviewQueueResponse {
     /// Total units that need review across all catalogs.
     pub total_count: usize,
-    /// Per-catalog unit count, keyed by absolute catalog path.
+    /// Per-catalog needs-review unit count, keyed by absolute catalog path.
     pub by_catalog: BTreeMap<String, usize>,
+    /// Per-catalog unit-state tally, keyed by absolute catalog path. Present
+    /// for every scanned catalog, even fully-finished ones.
+    pub stats_by_catalog: BTreeMap<String, CatalogStateCounts>,
     /// All items, sorted by catalog path then unit id.
     pub items: Vec<ReviewQueueItem>,
 }

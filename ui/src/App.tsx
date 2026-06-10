@@ -29,6 +29,7 @@ import {
   closeProject,
   currentProjectSummary,
   discardChangesInProject,
+  gateCatalogInProject,
   mergeCatalogs,
   openCatalogInProject,
   pickReferenceFiles,
@@ -47,6 +48,7 @@ import { listenBatchProgress } from "./lib/tauri-events";
 import { useTheme } from "./lib/theme";
 import type {
   BatchScope,
+  CatalogGateStats,
   CatalogResponse,
   GateReport,
   ProjectOpenResponse,
@@ -103,6 +105,11 @@ export function App() {
     new Set(),
   );
   const [reports, setReports] = useState<Record<UnitId, GateReport>>({});
+  // Per-catalog gate statistics, keyed by absolute path. Populated when a
+  // catalog is opened/switched and re-gated; drives the per-file stats view.
+  const [catalogStats, setCatalogStats] = useState<
+    Record<string, CatalogGateStats>
+  >({});
   const [busyIds, setBusyIds] = useState<Set<UnitId>>(new Set());
   const [toast, setToast] = useState<Toast | null>(null);
 
@@ -126,18 +133,6 @@ export function App() {
   // Absolute paths with a reuse/split/merge IPC call in flight (drives the
   // per-catalog actions-menu spinner).
   const [reuseBusyPaths, setReuseBusyPaths] = useState<Set<string>>(new Set());
-
-  // Per-catalog remaining-set ids captured from the last reuse pass. A reuse
-  // pass leaves conflicted units writable-but-untranslated, yet excludes them
-  // from its remaining set (they await human resolution). Export Remainder
-  // passes these exact ids so it carves out only the reuse leftovers, never the
-  // conflicts. Overwritten by the next reuse pass and cleared on project
-  // open/close; intentionally *not* cleared on edit so that resolving conflicts
-  // before exporting does not fall back to the standalone recompute (which would
-  // re-include the still-unresolved conflicts).
-  const [reuseRemainingIds, setReuseRemainingIds] = useState<
-    Map<string, string[]>
-  >(new Map());
 
   // ── Review queue ──────────────────────────────────────────────────────────
   // null = not yet scanned; populated eagerly when a project is open and
@@ -322,6 +317,7 @@ export function App() {
       setDirtyIds(new Set());
       setDirtyCatalogPaths(new Set());
       setReports({});
+      setCatalogStats({});
       setBusyIds(new Set());
       setProjectView("overview");
       setFocusLocale(null);
@@ -329,7 +325,6 @@ export function App() {
       setError(null);
       setCloseConfirm({ kind: "none" });
       setReuseBusyPaths(new Set());
-      setReuseRemainingIds(new Map());
       // Reset and immediately kick off a review-queue scan for the new project.
       setReviewQueue(null);
       scheduleRescan();
@@ -374,11 +369,11 @@ export function App() {
     setDirtyIds(new Set());
     setDirtyCatalogPaths(new Set());
     setReports({});
+    setCatalogStats({});
     setReviewQueue(null);
     setError(null);
     setCloseConfirm({ kind: "none" });
     setReuseBusyPaths(new Set());
-    setReuseRemainingIds(new Map());
   }, [activeBatch]);
 
   // Public entry point — raises inline confirmation when there are unsaved catalogs.
@@ -432,6 +427,27 @@ export function App() {
 
   // ── Project-mode catalog open ─────────────────────────────────────────────
 
+  // Re-run the validation gate over an open catalog to refresh its per-file
+  // stats and, when it is the active catalog, the per-unit reports the
+  // inspector renders. The gate is advisory: any failure is swallowed so it
+  // never blocks opening or switching catalogs.
+  const refreshCatalogGate = useCallback(
+    async (absPath: string, makeActive: boolean) => {
+      try {
+        const result = await gateCatalogInProject(absPath);
+        setCatalogStats((prev) => ({ ...prev, [absPath]: result.stats }));
+        if (makeActive) {
+          const map: Record<UnitId, GateReport> = {};
+          for (const r of result.reports) map[r.unit_id] = r;
+          setReports(map);
+        }
+      } catch {
+        // Advisory only — leave stats/reports untouched on failure.
+      }
+    },
+    [],
+  );
+
   const handleCatalogSelect = useCallback(
     async (absPath: string) => {
       if (absPath === activeCatalogPath) return;
@@ -453,6 +469,7 @@ export function App() {
         setSelectedId(first?.id ?? null);
         // Dirty IDs are per-active-catalog — reset when switching.
         setDirtyIds(new Set());
+        void refreshCatalogGate(absPath, true);
         return;
       }
 
@@ -471,6 +488,7 @@ export function App() {
         setDirtyIds(new Set());
         setReports({});
         setBusyIds(new Set());
+        void refreshCatalogGate(absPath, true);
       } catch (e) {
         setError(formatError(e));
         flashError(`Could not open catalog: ${formatError(e)}`);
@@ -478,7 +496,7 @@ export function App() {
         setLoading(false);
       }
     },
-    [activeCatalogPath, openCatalogs, flashError],
+    [activeCatalogPath, openCatalogs, flashError, refreshCatalogGate],
   );
 
   // ── Edit / translate / save / discard (project-scoped) ───────────────────
@@ -1392,13 +1410,6 @@ export function App() {
           report = await reuseReferencesInProject(catalogPath, picked);
         }
 
-        // Capture the exact remaining set so an immediate Export Remainder
-        // carves out only these (conflicts excluded), not the standalone
-        // writable-untranslated set that would re-include conflicted units.
-        setReuseRemainingIds((prev) =>
-          new Map(prev).set(catalogPath, report.remaining_ids),
-        );
-
         // Re-pull the post-reuse catalog (the backend refreshed it in place but
         // does not return units) and merge it into the cache.
         const refreshed = await openCatalogInProject(catalogPath);
@@ -1414,18 +1425,24 @@ export function App() {
         // place, so the in-memory entry is clean — do NOT mark it dirty.
         scheduleRescan();
 
-        const summary =
-          `${report.copied_finished} finished, ` +
-          `${report.copied_needs_review} need review, ` +
-          `${report.conflict_count} conflict(s), ` +
-          `${report.remaining_count} remaining`;
-        if (report.conflict_count > 0) {
-          flashInfo(
-            `References applied: ${summary}. Resolve conflicts in Review.`,
+        const parts: string[] = [];
+        if (report.copied_finished > 0)
+          parts.push(
+            `${report.copied_finished} auto-finished (gate-clean, complete)`,
           );
-        } else {
-          flashInfo(`References applied: ${summary}.`);
-        }
+        if (report.copied_needs_review > 0)
+          parts.push(
+            `${report.copied_needs_review} proposed for review (soft-flagged or incomplete plural)`,
+          );
+        if (report.conflict_count > 0)
+          parts.push(
+            `${report.conflict_count} conflict(s) — resolve in Review`,
+          );
+        if (report.remaining_count > 0)
+          parts.push(
+            `${report.remaining_count} remaining (no match in references)`,
+          );
+        flashInfo(`References applied: ${parts.join("; ")}.`);
       } catch (e) {
         flashError(`Apply references failed: ${formatError(e)}`);
       } finally {
@@ -1452,10 +1469,11 @@ export function App() {
       if (!outPath) return;
       markReuseBusy(catalogPath, true);
       try {
-        // Prefer the remaining set captured by the last reuse pass (conflicts
-        // excluded); fall back to a standalone recompute when no reuse ran.
-        const onlyIds = reuseRemainingIds.get(catalogPath) ?? null;
-        const report = await splitRemainder(catalogPath, outPath, onlyIds);
+        // Always recompute the writable-untranslated set fresh from disk
+        // (only_ids = null) so the export reflects the catalog's current state.
+        // Conflicted units stay writable-but-untranslated and are correctly
+        // included — they still need translation.
+        const report = await splitRemainder(catalogPath, outPath, null);
         flashInfo(
           `Wrote ${report.kept_count} unit(s) to ${shortenPath(report.out_path)}.`,
         );
@@ -1465,7 +1483,7 @@ export function App() {
         markReuseBusy(catalogPath, false);
       }
     },
-    [markReuseBusy, reuseRemainingIds, flashInfo, flashError],
+    [markReuseBusy, flashInfo, flashError],
   );
 
   const onMergeCatalog = useCallback(
@@ -1630,6 +1648,7 @@ export function App() {
                 summary={summary}
                 openCatalogs={openCatalogs}
                 dirtyCatalogPaths={dirtyCatalogPaths}
+                statsByCatalog={reviewQueue?.stats_by_catalog ?? {}}
                 focusLocale={focusLocale}
                 setFocusLocale={setFocusLocale}
                 setProjectView={setProjectView}
@@ -1653,6 +1672,11 @@ export function App() {
                 search={search}
                 dirtyIds={dirtyIds}
                 reports={reports}
+                stats={
+                  activeCatalogPath
+                    ? (catalogStats[activeCatalogPath] ?? null)
+                    : null
+                }
                 busyIds={busyIds}
                 batchActive={activeBatch !== null}
                 error={error}

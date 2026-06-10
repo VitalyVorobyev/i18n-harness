@@ -1,13 +1,70 @@
 //! Commands for mutating project manifest settings (catalogs, locales, backend,
 //! glossary, prompts).
 
+use std::path::{Path, PathBuf};
+
 use i18n_harness_project::{
-    BackendConfig, CatalogEntry, GlossaryConfig, LocaleConfig, PromptsConfig,
+    BackendConfig, CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig, PromptsConfig,
 };
 
 use crate::dto::ProjectOpenResponse;
 use crate::error;
 use crate::state::AppState;
+
+/// Guess a `CatalogFormat` from a file extension, or `None` for unsupported
+/// extensions (the file is then ignored by the folder scan).
+fn format_from_ext(path: &Path) -> Option<CatalogFormat> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())?
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "ts" => Some(CatalogFormat::QtTs),
+        "po" | "pot" => Some(CatalogFormat::GettextPo),
+        "json" => Some(CatalogFormat::IcuJson),
+        _ => None,
+    }
+}
+
+/// Recursively collect catalog files (`.ts` / `.po` / `.json`) under `dir`.
+/// Symlinks are not followed; unreadable subdirectories are skipped silently.
+fn collect_catalog_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_catalog_files(&path, out);
+        } else if file_type.is_file() && format_from_ext(&path).is_some() {
+            out.push(path);
+        }
+    }
+}
+
+/// Infer a locale id for `file_name` by matching each known locale id as a
+/// `_<id>_` / `_<id>.` token in the name (e.g. `Acf_es_ES_s.ts` → `es_ES`).
+/// Falls back to the first known locale id when no token matches.
+fn infer_locale(file_name: &str, locale_ids: &[String]) -> Option<(String, bool)> {
+    for id in locale_ids {
+        if file_name.contains(&format!("_{id}_")) || file_name.contains(&format!("_{id}.")) {
+            return Some((id.clone(), false));
+        }
+    }
+    locale_ids.first().map(|id| (id.clone(), true))
+}
+
+/// Relativize `abs` against `root`; keep it absolute when not under root.
+/// Mirrors the UI's `relativize` helper so manifest paths match either way.
+fn relativize(abs: &Path, root: &Path) -> PathBuf {
+    abs.strip_prefix(root)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|_| abs.to_path_buf())
+}
 
 /// Add a new catalog entry to the project manifest and persist it.
 ///
@@ -31,6 +88,86 @@ pub(crate) fn add_catalog_to_project(
         summary,
         warnings: vec![],
     })
+}
+
+/// Discover every `.ts` / `.po` / `.json` catalog under `folder` (recursively)
+/// and add each new one to the project manifest, persisting **once** at the end.
+///
+/// Locale is inferred from each filename via a `_<locale>_` token; files with no
+/// matching token fall back to the project's first locale (reported in
+/// `warnings`). Files already present in the manifest are skipped. The returned
+/// `warnings` summarise added / skipped / locale-defaulted files.
+#[tauri::command]
+pub(crate) fn add_catalogs_from_folder(
+    folder: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProjectOpenResponse, String> {
+    let mut guard = state
+        .project
+        .lock()
+        .map_err(error::lock_poisoned("project"))?;
+    let project = guard.as_mut().ok_or_else(error::no_project)?;
+
+    let root = project.paths().root().to_path_buf();
+    let locale_ids: Vec<String> = project.locale_ids().map(str::to_owned).collect();
+    if locale_ids.is_empty() {
+        return Err("project has no locales configured; add a locale first".to_string());
+    }
+
+    let mut files = Vec::new();
+    collect_catalog_files(Path::new(&folder), &mut files);
+    files.sort();
+
+    let mut added = 0usize;
+    let mut skipped = 0usize;
+    let mut warnings: Vec<String> = Vec::new();
+
+    for abs in files {
+        let Some(format) = format_from_ext(&abs) else {
+            continue;
+        };
+        let file_name = abs
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let Some((locale, defaulted)) = infer_locale(&file_name, &locale_ids) else {
+            continue;
+        };
+        let rel = relativize(&abs, &root);
+        let entry = CatalogEntry {
+            path: rel.clone(),
+            format,
+            locale: locale.clone(),
+        };
+        match project.add_catalog(entry) {
+            Ok(()) => {
+                added += 1;
+                if defaulted {
+                    warnings.push(format!(
+                        "{}: no locale in filename, defaulted to {locale}",
+                        rel.display()
+                    ));
+                }
+            }
+            Err(_) => {
+                // Most commonly a duplicate path already in the manifest; treat
+                // as a skip rather than aborting the whole batch.
+                skipped += 1;
+            }
+        }
+    }
+
+    if added > 0 {
+        project.save_manifest().map_err(|e| e.to_string())?;
+    }
+
+    warnings.insert(
+        0,
+        format!("Added {added} catalog(s); skipped {skipped} already-present."),
+    );
+
+    let summary = project.summary();
+    Ok(ProjectOpenResponse { summary, warnings })
 }
 
 /// Remove the catalog at `path` (manifest-relative) from the project manifest

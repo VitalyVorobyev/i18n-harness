@@ -6,20 +6,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addCatalogsFromFolder,
   addCatalogToProject,
   addProjectReference,
   pickCatalogFileForProject,
+  pickCatalogFolder,
   pickReferenceFiles,
+  pickRemainderOutputFolder,
   removeCatalogFromProject,
   removeLocaleFromProject,
   removeProjectReference,
   setBackendInProject,
+  splitAllRemainders,
   updateLocaleInProject,
 } from "../../lib/tauri";
 import type {
   BackendConfig,
   BackendKind,
   CatalogFormat,
+  CatalogRef,
   LocaleConfig,
   ProjectOpenResponse,
   ProjectSummary,
@@ -596,6 +601,33 @@ function CatalogsCard({
   const [addForm, setAddForm] = useState<AddCatalogFormState | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const handleToggleRef = useCallback(
+    async (c: CatalogRef, enable: boolean) => {
+      setBusy(true);
+      try {
+        let resp: ProjectOpenResponse;
+        if (enable) {
+          resp = await addProjectReference({
+            path: c.manifest_path,
+            format: c.format,
+            locale: c.locale,
+          });
+        } else {
+          resp = await removeProjectReference(c.manifest_path);
+        }
+        onMutation(resp);
+        flashSaved();
+      } catch (e) {
+        flashError(
+          `Could not ${enable ? "add" : "remove"} reference: ${formatError(e)}`,
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onMutation, flashError, flashSaved],
+  );
+
   const handleRemove = useCallback(
     async (manifestPath: string) => {
       const ok = window.confirm(
@@ -659,6 +691,39 @@ function CatalogsCard({
     }
   }, [addForm, onMutation, flashError, flashInfo, flashSaved]);
 
+  const handleAddFolder = useCallback(async () => {
+    setBusy(true);
+    try {
+      const folder = await pickCatalogFolder();
+      if (!folder) return;
+      const resp = await addCatalogsFromFolder(folder);
+      onMutation(resp);
+      flashSaved();
+      // The first warning is always the "Added N; skipped M" summary line.
+      flashInfo(resp.warnings[0] ?? "Folder scanned.");
+    } catch (e) {
+      flashError(`Could not add folder: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [onMutation, flashError, flashInfo, flashSaved]);
+
+  const handleExportAllRemainders = useCallback(async () => {
+    setBusy(true);
+    try {
+      const outDir = await pickRemainderOutputFolder();
+      if (!outDir) return;
+      const report = await splitAllRemainders(outDir);
+      flashInfo(
+        `Wrote ${report.written.length} remainder file(s); skipped ${report.skipped.length} fully-translated.`,
+      );
+    } catch (e) {
+      flashError(`Export all remainders failed: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [flashError, flashInfo]);
+
   return (
     <Card title="Catalogs" saved={saved}>
       {summary.catalogs.length === 0 ? (
@@ -672,39 +737,80 @@ function CatalogsCard({
                 <th className="text-left py-1.5 px-1 font-medium">Format</th>
                 <th className="text-left py-1.5 px-1 font-medium">Locale</th>
                 <th className="text-left py-1.5 px-1 font-medium">Status</th>
+                <th
+                  className="text-center py-1.5 px-1 font-medium w-10"
+                  title="Mark this catalog as a reference source for reuse"
+                >
+                  Ref
+                </th>
                 <th className="py-1.5 px-1" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
-              {summary.catalogs.map((c) => (
-                <tr
-                  key={c.absolute_path}
-                  className="border-b border-border-subtle last:border-0 hover:bg-bg-hover/40"
-                >
-                  <td
-                    className="py-1.5 px-1 font-mono text-fg-primary max-w-[220px] truncate"
-                    title={c.manifest_path}
+              {summary.catalogs.map((c) => {
+                const isRef = summary.references.some(
+                  (r) => r.manifest_path === c.manifest_path,
+                );
+                return (
+                  <tr
+                    key={c.absolute_path}
+                    className="border-b border-border-subtle last:border-0 hover:bg-bg-hover/40"
                   >
-                    {c.manifest_path}
-                  </td>
-                  <td className="py-1.5 px-1 text-fg-secondary">{c.format}</td>
-                  <td className="py-1.5 px-1 text-fg-secondary">{c.locale}</td>
-                  <td className="py-1.5 px-1">
-                    <CatalogStatusBadge status={c.status} />
-                  </td>
-                  <td className="py-1.5 px-1">
-                    <button
-                      type="button"
-                      aria-label={`Remove catalog ${c.manifest_path}`}
-                      className={btnDangerCls}
-                      disabled={busy}
-                      onClick={() => void handleRemove(c.manifest_path)}
+                    <td
+                      className="py-1.5 px-1 font-mono text-fg-primary max-w-[220px] truncate"
+                      title={c.manifest_path}
                     >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {c.manifest_path}
+                    </td>
+                    <td className="py-1.5 px-1 text-fg-secondary">
+                      {c.format}
+                    </td>
+                    <td className="py-1.5 px-1 text-fg-secondary">
+                      {c.locale}
+                    </td>
+                    <td className="py-1.5 px-1">
+                      <CatalogStatusBadge status={c.status} />
+                    </td>
+                    <td className="py-1.5 px-1 text-center">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isRef}
+                        aria-label={
+                          isRef
+                            ? `Remove ${c.manifest_path} from references`
+                            : `Mark ${c.manifest_path} as a reference`
+                        }
+                        title={
+                          isRef
+                            ? "Used as a reference — click to remove"
+                            : "Mark as a reference to reuse its finished translations into same-locale catalogs"
+                        }
+                        disabled={busy}
+                        className={
+                          isRef
+                            ? "inline-flex items-center justify-center w-5 h-5 rounded border border-accent bg-accent/10 text-accent text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent transition-colors duration-100 disabled:opacity-40"
+                            : "inline-flex items-center justify-center w-5 h-5 rounded border border-border-default text-fg-disabled hover:border-border-strong text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent transition-colors duration-100 disabled:opacity-40"
+                        }
+                        onClick={() => void handleToggleRef(c, !isRef)}
+                      >
+                        {isRef ? "✓" : ""}
+                      </button>
+                    </td>
+                    <td className="py-1.5 px-1">
+                      <button
+                        type="button"
+                        aria-label={`Remove catalog ${c.manifest_path}`}
+                        className={btnDangerCls}
+                        disabled={busy}
+                        onClick={() => void handleRemove(c.manifest_path)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -712,7 +818,7 @@ function CatalogsCard({
 
       {/* Add catalog affordance */}
       {addForm === null ? (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             className={btnCls}
@@ -720,6 +826,15 @@ function CatalogsCard({
             onClick={() => void handlePickFile()}
           >
             Pick file…
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            disabled={busy}
+            onClick={() => void handleAddFolder()}
+            title="Recursively add every .ts/.po/.json file in a folder"
+          >
+            Add folder…
           </button>
           <button
             type="button"
@@ -736,6 +851,16 @@ function CatalogsCard({
             }
           >
             Add manually
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            className={btnCls}
+            disabled={busy || summary.catalogs.length === 0}
+            onClick={() => void handleExportAllRemainders()}
+            title="Export the untranslated remainder of every non-reference catalog into one folder"
+          >
+            Export all remainders…
           </button>
         </div>
       ) : (

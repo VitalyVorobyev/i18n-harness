@@ -47,6 +47,7 @@ const BASE_PROPS = {
   search: "",
   dirtyIds: new Set<string>(),
   reports: {},
+  stats: null,
   busyIds: new Set<string>(),
   batchActive: false,
   error: null,

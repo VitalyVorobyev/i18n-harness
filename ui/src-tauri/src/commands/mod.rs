@@ -7,6 +7,7 @@
 pub(crate) mod corrections;
 pub(crate) mod eval;
 pub(crate) mod file_catalog;
+pub(crate) mod gate;
 pub(crate) mod glossary;
 pub(crate) mod meta;
 pub mod project_catalog;
@@ -27,6 +28,8 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         file_catalog::save_catalog,
         file_catalog::discard_changes,
         file_catalog::translate_unit,
+        gate::gate_catalog,
+        gate::gate_catalog_in_project,
         meta::list_locales,
         glossary::load_glossary,
         glossary::save_glossary,
@@ -57,6 +60,7 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         review::set_review_status_in_project,
         review::accept_unit_in_project,
         settings::add_catalog_to_project,
+        settings::add_catalogs_from_folder,
         settings::remove_catalog_from_project,
         settings::update_locale_in_project,
         settings::remove_locale_from_project,
@@ -66,6 +70,7 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         review::scan_project_review_state,
         reuse::reuse_references_in_project,
         reuse::split_remainder,
+        reuse::split_all_remainders,
         reuse::merge_catalogs,
         reuse::add_project_reference,
         reuse::remove_project_reference,
@@ -85,6 +90,8 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         file_catalog::update_unit_target,
         file_catalog::save_catalog,
         file_catalog::discard_changes,
+        gate::gate_catalog,
+        gate::gate_catalog_in_project,
         meta::list_locales,
         glossary::load_glossary,
         glossary::save_glossary,
@@ -112,6 +119,7 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         review::set_review_status_in_project,
         review::accept_unit_in_project,
         settings::add_catalog_to_project,
+        settings::add_catalogs_from_folder,
         settings::remove_catalog_from_project,
         settings::update_locale_in_project,
         settings::remove_locale_from_project,
@@ -121,6 +129,7 @@ pub(crate) fn build_handler(builder: tauri::Builder<tauri::Wry>) -> tauri::Build
         review::scan_project_review_state,
         reuse::reuse_references_in_project,
         reuse::split_remainder,
+        reuse::split_all_remainders,
         reuse::merge_catalogs,
         reuse::add_project_reference,
         reuse::remove_project_reference,

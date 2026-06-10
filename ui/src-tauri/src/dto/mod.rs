@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod correction;
 #[cfg(feature = "ollama")]
 pub mod eval;
+pub mod gate;
 pub mod glossary;
 pub mod metrics;
 pub mod project;
@@ -17,6 +18,7 @@ pub use catalog::*;
 pub use correction::*;
 #[cfg(feature = "ollama")]
 pub use eval::*;
+pub use gate::*;
 pub use glossary::*;
 pub use metrics::*;
 pub use project::*;

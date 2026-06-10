@@ -277,6 +277,13 @@ fn length_warn_check(
     if source_chars == 0 {
         return;
     }
+    // At very short lengths a single extra character swings the ratio by
+    // 25–50%, producing false positives for trivially correct translations
+    // (e.g. "Red" → "Rojo" = 1.33×, "Test" → "Probar" = 1.5×). Ratio
+    // noise dominates meaning below 8 source characters, so skip the check.
+    if source_chars < 8 {
+        return;
+    }
     let target_chars: u32 = slots.iter().map(|s| s.text.chars().count() as u32).sum();
     let threshold = locale.length_warn_ratio;
     // UI strings are tiny (a screen at a time); even at 100 KB per slot
@@ -502,9 +509,74 @@ fn markup_tag_check(unit: &Unit, slots: &[TargetSlot<'_>], findings: &mut Vec<Fi
     }
 }
 
+/// HTML / Qt-rich-text tag names recognized as markup. Restricting the lexer
+/// to this set is what keeps literal angle-bracket labels — `<No ID>`,
+/// `<empty>`, `<unset>` and the like, common in UI source strings — from being
+/// mistaken for markup and flagged as a tag mismatch against their (equally
+/// literal) translation. The list is the Qt rich-text HTML subset plus the
+/// inline/formatting tags that actually appear in UI strings; it is matched
+/// case-insensitively (names are lower-cased before lookup).
+const MARKUP_TAG_NAMES: &[&str] = &[
+    "a",
+    "abbr",
+    "b",
+    "big",
+    "blockquote",
+    "body",
+    "br",
+    "center",
+    "cite",
+    "code",
+    "dd",
+    "dfn",
+    "div",
+    "dl",
+    "dt",
+    "em",
+    "font",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "hr",
+    "html",
+    "i",
+    "img",
+    "kbd",
+    "li",
+    "nobr",
+    "ol",
+    "p",
+    "pre",
+    "q",
+    "s",
+    "samp",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "tt",
+    "u",
+    "ul",
+    "var",
+];
+
 /// Lex `<NAME>`, `</NAME>`, and `<NAME ... />` patterns out of `text` and
 /// return the tag names in document order. Lower-cases names so `<B>` and
-/// `<b>` collapse.
+/// `<b>` collapse. Only names in [`MARKUP_TAG_NAMES`] count; any other
+/// `<word …>` is treated as literal text, not markup.
 ///
 /// Heuristics:
 /// - A `<` followed by `/`, an ASCII letter, or `_` starts a candidate.
@@ -551,7 +623,10 @@ fn extract_tag_names(text: &str) -> Vec<String> {
             continue;
         }
         if let Ok(name) = std::str::from_utf8(&bytes[name_start..j]) {
-            out.push(name.to_ascii_lowercase());
+            let lowered = name.to_ascii_lowercase();
+            if MARKUP_TAG_NAMES.contains(&lowered.as_str()) {
+                out.push(lowered);
+            }
         }
         i = k + 1;
     }

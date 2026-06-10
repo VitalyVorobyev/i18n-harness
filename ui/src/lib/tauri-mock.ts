@@ -11,6 +11,8 @@ const MOCK_TRANSLATE_DELAY_MS = 400;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 import type {
+  CatalogGateResponse,
+  CatalogGateStats,
   CatalogResponse,
   GlossaryLoadResponse,
   GlossaryPayload,
@@ -157,6 +159,38 @@ function cmdOpenCatalogInProject(args: {
   if (!catalog)
     throw new Error(`Catalog not found in mock: ${args.catalogPath}`);
   return JSON.parse(JSON.stringify(catalog)) as CatalogResponse;
+}
+
+function emptyGateStats(): CatalogGateStats {
+  return {
+    total: 0,
+    finished: 0,
+    proposed: 0,
+    untranslated: 0,
+    vanished_obsolete: 0,
+    hard: 0,
+    soft: 0,
+  };
+}
+
+// The mock does not run the real validation gate; it derives state counts
+// from the catalog's units and reports no findings. Enough for component
+// tests that only exercise the per-file stats wiring.
+function cmdGateCatalogInProject(args: {
+  catalogPath: string;
+}): CatalogGateResponse {
+  const catalog = state.catalogs.get(args.catalogPath);
+  if (!catalog)
+    throw new Error(`Catalog not found in mock: ${args.catalogPath}`);
+  const stats = emptyGateStats();
+  stats.total = catalog.units.length;
+  for (const u of catalog.units) {
+    if (u.state === "finished") stats.finished++;
+    else if (u.state === "proposed") stats.proposed++;
+    else if (u.state === "untranslated") stats.untranslated++;
+    else stats.vanished_obsolete++;
+  }
+  return { path: args.catalogPath, reports: [], stats };
 }
 
 function cmdUpdateUnitTargetInProject(args: {
@@ -368,6 +402,7 @@ function cmdCancelTranslation(_args: { jobId: string }): boolean {
 function cmdScanProjectReviewState(): ReviewQueueResponse {
   const items: ReviewQueueResponse["items"] = [];
   const byCatalog: Record<string, number> = {};
+  const statsByCatalog: ReviewQueueResponse["stats_by_catalog"] = {};
 
   for (const [catalogPath, catalog] of state.catalogs) {
     const project = state.openProject;
@@ -375,13 +410,27 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
       (c) => c.absolute_path === catalogPath,
     );
     let count = 0;
+    const counts = {
+      total: 0,
+      finished: 0,
+      proposed: 0,
+      untranslated: 0,
+      vanished_obsolete: 0,
+      needs_review: 0,
+    };
     for (const unit of catalog.units) {
+      counts.total++;
+      if (unit.state === "finished") counts.finished++;
+      else if (unit.state === "proposed") counts.proposed++;
+      else if (unit.state === "untranslated") counts.untranslated++;
+      else counts.vanished_obsolete++;
       const needsReview =
         unit.review_status === "needs-review" ||
         unit.review_status === "conflict" ||
         unit.flags.length > 0;
       if (!needsReview) continue;
       count++;
+      counts.needs_review++;
       items.push({
         catalog_path: catalogPath,
         catalog_manifest_path: catRef?.manifest_path ?? catalogPath,
@@ -400,11 +449,13 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
       });
     }
     if (count > 0) byCatalog[catalogPath] = count;
+    statsByCatalog[catalogPath] = counts;
   }
 
   return {
     total_count: items.length,
     by_catalog: byCatalog,
+    stats_by_catalog: statsByCatalog,
     items,
   };
 }
@@ -450,6 +501,13 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   close_project: () => cmdCloseProject(),
   open_catalog_in_project: (a) =>
     cmdOpenCatalogInProject(a as { catalogPath: string }),
+  gate_catalog_in_project: (a) =>
+    cmdGateCatalogInProject(a as { catalogPath: string }),
+  gate_catalog: () => ({
+    path: "",
+    reports: [],
+    stats: emptyGateStats(),
+  }),
   update_unit_target_in_project: (a) =>
     cmdUpdateUnitTargetInProject(
       a as { catalogPath: string; unitId: UnitId; edit: TargetEdit },
@@ -486,6 +544,10 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   }),
   create_project: () => ({ summary: state.openProject, warnings: [] }),
   add_catalog_to_project: () => ({ summary: state.openProject, warnings: [] }),
+  add_catalogs_from_folder: () => ({
+    summary: state.openProject,
+    warnings: ["Added 0 catalog(s); skipped 0 already-present."],
+  }),
   remove_catalog_from_project: () => ({
     summary: state.openProject,
     warnings: [],
@@ -618,6 +680,38 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
       out_path: args.outPath,
       kept_count: args.onlyIds?.length ?? writableUntranslated,
     };
+  },
+  split_all_remainders: (a) => {
+    const args = a as { outDir: string };
+    const project = state.openProject;
+    const referencePaths = new Set(
+      (project?.references ?? []).map((r) => r.absolute_path),
+    );
+    const written: {
+      base_path: string;
+      out_path: string;
+      kept_count: number;
+    }[] = [];
+    const skipped: string[] = [];
+    for (const c of project?.catalogs ?? []) {
+      if (c.format !== "qt-ts" || referencePaths.has(c.absolute_path)) continue;
+      const catalog = state.catalogs.get(c.absolute_path);
+      const keptCount = (catalog?.units ?? []).filter(
+        (u) => u.state === "untranslated",
+      ).length;
+      if (keptCount === 0) {
+        skipped.push(c.manifest_path);
+        continue;
+      }
+      const base =
+        c.absolute_path.split("/").pop()?.replace(/\.ts$/i, "") ?? "catalog";
+      written.push({
+        base_path: c.absolute_path,
+        out_path: `${args.outDir}/${base}.remainder.ts`,
+        kept_count: keptCount,
+      });
+    }
+    return { written, skipped };
   },
   merge_catalogs: (a) => {
     const args = a as {

@@ -9,7 +9,9 @@ import {
 import type {
   BackendConfig,
   BatchScope,
+  BatchSplitReport,
   CatalogEntry,
+  CatalogGateResponse,
   CatalogResponse,
   Correction,
   CuratedExample,
@@ -68,6 +70,10 @@ export async function discardChanges(): Promise<CatalogResponse> {
 
 export async function translateUnit(unitId: UnitId): Promise<TranslateResult> {
   return await invoke<TranslateResult>("translate_unit", { unitId });
+}
+
+export async function gateCatalog(): Promise<CatalogGateResponse> {
+  return await invoke<CatalogGateResponse>("gate_catalog");
 }
 
 export async function pickCatalogFile(): Promise<string | null> {
@@ -219,6 +225,14 @@ export async function openCatalogInProject(
   });
 }
 
+export async function gateCatalogInProject(
+  catalogPath: string,
+): Promise<CatalogGateResponse> {
+  return await invoke<CatalogGateResponse>("gate_catalog_in_project", {
+    catalogPath,
+  });
+}
+
 export async function updateUnitTargetInProject(
   catalogPath: string,
   unitId: UnitId,
@@ -293,12 +307,42 @@ export async function pickProjectFolder(): Promise<string | null> {
   return null;
 }
 
+/// Pick a folder to recursively scan for catalogs to add to the project.
+export async function pickCatalogFolder(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+/// Pick a destination folder for a batch remainder export.
+export async function pickRemainderOutputFolder(): Promise<string | null> {
+  const selected = await openDialog({
+    multiple: false,
+    directory: true,
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
 // ── Settings view mutation wrappers ───────────────────────────────────────────
 
 export async function addCatalogToProject(
   entry: CatalogEntry,
 ): Promise<ProjectOpenResponse> {
   return await invoke<ProjectOpenResponse>("add_catalog_to_project", { entry });
+}
+
+/// Recursively scan `folder` for `.ts`/`.po`/`.json` catalogs and add each new
+/// one to the project, inferring locale from the filename. Persists once.
+export async function addCatalogsFromFolder(
+  folder: string,
+): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("add_catalogs_from_folder", {
+    folder,
+  });
 }
 
 export async function removeCatalogFromProject(
@@ -558,6 +602,15 @@ export async function splitRemainder(
     outPath,
     onlyIds: onlyIds ?? null,
   });
+}
+
+/// Carve a remainder for every non-reference Qt catalog in the project into
+/// `outDir`, one `<base>.remainder.ts` per catalog. Fully-translated catalogs
+/// are skipped and reported in the response.
+export async function splitAllRemainders(
+  outDir: string,
+): Promise<BatchSplitReport> {
+  return await invoke<BatchSplitReport>("split_all_remainders", { outDir });
 }
 
 /// Merge a translated remainder back into its base, writing the result to

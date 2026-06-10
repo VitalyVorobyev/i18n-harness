@@ -33,8 +33,13 @@
 //!
 //! # Known limitations
 //!
-//! - The source text must not contain unescaped ICU metacharacters (`{`,
-//!   `}`, `'`) used as literal characters; ICU treats them as syntax. Qt UI
+//! - Literal apostrophes (`'`) are handled: `to_icu` escapes each as `''`
+//!   (the ICU literal-apostrophe form) and `from_icu` collapses `''` back to
+//!   `'`. This keeps placeholders adjacent to apostrophes (e.g. the common
+//!   `'%1'` quoting in Romance-language targets) from being misread by ICU
+//!   consumers as quoted literals.
+//! - The source text must not contain unescaped ICU **brace** metacharacters
+//!   (`{`, `}`) used as literal characters; ICU treats them as syntax. Qt UI
 //!   strings essentially never use these as literals, but extracting from a
 //!   pathological source would round-trip incorrectly. A `debug_assert!`
 //!   could be added later if this becomes an issue in practice.
@@ -55,15 +60,28 @@ pub fn to_icu(qt: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
+        if b == b'\'' {
+            // ICU treats `'` as the literal-escape marker: a lone `'` before a
+            // syntax char (`{`, `}`, `#`, `|`) opens a quoted span, so a Qt
+            // string like `'%1'` would otherwise normalize to `'{0}'`, which
+            // every ICU consumer (the gate parser, the ICU-JSON serializer)
+            // reads as the *literal text* `{0}` rather than a placeholder.
+            // Doubling makes the apostrophe an unambiguous literal `'`, leaving
+            // `{0}` a real placeholder. `from_icu` collapses `''` back to `'`.
+            out.push_str("''");
+            i += 1;
+            continue;
+        }
         if b != b'%' {
-            // Fast path: copy a run of non-% chars verbatim.
+            // Fast path: copy a run of plain text verbatim, stopping at the
+            // next byte that needs handling (`%` token, `'` escape).
             let start = i;
-            while i < bytes.len() && bytes[i] != b'%' {
+            while i < bytes.len() && bytes[i] != b'%' && bytes[i] != b'\'' {
                 i += 1;
             }
-            // Safety on `from_utf8_unchecked`: `qt` is a `&str`, so its bytes
-            // are valid UTF-8; we did not split inside a multi-byte sequence
-            // because `%` is single-byte ASCII.
+            // Safety: `qt` is a `&str`, so its bytes are valid UTF-8; we never
+            // split a multi-byte sequence because `%` and `'` are single-byte
+            // ASCII.
             out.push_str(std::str::from_utf8(&bytes[start..i]).expect("utf-8 invariant"));
             continue;
         }
@@ -142,6 +160,18 @@ pub fn from_icu(icu: &str) -> String {
     while i < bytes.len() {
         let b = bytes[i];
         match b {
+            b'\'' => {
+                // Inverse of the `to_icu` escape: a doubled `''` is one literal
+                // apostrophe. A lone `'` (from an external ICU source that
+                // never went through `to_icu`) is passed through unchanged.
+                if bytes.get(i + 1) == Some(&b'\'') {
+                    out.push('\'');
+                    i += 2;
+                } else {
+                    out.push('\'');
+                    i += 1;
+                }
+            }
             b'%' => {
                 // Literal `%` in ICU output came from an escaped `%%` in Qt source.
                 out.push_str("%%");
@@ -190,7 +220,7 @@ pub fn from_icu(icu: &str) -> String {
             }
             _ => {
                 let start = i;
-                while i < bytes.len() && bytes[i] != b'%' && bytes[i] != b'{' {
+                while i < bytes.len() && bytes[i] != b'%' && bytes[i] != b'{' && bytes[i] != b'\'' {
                     i += 1;
                 }
                 out.push_str(std::str::from_utf8(&bytes[start..i]).expect("utf-8 invariant"));
@@ -253,6 +283,29 @@ mod tests {
     }
 
     #[test]
+    fn apostrophe_around_placeholder_is_escaped() {
+        // The real-world case: a Romance-language target quotes a placeholder
+        // with apostrophes. Without escaping, the ICU intermediate `'{0}'`
+        // reads as the literal text `{0}`, so the gate reports a (false)
+        // hard placeholder-mismatch. Doubling keeps `{0}` a real placeholder.
+        assert_eq!(
+            to_icu("Producto '%1' seleccionado"),
+            "Producto ''{0}'' seleccionado"
+        );
+        assert_eq!(
+            from_icu("Producto ''{0}'' seleccionado"),
+            "Producto '%1' seleccionado"
+        );
+    }
+
+    #[test]
+    fn lone_apostrophe_round_trips() {
+        // English contractions and Romance elisions are common in UI strings.
+        assert_eq!(to_icu("doesn't exist"), "doesn''t exist");
+        assert_eq!(from_icu("doesn''t exist"), "doesn't exist");
+    }
+
+    #[test]
     fn unknown_percent_is_passed_through() {
         // %s is not a Qt placeholder; we leave it intact.
         assert_eq!(to_icu("foo %s bar"), "foo %s bar");
@@ -272,9 +325,10 @@ mod tests {
     // ── Round-trip property ────────────────────────────────────────────────
 
     // A generator for Qt-shaped strings: mixed runs of safe text and Qt
-    // placeholder tokens drawn from the supported set. We exclude characters
-    // that would conflict with ICU metacharacters when round-tripped through
-    // the converter (`{`, `}`, `'`).
+    // placeholder tokens drawn from the supported set. We exclude the ICU
+    // brace metacharacters (`{`, `}`) — Qt sources never use them literally —
+    // but `'` is included: it is escaped/unescaped by the converter and must
+    // round-trip.
     fn qt_token() -> impl Strategy<Value = String> {
         prop_oneof![
             // Plural count
@@ -289,9 +343,9 @@ mod tests {
     }
 
     fn safe_text() -> impl Strategy<Value = String> {
-        // ASCII letters, digits, space, common punctuation — explicitly no `%`,
-        // `{`, `}`, or `'`.
-        "[a-zA-Z0-9 .,!?-]{0,12}".prop_map(|s| s.to_owned())
+        // ASCII letters, digits, space, common punctuation including `'`
+        // (escaped/unescaped by the converter) — explicitly no `%`, `{`, `}`.
+        "[a-zA-Z0-9 .,!?'-]{0,12}".prop_map(|s| s.to_owned())
     }
 
     fn qt_string() -> impl Strategy<Value = String> {

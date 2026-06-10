@@ -12,11 +12,17 @@
 //! 2. **0 candidates** → `U` is left unchanged and its id goes to
 //!    `remaining_ids` (it feeds the split step).
 //! 3. **≥1 candidate, all targets EQUAL** → copy the translation into `U`,
-//!    then run the gate on `U`. If the gate is clean **and** the target is
-//!    complete, promote `U` to `Finished` (`copied_finished`); otherwise keep
-//!    the copied text but leave `U` at `Proposed` (`copied_needs_review`).
-//!    Provenance records the first reference (declaration order) that carried
-//!    the winning text.
+//!    then run the gate on `U`. If the gate raises **no hard findings** and
+//!    the target is complete, promote `U` to `Finished` (`copied_finished`);
+//!    otherwise keep the copied text but leave `U` at `Proposed`
+//!    (`copied_needs_review`). Soft findings are folded onto `U` as advisory
+//!    flags but do **not** block promotion — the copied text is an expert
+//!    translation the reference already marked `Finished`, so a soft warning
+//!    on it (typically a length-ratio or accelerator advisory) is
+//!    informational, not a reason to re-queue review. This is intentionally a
+//!    laxer bar than the fresh-translation path, which promotes only on a
+//!    fully clean gate. Provenance records the first reference (declaration
+//!    order) that carried the winning text.
 //! 4. **≥2 candidates that DIFFER** → conflict. Do **not** copy. Leave `U`
 //!    untranslated. Record a [`ReferenceConflict`] listing each distinct
 //!    candidate text and which references voted for it. Conflicted ids are
@@ -253,12 +259,23 @@ fn apply_copy(
         unit.flags.insert(flag);
     }
 
-    let disposition = if gate_report.is_clean() && unit.target.is_complete() {
+    let disposition = if !gate_report.has_hard() && unit.target.is_complete() {
+        // Promote on the absence of *hard* findings, not on a fully clean
+        // gate. This is a deliberate divergence from the fresh-translation
+        // path (which promotes only when `is_clean()`): a reused target is
+        // not model output, it is an expert translation a human already
+        // signed off as `Finished` in the reference. A soft warning on
+        // already-approved text — most commonly a length-ratio or accelerator
+        // advisory when a terse English source expands in the target language
+        // — is informational, not a reason to re-queue the unit for review.
+        // The soft flags are still folded onto the unit above, so they remain
+        // visible; only the disposition differs.
         unit.state = UnitState::Finished;
         report.copied_finished.push(unit.id.clone());
         CopiedDisposition::Finished
     } else {
-        // Keep the copied text, leave at Proposed for a human to review.
+        // A hard finding (or an incomplete target) survived the copy. Keep the
+        // copied text but leave it at Proposed for a human to resolve.
         if let Some(status) = needs_review_status() {
             unit.review_status = Some(status);
         }
