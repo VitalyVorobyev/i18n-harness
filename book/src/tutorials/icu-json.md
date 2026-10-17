@@ -35,9 +35,9 @@ A folder `json-demo` with `locales/en.json`:
 ## Steps
 
 1. Copy `locales/en.json` to `locales/fr.json`.
-2. Open `json-demo` in the app. **Files** lists `en.json` (*English*) and
-   `fr.json` (*French*), both *All done*: the French file still contains
-   English, and the app cannot know that yet.
+2. Open `json-demo` in the app. The files `en` (under *English*) and `fr`
+   (under *French*) both have a full green bar: the French file still
+   contains English, and the app cannot know that yet.
 3. Click **⋯** next to `fr.json`, choose **Language of the existing
    text…**, pick **English** and click **Apply**. All five French strings
    are now **To do**, with the English text in the **From English**
