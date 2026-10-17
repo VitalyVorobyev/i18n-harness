@@ -591,3 +591,31 @@ fn gettext_plural_forms_translate_from_msgid_plural_with_their_count() {
         "{written}"
     );
 }
+
+#[test]
+fn a_held_back_translation_is_to_do_again_after_a_restart() {
+    let (_dir, mut session, path) = open();
+    session.set_pivot(&path, Some("de_DE")).unwrap();
+    let id = session
+        .units(&path, &UnitFilter::default(), 0, usize::MAX)
+        .unwrap()
+        .units
+        .into_iter()
+        .find(|u| u.source.contains("%1 mm"))
+        .unwrap()
+        .id;
+    session
+        .set_translation(
+            &path,
+            &id,
+            vec!["<b>Ignorovať</b> chyby pod mm".into()],
+            true,
+        )
+        .unwrap();
+    assert_eq!(session.save(None).unwrap().held_back, 1);
+
+    // The file kept the German text; the review store must not claim
+    // anything was translated.
+    let reopened = Session::open_folder(session.root()).unwrap();
+    assert!(ids_with(&reopened, &path, UnitStatus::ToDo).contains(&id));
+}

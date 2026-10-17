@@ -32,6 +32,8 @@ pub(crate) struct OpenCatalog {
     /// States as they were when the catalog was opened, for strings with
     /// [`Self::existing`] text.
     pub(crate) existing_state: HashMap<UnitId, UnitState>,
+    /// Review statuses as they were when the catalog was opened.
+    pub(crate) existing_review: HashMap<UnitId, Option<ReviewStatus>>,
     pub(crate) dirty: bool,
 }
 
@@ -468,6 +470,9 @@ impl Session {
     pub fn save(&mut self, path: Option<&Path>) -> Result<SaveReport> {
         let glossary = self.project.glossary();
         let mut report = SaveReport::default();
+        // The review store must describe what is on disk: a held-back
+        // string's record goes back to what it was when opened.
+        let mut restore: Vec<(PathBuf, UnitId, Option<ReviewStatus>, String)> = Vec::new();
         for catalog in &mut self.catalogs {
             if !catalog.dirty || path.is_some_and(|p| p != catalog.path) {
                 continue;
@@ -486,6 +491,12 @@ impl Session {
                         && catalog.gate(unit, glossary).flags.has_hard();
                     if blocked {
                         report.held_back += 1;
+                        restore.push((
+                            catalog.path.clone(),
+                            unit.id.clone(),
+                            catalog.existing_review.get(&unit.id).copied().flatten(),
+                            unit.source_hash.clone().unwrap_or_default(),
+                        ));
                         held_back_version(catalog, unit)
                     } else {
                         unit.clone()
@@ -515,6 +526,10 @@ impl Session {
             catalog.doc = fresh;
             catalog.dirty = still_dirty;
             report.written.push(catalog.path.display().to_string());
+        }
+        for (path, id, status, hash) in restore {
+            self.project
+                .set_review_status(&path, &id, status, hash, None)?;
         }
         Ok(report)
     }
@@ -555,6 +570,11 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
     let opened = || doc.units().iter().filter(|u| has_target_text(&u.target));
     let existing = opened().map(|u| (u.id.clone(), u.target.clone())).collect();
     let existing_state = opened().map(|u| (u.id.clone(), u.state)).collect();
+    let existing_review = doc
+        .units()
+        .iter()
+        .map(|u| (u.id.clone(), u.review_status))
+        .collect();
     Ok(OpenCatalog {
         path,
         relative: catalog.manifest_path.clone(),
@@ -563,6 +583,7 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
         pivot,
         existing,
         existing_state,
+        existing_review,
         dirty: false,
     })
 }
