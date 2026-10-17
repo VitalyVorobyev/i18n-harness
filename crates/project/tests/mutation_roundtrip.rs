@@ -143,6 +143,7 @@ fn add_catalog_appends_and_preserves_existing() {
             path: PathBuf::from("translations/app_zh.json"),
             format: FormatId::from("icu-json"),
             locale: "zh_Hans".to_owned(),
+            pivot: None,
         })
         .expect("add_catalog");
     project.save_manifest().expect("save");
@@ -324,5 +325,45 @@ fn manifest_view_reflects_changes_immediately_without_save() {
     assert_eq!(
         project.manifest().locales["de_DE"].register,
         Some(RegisterOverride::Neutral)
+    );
+}
+
+#[test]
+fn set_catalog_pivot_round_trips_and_clears() {
+    let (_, after) = open_mutate_save(|p| {
+        p.set_catalog_pivot(Path::new("translations/app_de.ts"), Some("en".into()))
+            .expect("set pivot");
+    });
+    assert!(after.contains("pivot = \"en\""), "{after}");
+
+    let fs = Arc::new(InMemoryFs::new());
+    for (path, bytes) in [
+        ("i18n-harness.toml", after.as_bytes()),
+        ("translations/app_de.ts", b"<TS></TS>".as_slice()),
+        (
+            "translations/app_es.po",
+            b"msgid \"\"\nmsgstr \"\"".as_slice(),
+        ),
+    ] {
+        let abs = root().join(path);
+        fs.create_dir_all(abs.parent().unwrap()).unwrap();
+        fs.write_atomic(&abs, bytes).unwrap();
+    }
+    let (mut project, _) = Project::open_with_fs(root(), fs).expect("reopen");
+    let de = project
+        .catalogs()
+        .iter()
+        .find(|c| c.manifest_path.ends_with("app_de.ts"))
+        .unwrap();
+    assert_eq!(de.pivot.as_deref(), Some("en"));
+
+    project
+        .set_catalog_pivot(Path::new("translations/app_de.ts"), None)
+        .expect("clear");
+    assert!(project.catalogs().iter().all(|c| c.pivot.is_none()));
+    assert!(
+        project
+            .set_catalog_pivot(Path::new("nope.ts"), None)
+            .is_err()
     );
 }

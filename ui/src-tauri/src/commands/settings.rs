@@ -133,6 +133,7 @@ pub(crate) fn add_catalogs_from_folder(
             path: rel.clone(),
             format,
             locale: locale.clone(),
+            pivot: None,
         };
         match project.add_catalog(entry) {
             Ok(()) => {

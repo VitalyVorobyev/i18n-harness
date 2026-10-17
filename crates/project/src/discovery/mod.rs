@@ -231,6 +231,7 @@ impl Project {
                     path: rel,
                     format,
                     locale,
+                    pivot: None,
                 })
             })
             .collect();

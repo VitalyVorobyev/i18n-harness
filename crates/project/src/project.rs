@@ -76,6 +76,10 @@ pub struct CatalogRef {
     pub format: FormatId,
     /// Locale id this catalog serves.
     pub locale: String,
+    /// Language of the text currently in the targets, when it is not
+    /// `locale` (see [`CatalogEntry::pivot`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<String>,
     /// Health of the catalog entry as determined at open time.
     pub status: CatalogStatus,
 }
@@ -458,6 +462,12 @@ impl Project {
                 entry.locale.clone(),
             ))),
         );
+        if let Some(pivot) = &entry.pivot {
+            new_table.insert(
+                "pivot",
+                Item::Value(Value::String(toml_edit::Formatted::new(pivot.clone()))),
+            );
+        }
 
         // Append to [[catalogs]] array, creating it if absent.
         let doc = &mut self.doc;
@@ -468,6 +478,48 @@ impl Project {
             aot.push(new_table);
         }
 
+        self.sync_manifest()
+    }
+
+    /// Set (or clear) the pivot language of the catalog at manifest-relative
+    /// `path`. See [`CatalogEntry::pivot`]. Call [`Self::save_manifest`] to
+    /// persist.
+    ///
+    /// # Errors
+    ///
+    /// [`ProjectError::UnknownCatalog`] when no entry has that path.
+    pub fn set_catalog_pivot(
+        &mut self,
+        path: &Path,
+        pivot: Option<String>,
+    ) -> Result<(), ProjectError> {
+        let index = self
+            .manifest
+            .catalogs
+            .iter()
+            .position(|c| c.path == path)
+            .ok_or_else(|| ProjectError::UnknownCatalog {
+                path: self.paths.catalog(path),
+            })?;
+        let table = self
+            .doc
+            .get_mut("catalogs")
+            .and_then(Item::as_array_of_tables_mut)
+            .and_then(|aot| aot.get_mut(index))
+            .ok_or_else(|| ProjectError::UnknownCatalog {
+                path: self.paths.catalog(path),
+            })?;
+        match pivot {
+            Some(p) => {
+                table.insert(
+                    "pivot",
+                    Item::Value(Value::String(toml_edit::Formatted::new(p))),
+                );
+            }
+            None => {
+                table.remove("pivot");
+            }
+        }
         self.sync_manifest()
     }
 
@@ -1222,6 +1274,7 @@ fn build_catalog_refs(
             manifest_path: entry.path.display().to_string(),
             format: entry.format.clone(),
             locale: entry.locale.clone(),
+            pivot: entry.pivot.clone(),
             status: CatalogStatus::Ok,
         });
     }
@@ -1258,6 +1311,7 @@ fn build_catalog_refs_no_check(
                 manifest_path: entry.path.display().to_string(),
                 format: entry.format.clone(),
                 locale: entry.locale.clone(),
+                pivot: entry.pivot.clone(),
                 status: CatalogStatus::Ok,
             }
         })
