@@ -93,11 +93,13 @@ cargo fmt   --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo doc   --workspace --no-deps --document-private-items
 cargo run   -p i18n-harness-cli -- --help
+cargo app [--release]           # the desktop app (aliases in .cargo/config.toml)
+cargo app-run [--release]       # build and start it
 
 # Desktop UI (Tauri + Vite + React, see ui/README.md for details)
 cd ui && bun install
 cd ui && bun run typecheck
-cd ui && bun run lint           # Biome — single tool for lint + format
+cd ui && bun run lint           # Oxlint, type-aware; `bun run fmt:check` for oxfmt
 cd ui && bun audit --prod       # Production-dep vulnerability scan
 cd ui && bun run build
 cd ui && bun tauri:dev

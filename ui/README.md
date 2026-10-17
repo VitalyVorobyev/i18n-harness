@@ -24,5 +24,7 @@ bun run test:e2e        # Playwright against the mock backend
 bun run tauri:build     # installers for this platform
 ```
 
-`cargo build --release` at the workspace root also produces a working app:
-the shell's build script rebuilds `dist/` when the frontend changed.
+From the workspace root, `cargo app` builds the app and `cargo app-run`
+builds and starts it, debug by default, optimised with `--release`
+(aliases in `.cargo/config.toml`). The shell's build script rebuilds `dist/`
+when the frontend changed, so only `bun install` is needed once.

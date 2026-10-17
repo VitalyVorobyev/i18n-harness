@@ -62,8 +62,16 @@ bun run tauri:build     # installers for this platform
 
 `bun run dev:mock` is the quickest way to work on the interface: no Rust
 build, a sample folder (a Slovak Qt file pre-filled with German and a PO
-file) and two fake models. `cargo build --release` at the workspace root
-also produces a working app binary with the interface embedded.
+file) and two fake models.
+
+From the workspace root, two cargo aliases build the app with the
+interface embedded (after `bun install` in `ui/` once):
+
+```sh
+cargo app                 # debug build: target/debug/i18n-harness-ui
+cargo app --release       # optimised:   target/release/i18n-harness-ui
+cargo app-run             # build and start (also with --release)
+```
 
 ## The book
 

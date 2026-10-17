@@ -103,7 +103,10 @@ A new target language needs no code; a project tunes it in its
 cargo build --workspace
 cargo test  --workspace --all-targets
 cargo run   -p i18n-harness-cli -- --help
+cargo app-run                   # build and start the desktop app (add --release)
 ```
+
+The first app build needs `bun install` in `ui/` once.
 
 ## Architecture (one paragraph)
 
