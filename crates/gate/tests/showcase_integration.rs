@@ -268,3 +268,70 @@ fn keep_unchanged_glossary_terms_must_survive_translation() {
             .contains(Flag::ProtectedTermMismatch)
     );
 }
+
+#[test]
+fn a_translated_icu_keyword_is_a_placeholder_mismatch() {
+    let mut u = i18n_harness_core::Unit::untranslated_singular(
+        "id",
+        "{count, plural, one {# file} other {# files}}",
+    );
+    u.target = Target::Singular {
+        text: Some("{count, pluriel, un {# fichier} other {# fichiers}}".into()),
+    };
+    u.state = UnitState::Proposed;
+    let report = i18n_harness_gate::validate(&u, Locale::by_id("fr_FR").unwrap(), None);
+    assert!(
+        report.flags.contains(Flag::PlaceholderMismatch),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn plural_lengths_are_compared_form_by_form() {
+    let mut u = i18n_harness_core::Unit::untranslated_singular("id", "{count} files were imported");
+    u.plural_arity = Some(3);
+    u.target = Target::Plural {
+        forms: vec![
+            Some("{count} súbor importovaný".into()),
+            Some("{count} súbory importované".into()),
+            Some("{count} súborov importovaných".into()),
+        ],
+    };
+    u.state = UnitState::Proposed;
+    let report = i18n_harness_gate::validate(&u, Locale::by_id("sk_SK").unwrap(), None);
+    assert!(!report.flags.contains(Flag::LengthWarn), "{report:?}");
+}
+
+#[test]
+fn gettext_plural_forms_follow_msgid_plural() {
+    let mut u = i18n_harness_core::Unit::untranslated_singular("id", "One file");
+    u.source_plural = Some("{0} files".into());
+    u.plural_arity = Some(2);
+    u.state = UnitState::Proposed;
+    let sk = Locale::by_id("sk_SK").unwrap();
+    u.target = Target::Plural {
+        forms: vec![
+            Some("Jeden súbor".into()),
+            Some("{0} súbory".into()),
+            Some("{0} súborov".into()),
+        ],
+    };
+    let report = i18n_harness_gate::validate(&u, sk, None);
+    assert!(
+        !report.flags.contains(Flag::PlaceholderMismatch),
+        "{report:?}"
+    );
+
+    u.target = Target::Plural {
+        forms: vec![
+            Some("{0} súbor".into()),
+            Some("súbory".into()),
+            Some("{0} súborov".into()),
+        ],
+    };
+    let report = i18n_harness_gate::validate(&u, sk, None);
+    assert!(
+        report.flags.contains(Flag::PlaceholderMismatch),
+        "{report:?}"
+    );
+}

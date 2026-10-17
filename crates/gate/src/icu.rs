@@ -96,6 +96,9 @@ pub(crate) struct Message {
     /// Every placeholder occurrence in the message, in left-to-right order,
     /// across all selector arms. Multiset semantics — duplicates are kept.
     pub placeholders: Vec<PlaceholderRef>,
+    /// Every typed argument as `{name, type}` (`{count, plural}`,
+    /// `{d, date}`), so a translated keyword (`pluriel`) is caught.
+    pub typed: Vec<String>,
     /// Every selector construct encountered, in left-to-right order. A
     /// nested plural inside a select arm produces two entries.
     pub selectors: Vec<Selector>,
@@ -251,6 +254,7 @@ impl<'a> Parser<'a> {
                     message: "expected selector type after ','".to_owned(),
                 })?;
                 self.skip_ws();
+                msg.typed.push(format!("{{{name}, {kind_name}}}"));
                 // We record the placeholder occurrence regardless of the
                 // selector type (CLDR plural-count argument is still a
                 // placeholder in the multiset).

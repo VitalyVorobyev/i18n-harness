@@ -29,6 +29,11 @@ pub(crate) struct OpenCatalog {
     pub(crate) pivot: Option<&'static Locale>,
     /// Non-empty targets as they were when the catalog was opened.
     pub(crate) existing: HashMap<UnitId, Target>,
+    /// States as they were when the catalog was opened, for strings with
+    /// [`Self::existing`] text.
+    pub(crate) existing_state: HashMap<UnitId, UnitState>,
+    /// Review statuses as they were when the catalog was opened.
+    pub(crate) existing_review: HashMap<UnitId, Option<ReviewStatus>>,
     pub(crate) dirty: bool,
 }
 
@@ -465,6 +470,9 @@ impl Session {
     pub fn save(&mut self, path: Option<&Path>) -> Result<SaveReport> {
         let glossary = self.project.glossary();
         let mut report = SaveReport::default();
+        // The review store must describe what is on disk: a held-back
+        // string's record goes back to what it was when opened.
+        let mut restore: Vec<(PathBuf, UnitId, Option<ReviewStatus>, String)> = Vec::new();
         for catalog in &mut self.catalogs {
             if !catalog.dirty || path.is_some_and(|p| p != catalog.path) {
                 continue;
@@ -483,6 +491,12 @@ impl Session {
                         && catalog.gate(unit, glossary).flags.has_hard();
                     if blocked {
                         report.held_back += 1;
+                        restore.push((
+                            catalog.path.clone(),
+                            unit.id.clone(),
+                            catalog.existing_review.get(&unit.id).copied().flatten(),
+                            unit.source_hash.clone().unwrap_or_default(),
+                        ));
                         held_back_version(catalog, unit)
                     } else {
                         unit.clone()
@@ -512,6 +526,10 @@ impl Session {
             catalog.doc = fresh;
             catalog.dirty = still_dirty;
             report.written.push(catalog.path.display().to_string());
+        }
+        for (path, id, status, hash) in restore {
+            self.project
+                .set_review_status(&path, &id, status, hash, None)?;
         }
         Ok(report)
     }
@@ -549,11 +567,13 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
         .as_deref()
         .map(|id| Locale::by_id(id).ok_or_else(|| SessionError::UnknownLocale(id.to_owned())))
         .transpose()?;
-    let existing = doc
+    let opened = || doc.units().iter().filter(|u| has_target_text(&u.target));
+    let existing = opened().map(|u| (u.id.clone(), u.target.clone())).collect();
+    let existing_state = opened().map(|u| (u.id.clone(), u.state)).collect();
+    let existing_review = doc
         .units()
         .iter()
-        .filter(|u| has_target_text(&u.target))
-        .map(|u| (u.id.clone(), u.target.clone()))
+        .map(|u| (u.id.clone(), u.review_status))
         .collect();
     Ok(OpenCatalog {
         path,
@@ -562,6 +582,8 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
         locale,
         pivot,
         existing,
+        existing_state,
+        existing_review,
         dirty: false,
     })
 }
@@ -571,7 +593,12 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
 fn held_back_version(catalog: &OpenCatalog, unit: &Unit) -> Unit {
     let mut original = unit.clone();
     match catalog.existing.get(&unit.id) {
-        Some(target) => original.target = target.clone(),
+        Some(target) => {
+            original.target = target.clone();
+            if let Some(state) = catalog.existing_state.get(&unit.id) {
+                original.state = *state;
+            }
+        }
         None => {
             original.target = match &unit.target {
                 Target::Singular { .. } => Target::Singular { text: None },

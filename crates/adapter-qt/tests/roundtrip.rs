@@ -1007,3 +1007,52 @@ fn context_and_developer_notes_reach_the_unit() {
         ["First developer note.", "Second developer note."]
     );
 }
+
+#[test]
+fn a_finished_message_replaced_by_a_proposal_is_marked_unfinished() {
+    let fixture = fixtures_dir().join("es_ES.ts");
+    let catalog = extract(&fixture).expect("extract");
+    let mut units = catalog.units().to_vec();
+    let unit = units
+        .iter_mut()
+        .find(|u| u.state == UnitState::Finished && matches!(u.target, Target::Singular { .. }))
+        .expect("a finished singular unit");
+    unit.target = Target::Singular {
+        text: Some("Návrh".into()),
+    };
+    unit.state = UnitState::Proposed;
+
+    let rendered = String::from_utf8(render(&catalog, &units).expect("render")).expect("utf8");
+    assert!(
+        rendered.contains(r#"<translation type="unfinished">Návrh</translation>"#),
+        "{rendered}"
+    );
+    let reread = std::env::temp_dir().join(format!("qt-unfinished-{}.ts", std::process::id()));
+    std::fs::write(&reread, &rendered).unwrap();
+    let again = extract(&reread).expect("re-extract");
+    std::fs::remove_file(&reread).ok();
+    assert!(again.units().iter().any(|u| u.state == UnitState::Proposed
+        && u.target
+            == Target::Singular {
+                text: Some("Návrh".into())
+            }));
+}
+
+#[test]
+fn a_finished_message_left_finished_keeps_its_open_tag() {
+    let fixture = fixtures_dir().join("es_ES.ts");
+    let catalog = extract(&fixture).expect("extract");
+    let mut units = catalog.units().to_vec();
+    let unit = units
+        .iter_mut()
+        .find(|u| u.state == UnitState::Finished && matches!(u.target, Target::Singular { .. }))
+        .expect("a finished singular unit");
+    unit.target = Target::Singular {
+        text: Some("Hotovo".into()),
+    };
+    let rendered = String::from_utf8(render(&catalog, &units).expect("render")).expect("utf8");
+    assert!(
+        rendered.contains("<translation>Hotovo</translation>"),
+        "{rendered}"
+    );
+}
