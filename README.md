@@ -43,12 +43,13 @@ built for translators, not developers. `i18n-harness` flips both.
 ## Status
 
 **Pre-alpha.** Core, multi-catalog project mode (with reference
-catalogs), all three target catalog formats (Qt `.ts`, PO, ICU-JSON),
-the validation gate, the local Ollama and `openai-compatible` backends,
-the Tauri desktop UI, quality evaluation, the two-phase agent
-translation CLI, and deterministic reference reuse / remainder split /
-merge for Qt (copy expert translations by exact unit-id match, carve
-the leftover, merge it back — no model) are all in. UI integration of
+catalogs), all three target catalog formats (Qt `.ts`, PO, ICU-JSON)
+behind one format registry, every CLDR language, the validation gate,
+the local Ollama backend, runtime model discovery for Ollama and
+OpenAI-compatible servers, the Tauri desktop UI, quality evaluation,
+the two-phase agent translation CLI, and deterministic reference reuse /
+remainder split / merge (copy expert translations by exact unit-id
+match, carve the leftover, merge it back — no model) are all in. UI integration of
 the agent flow is the next visible step. See
 [`docs/roadmap-product.md`](docs/roadmap-product.md) for the
 translator-facing milestone log and
@@ -56,20 +57,23 @@ translator-facing milestone log and
 
 ## Scope
 
-**Catalog formats:** Qt Linguist `.ts`, gettext / Lingui PO, ICU-JSON
-for react-intl / i18next. Each is a `CatalogFormat` plugin behind a
-stable extension point — new formats land as serializers, not
-parser rewrites.
+**Catalog formats:** Qt Linguist `.ts`, gettext PO, ICU-JSON for
+react-intl / i18next. Each is a `CatalogFormat` plugin listed in one
+registry (`crates/formats`) — new formats land as plugins, not parser
+rewrites, and nothing outside the plugin names them.
 
 **Translation engines:**
 
 - `manual` — closure-driven, no model. The trait substrate; also the
   engine the agent-translation CLI routes through.
-- `ollama` — local Gemma 4 by default; the offline-by-default path.
-- `openai-compatible` — covers vLLM, LM Studio, and cloud APIs
-  (OpenAI, Anthropic, any provider speaking OpenAI Chat Completions).
-  Endpoint and API key per-project; the harness itself stores no
-  credentials.
+- `ollama` — any model on a local Ollama server; the
+  offline-by-default path. The harness ships and names no models: the
+  installed ones are discovered at runtime (`/api/tags`, `/api/show`),
+  and how each wants to be prompted (chat or raw completion) is read
+  from what the server reports.
+- OpenAI-compatible servers (vLLM, LM Studio, llama.cpp server, cloud
+  APIs) — model discovery is in; the translation transport is next.
+  Endpoint and API key per project; the harness stores no credentials.
 - **Two-phase agent CLI** (`harness export-batch` /
   `harness import-batch` + the
   [`translate-i18n-batch`](skills/translate-i18n-batch/) skill) for
@@ -79,9 +83,11 @@ parser rewrites.
   harness ingests the result and runs the validation gate. No
   in-process model dependency.
 
-**Locales:** `en` source plus `de_DE`, `es_ES`, `zh_Hans` targets out
-of the box. Adding a new locale is a single config-row change in
-`crates/locales` plus a CLDR plural-arity fixture — data, not code.
+**Locales:** every language in Unicode CLDR (plural categories, script
+and display name are generated from pinned CLDR data), with harness
+defaults for register and length in `crates/locales/data/defaults.toml`.
+A new target language needs no code; a project tunes it in its
+`[locales.<id>]` table.
 
 ## Quick check
 
@@ -110,16 +116,17 @@ placeholder integrity. The three never overlap.
 i18n-harness/
 ├── crates/
 │   ├── core/           # Unit, intermediate (ICU), batches
-│   ├── locales/        # locale records + CLDR plural-arity tables
+│   ├── locales/        # generated CLDR table + harness defaults (data)
 │   ├── gate/           # validation gate (CLDR-driven, format-agnostic)
 │   ├── glossary/       # per-project TOML glossary
 │   ├── backend/        # TranslationBackend trait + impls
-│   ├── catalog/        # CatalogFormat trait + PO/ICU-JSON serializers
-│   ├── adapter-qt/     # Qt .ts adapter (reference adapter) + subset writer
-│   ├── adapter-react/  # React adapter over catalog serializers
+│   ├── catalog/        # CatalogFormat / FormatDoc traits + PO/ICU-JSON
+│   ├── adapter-qt/     # Qt .ts format (XML round-trip) + subset writer
+│   ├── formats/        # the registry of every built-in format
 │   ├── project/        # project manifest (multi-catalog + references), state
-│   ├── reuse/          # reference reuse / remainder split / merge (Qt, no model)
+│   ├── reuse/          # reference reuse / remainder split / merge (no model)
 │   └── cli/            # `harness` binary
+├── xtask/              # maintainer tasks (CLDR data generation)
 ├── ui/                 # Tauri 2 + Vite + React desktop shell
 ├── docs/               # design + plan
 ├── fixtures/           # round-trip + gate test inputs

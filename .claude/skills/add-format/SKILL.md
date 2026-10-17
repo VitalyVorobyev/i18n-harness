@@ -51,8 +51,10 @@ Adds a new `CatalogFormat` serializer to `crates/catalog`.
 6. **Extend the gate fixture coverage** in `crates/gate/tests/` with at
    least one fixture demonstrating any format-specific quirk the gate
    needs to know about (e.g., PO's plural `msgstr[N]` form).
-7. **Register the serializer** in `crates/adapter-react` (if relevant)
-   and `crates/cli/src/main.rs` so it appears in `--format xliff2`.
+7. **Register the format** in `FormatRegistry::builtin()`
+   (`crates/formats/src/lib.rs`). That is the only list of formats:
+   project discovery, the CLI, and the desktop shell all go through the
+   registry, so nothing else needs to change.
 
 ## What you do NOT do
 
