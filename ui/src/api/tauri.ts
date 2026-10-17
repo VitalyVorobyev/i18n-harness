@@ -24,6 +24,7 @@ export const tauriApi: Api = {
   setPivot: (path, pivot) => invoke("set_pivot", { path, pivot }),
   getGlossary: (locale) => invoke("get_glossary", { locale }),
   setGlossary: (locale, entries) => invoke("set_glossary", { locale, entries }),
+  glossaryUsage: (locale) => invoke("glossary_usage", { locale }),
   pickTable: async () => {
     const picked = await open({
       multiple: false,

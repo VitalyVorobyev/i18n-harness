@@ -82,17 +82,28 @@ test("pivot dialog", async ({ page }) => {
   await shot(page, "pivot-dialog");
 });
 
+test("glossary", async ({ page }) => {
+  await openFolder(page);
+  await page.getByRole("radio", { name: "Glossary" }).click();
+  const glossary = page.getByRole("region", { name: "Glossary" });
+  await expect(glossary.getByRole("textbox", { name: "Term", exact: true }).first()).toHaveValue(
+    "ParamsManager",
+  );
+  await glossary.getByRole("button", { name: "Add term" }).click();
+  await glossary.getByRole("textbox", { name: "Term", exact: true }).last().fill("Filter");
+  await glossary.getByRole("checkbox", { name: "Keep Filter unchanged" }).click();
+  await glossary.getByRole("textbox", { name: "Slovak translation" }).last().fill("filter");
+  await glossary.getByRole("textbox", { name: "Note" }).last().fill("Image filter");
+  await expect(glossary.getByText("Saved in glossary.toml")).toBeVisible();
+  await shot(page, "glossary");
+});
+
 test("settings", async ({ page }) => {
   await openFolder(page);
   await page.getByRole("button", { name: "Settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog.getByRole("textbox", { name: "Term" }).first()).toHaveValue("ParamsManager");
-  await dialog.getByRole("button", { name: "Add term" }).click();
-  await dialog.getByRole("textbox", { name: "Term" }).last().fill("filter");
-  await dialog.getByRole("checkbox", { name: "Keep filter unchanged" }).click();
-  await dialog.getByRole("textbox", { name: "Slovak translation" }).last().fill("filter");
-  await dialog.getByRole("textbox", { name: "Note" }).last().fill("Image filter");
-  await shot(page, "settings-glossary");
+  await expect(dialog.getByText("Skip originals shorter than")).toBeVisible();
+  await shot(page, "settings-checks");
   await dialog.getByRole("tab", { name: "Model server" }).click();
   await expect(dialog.getByText("Context size (tokens)")).toBeVisible();
   await shot(page, "settings-server");

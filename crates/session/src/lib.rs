@@ -33,7 +33,7 @@ mod view;
 
 pub use cancel::CancelToken;
 pub use error::{Result, SessionError};
-pub use glossary::{GlossaryEntry, GlossaryImport, glossary_table_entries};
+pub use glossary::{GlossaryEntry, GlossaryImport, TermUsage, glossary_table_entries};
 pub use models::{DEFAULT_OLLAMA_HOST, ModelChoice, ModelSettings, backend, list_models};
 pub use session::Session;
 pub use translate::{

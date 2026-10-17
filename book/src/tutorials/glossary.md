@@ -41,20 +41,27 @@ must stay in English. *Layer* must always be *Ebene* in this product.
 
 ## Steps
 
-1. Open `glossary-demo` in the app and click the **gear** button
-   (**Settings**). The **Glossary** tab is open.
+1. Open `glossary-demo` in the app and click **Glossary** in the toolbar
+   (next to **Strings**).
 2. Click **Add term** and type `ParamsManager`. **Keep unchanged** is
    ticked for a new term. In **Note** write *Class name*.
 3. Add `PhotoVault` the same way, with the note *Product name*.
 4. Add `layer`, **untick** *Keep unchanged*, and type `Ebene` in the
    **German** column.
 
-   ![Glossary settings](../images/settings-glossary.png)
+   ![The glossary](../images/glossary.png)
 
    *(The screenshot shows the demo project, which is Slovak.)*
 
-5. Click **Save settings**.
-6. Translate the file as usual and review under **Check**.
+   Every change is saved as you type; the line at the bottom says
+   *Saved in glossary.toml*.
+5. Click **Strings**, translate the file as usual and review under
+   **Check**.
+
+For each term the glossary shows **Used in** (how many strings contain
+it) and **Breaks it** (how many translations do not follow it). Click a
+number to see those strings: the strings view opens with the term in the
+search field.
 
 ## Expected result
 
@@ -114,9 +121,9 @@ per row:
   `original` is taken as a header and skipped. Cells may be quoted, as
   spreadsheets do for text containing the separator.
 
-In the app: **Settings** → **Glossary** → **Import from a spreadsheet…**,
-pick the file, check the rows, then **Save settings**. A term already in
-the glossary is updated; nothing is removed. From the command line:
+In the app: **Glossary** → **Import from a spreadsheet…** and pick the
+file. A term already in the glossary is updated; nothing is removed. The
+imported terms are saved at once, like any edit. From the command line:
 
 ```sh
 harness import-glossary --language de_DE glossary-demo terms.csv
@@ -129,14 +136,14 @@ a term later — the existing translations do not follow it yet. The
 checks find them: a changed *keep unchanged* term is a red problem, a
 missing fixed translation a yellow warning.
 
-1. Save the settings with the new glossary.
-2. Open the menu next to **Translate** (the arrow). It reads
-   **Apply the glossary (N strings break it)**, counting every file of
-   the folder, whatever the strings' status.
-3. Choose it. Those strings are translated again with the glossary in
-   the prompt and land under **Check** for review.
-4. Strings that still break the glossary keep their warning or problem;
-   fix them in the editor.
+1. Open **Glossary**. The button at the top reads
+   **Apply to N strings**, counting every file of the folder, whatever
+   the strings' status. (The same command is in the menu next to
+   **Translate**, as *Apply the glossary*.)
+2. Click it. Those strings are translated again with the glossary in the
+   prompt and land under **Check** for review.
+3. Strings that still break the glossary keep their warning or problem;
+   the **Breaks it** numbers show where. Fix them in the editor.
 
 The command-line equivalent is
 `harness translate-folder <folder> --model <model> --fix-glossary --save`.

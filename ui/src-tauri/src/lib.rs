@@ -37,6 +37,7 @@ pub fn run() {
             commands::set_pivot,
             commands::get_glossary,
             commands::set_glossary,
+            commands::glossary_usage,
             commands::read_glossary_table,
             commands::plan_size,
             commands::get_model_settings,

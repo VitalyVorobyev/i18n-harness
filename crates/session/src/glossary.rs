@@ -7,8 +7,10 @@ use i18n_harness_glossary::{Glossary, Term};
 use i18n_harness_project::{GlossaryConfig, Project};
 use serde::{Deserialize, Serialize};
 
+use i18n_harness_gate::{FindingDetail, term_occurs};
+
 use crate::error::{Result, SessionError};
-use crate::session::Session;
+use crate::session::{Session, is_active};
 
 /// What [`Session::import_glossary`] changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -17,6 +19,18 @@ pub struct GlossaryImport {
     pub added: usize,
     /// Terms it had, now replaced by the imported row.
     pub updated: usize,
+}
+
+/// How the strings of one target language use a glossary term.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermUsage {
+    /// The term as it appears in the original text.
+    pub term: String,
+    /// Strings whose original contains the term.
+    pub strings: usize,
+    /// Translations that do not follow the term: a kept term changed, or a
+    /// fixed translation missing.
+    pub breaking: usize,
 }
 
 /// Default file name of a glossary the harness creates.
@@ -38,6 +52,54 @@ pub struct GlossaryEntry {
 }
 
 impl Session {
+    /// For every glossary term, how many strings of the catalogs in `locale`
+    /// use it and how many translations break it, in glossary order.
+    pub fn glossary_usage(&self, locale: &str) -> Vec<TermUsage> {
+        let Some(glossary) = self.project.glossary() else {
+            return Vec::new();
+        };
+        let terms: Vec<(&str, bool)> = glossary
+            .terms()
+            .map(|(source, term)| (source, term.do_not_translate))
+            .collect();
+        let mut usage: Vec<TermUsage> = terms
+            .iter()
+            .map(|(term, _)| TermUsage {
+                term: (*term).to_owned(),
+                strings: 0,
+                breaking: 0,
+            })
+            .collect();
+        for catalog in self.catalogs.iter().filter(|c| c.locale.id == locale) {
+            for unit in catalog.doc.units().iter().filter(|u| is_active(u)) {
+                let used: Vec<usize> = terms
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (term, keep))| term_occurs(&unit.source, term, *keep))
+                    .map(|(i, _)| i)
+                    .collect();
+                if used.is_empty() {
+                    continue;
+                }
+                let report = catalog
+                    .is_translation(unit)
+                    .then(|| catalog.gate(unit, Some(glossary)));
+                for i in used {
+                    usage[i].strings += 1;
+                    let broken = report.as_ref().is_some_and(|r| {
+                        r.findings.iter().any(|f| match &f.detail {
+                            FindingDetail::ProtectedTermMismatch(d) => d.term == usage[i].term,
+                            FindingDetail::TermTranslationMissing(d) => d.term == usage[i].term,
+                            _ => false,
+                        })
+                    });
+                    usage[i].breaking += usize::from(broken);
+                }
+            }
+        }
+        usage
+    }
+
     /// The glossary as seen from `locale`, in alphabetical order.
     pub fn glossary(&self, locale: &str) -> Vec<GlossaryEntry> {
         self.project

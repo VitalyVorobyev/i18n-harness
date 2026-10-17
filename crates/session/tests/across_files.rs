@@ -190,3 +190,41 @@ fn a_ratio_that_is_not_positive_is_refused() {
     };
     assert!(session.set_check_settings("sk_SK", bad).is_err());
 }
+
+#[test]
+fn glossary_usage_counts_strings_and_translations_that_break_a_term() {
+    use i18n_harness_session::GlossaryEntry;
+    let (_dir, mut session, _) = open();
+    let entry = |term: &str, keep: bool, translation: Option<&str>| GlossaryEntry {
+        term: term.to_owned(),
+        keep,
+        translation: translation.map(str::to_owned),
+        note: None,
+    };
+    session
+        .set_glossary(
+            "sk_SK",
+            vec![
+                entry("Open", false, Some("Otvoriť")),
+                entry("Close", true, None),
+                entry("Print", true, None),
+            ],
+        )
+        .unwrap();
+    let usage = session.glossary_usage("sk_SK");
+    let of = |term: &str| {
+        let u = usage.iter().find(|u| u.term == term).unwrap();
+        (u.strings, u.breaking)
+    };
+    // "Open" in all three files, translated as required everywhere.
+    assert_eq!(of("Open"), (3, 0));
+    // "Close" must stay unchanged; both translations change it.
+    assert_eq!(of("Close"), (2, 2));
+    assert_eq!(of("Print"), (0, 0));
+    assert!(
+        session
+            .glossary_usage("de_DE")
+            .iter()
+            .all(|u| u.strings == 0)
+    );
+}

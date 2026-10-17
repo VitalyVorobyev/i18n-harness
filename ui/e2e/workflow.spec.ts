@@ -78,16 +78,28 @@ test("the language of the existing text can be changed", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("settings edit the glossary", async ({ page }) => {
+test("the glossary view edits terms and saves them as you type", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
-  await page.getByRole("button", { name: "Settings" }).click();
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog.getByRole("textbox", { name: "Term" }).first()).toHaveValue("ParamsManager");
-  await dialog.getByRole("button", { name: "Add term" }).click();
-  await dialog.getByRole("textbox", { name: "Term" }).last().fill("Blob");
-  if (shots) await page.screenshot({ path: `${shots}/settings.png` });
-  await dialog.getByRole("button", { name: "Save settings" }).click();
-  await expect(page.getByText("Settings saved")).toBeVisible();
+  await page.getByRole("radio", { name: "Glossary" }).click();
+  const glossary = page.getByRole("region", { name: "Glossary" });
+  await expect(glossary.getByRole("textbox", { name: "Term", exact: true }).first()).toHaveValue(
+    "ParamsManager",
+  );
+  // ParamsManager occurs in one string; clicking the count lists it.
+  await glossary.getByRole("button", { name: /Show the 1 string using ParamsManager/ }).click();
+  await expect(page.getByRole("cell", { name: "Open ParamsManager" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Search strings" })).toHaveValue("ParamsManager");
+
+  await page.getByRole("radio", { name: "Glossary" }).click();
+  await glossary.getByRole("button", { name: "Add term" }).click();
+  await glossary.getByRole("textbox", { name: "Term", exact: true }).last().fill("Blob");
+  await expect(glossary.getByText("Saved in glossary.toml")).toBeVisible();
+  // Back and forth: the new term was written.
+  await page.getByRole("radio", { name: "Strings" }).click();
+  await page.getByRole("radio", { name: "Glossary" }).click();
+  await expect(glossary.getByRole("textbox", { name: "Term", exact: true }).last()).toHaveValue(
+    "Blob",
+  );
 });
 
 test("a glossary imported later is applied to finished translations", async ({ page }) => {
@@ -95,30 +107,31 @@ test("a glossary imported later is applied to finished translations", async ({ p
   await page.getByRole("combobox", { name: "Translation model" }).click();
   await page.getByRole("option", { name: /eurollm-9b-instruct/ }).click();
 
-  await page.getByRole("button", { name: "Settings" }).click();
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await dialog.getByRole("button", { name: "Import from a spreadsheet…" }).click();
+  await page.getByRole("radio", { name: "Glossary" }).click();
+  const glossary = page.getByRole("region", { name: "Glossary" });
+  await glossary.getByRole("button", { name: "Import from a spreadsheet…" }).click();
   await expect(page.getByText("2 terms added, 0 updated")).toBeVisible();
-  await expect(dialog.getByRole("textbox", { name: "Term" }).last()).toHaveValue("Blob");
+  await expect(glossary.getByRole("textbox", { name: "Term", exact: true }).last()).toHaveValue(
+    "Blob",
+  );
   // A required translation that a finished string ("Save" → "Uložiť") breaks.
-  await dialog.getByRole("button", { name: "Add term" }).click();
-  await dialog.getByRole("textbox", { name: "Term" }).last().fill("Save");
-  await dialog.getByRole("checkbox", { name: "Keep Save unchanged" }).click();
-  await dialog
+  await glossary.getByRole("button", { name: "Add term" }).click();
+  await glossary.getByRole("textbox", { name: "Term", exact: true }).last().fill("Save");
+  await glossary.getByRole("checkbox", { name: "Keep Save unchanged" }).click();
+  await glossary
     .getByRole("textbox", { name: /translation$/ })
     .last()
     .fill("Zachovať");
-  await dialog.getByRole("button", { name: "Save settings" }).click();
-  await expect(page.getByText("Settings saved")).toBeVisible();
+  await expect(
+    glossary.getByRole("button", { name: "Show the 1 translation breaking Save" }),
+  ).toBeVisible();
 
-  await page.getByRole("button", { name: "More translate options" }).click();
-  await page.getByRole("menuitem", { name: "Apply the glossary (1 string breaks it)" }).click();
+  await glossary.getByRole("button", { name: "Apply to 1 string" }).click();
   await expect(page.getByRole("status")).toContainText("Finished. 1 translated", {
     timeout: 20_000,
   });
-  await page.getByRole("button", { name: "More translate options" }).click();
   await expect(
-    page.getByRole("menuitem", { name: "Every translation follows the glossary" }),
+    glossary.getByRole("button", { name: "Every translation follows it" }),
   ).toBeVisible();
 });
 

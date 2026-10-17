@@ -66,6 +66,7 @@ mod report;
 
 pub mod metrics;
 
+pub use check::term_occurs;
 pub use report::{
     AccelDetail, BackendMalformedResponseDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding,
     FindingDetail, GateReport, IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail,

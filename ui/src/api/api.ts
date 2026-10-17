@@ -10,6 +10,7 @@ import type {
   ModelSettings,
   CheckSettings,
   SaveReport,
+  TermUsage,
   TranslateScope,
   TranslationEvent,
   UnitFilter,
@@ -35,6 +36,8 @@ export interface Api {
   setPivot(path: string, pivot: string | null): Promise<CatalogSummary>;
   getGlossary(locale: string): Promise<GlossaryEntry[]>;
   setGlossary(locale: string, entries: GlossaryEntry[]): Promise<GlossaryEntry[]>;
+  /** How the strings of `locale` use each glossary term. */
+  glossaryUsage(locale: string): Promise<TermUsage[]>;
   /** Ask the user for a term table (CSV or tab separated); `null` when they cancel. */
   pickTable(): Promise<string | null>;
   /** The terms of a table file, for the glossary editor to merge. */
