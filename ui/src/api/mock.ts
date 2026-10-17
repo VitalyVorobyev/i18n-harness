@@ -320,18 +320,21 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
     return u.target.join("\u0000");
   };
   // The same string in other files: same language, id and original.
-  const relation = (c: MockCatalog, u: MockUnit) => {
-    const group = (catalogs ?? []).flatMap((other) =>
+  const group = (c: MockCatalog, u: MockUnit) =>
+    (catalogs ?? []).flatMap((other) =>
       other.summary.locale === c.summary.locale
         ? other.units
             .filter((x) => x.id === u.id && x.source === u.source)
             .map((x) => ({ c: other, u: x }))
         : [],
     );
+  const siblingsOf = (c: MockCatalog, u: MockUnit) => group(c, u).filter((m) => m.u !== u);
+  const relation = (c: MockCatalog, u: MockUnit) => {
+    const group_ = group(c, u);
     const texts = new Set(
-      group.map((m) => translation(m.c, m.u)).filter((t): t is string => t !== null),
+      group_.map((m) => translation(m.c, m.u)).filter((t): t is string => t !== null),
     );
-    return { shared: group.length > 1, inconsistent: group.length > 1 && texts.size > 1 };
+    return { shared: group_.length > 1, inconsistent: group_.length > 1 && texts.size > 1 };
   };
   const summary = (c: MockCatalog): CatalogSummary => {
     refresh(c);
@@ -442,6 +445,63 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
           ];
         });
       });
+    },
+    siblings: async (path, id) => {
+      const c = find(path);
+      const u = c.units.find((x) => x.id === id);
+      if (!u) throw new MockError("unknown-unit", id);
+      return siblingsOf(c, u).map((m) => {
+        refresh(m.c);
+        const text = translation(m.c, m.u);
+        return {
+          path: m.c.summary.path,
+          file: m.c.summary.name,
+          target: text === null ? m.u.target.map(() => "") : m.u.target,
+          status: m.u.status,
+        };
+      });
+    },
+    useEverywhere: async (path, id) => {
+      const c = find(path);
+      const u = c.units.find((x) => x.id === id);
+      if (!u || translation(c, u) === null || u.target.some((t) => t === "")) {
+        throw new MockError("invalid-input", `"${id}" has no complete translation to copy`);
+      }
+      refresh(c);
+      const status = u.status === "done" ? "done" : "check";
+      const others = siblingsOf(c, u);
+      for (const m of others) {
+        m.u.target = [...u.target];
+        m.u.status = status;
+        m.c.dirty = true;
+      }
+      return others.length;
+    },
+    fillFromOtherFiles: async (paths, apply) => {
+      const report = { filled: 0, conflicting: 0 };
+      for (const c of (catalogs ?? []).filter(
+        (x) => paths.length === 0 || paths.includes(x.summary.path),
+      )) {
+        refresh(c);
+        for (const u of c.units.filter((x) => x.status === "to-do")) {
+          const sources = siblingsOf(c, u).filter(
+            (m) => translation(m.c, m.u) !== null && m.u.target.every((t) => t !== ""),
+          );
+          if (sources.length === 0) continue;
+          const texts = new Set(sources.map((m) => translation(m.c, m.u)));
+          if (texts.size > 1) {
+            report.conflicting += 1;
+            continue;
+          }
+          report.filled += 1;
+          if (apply) {
+            u.target = [...sources[0]!.u.target];
+            u.status = sources.some((m) => m.u.status === "done") ? "done" : "check";
+            c.dirty = true;
+          }
+        }
+      }
+      return report;
     },
     getUnit: async (path, id) => {
       const c = find(path);

@@ -88,6 +88,22 @@ export interface UnitRow {
   inconsistent: boolean;
 }
 
+/** The same string in another file of the same language. */
+export interface SiblingView {
+  path: string;
+  file: string;
+  /** Its translation there, per form (empty: none), in the syntax of the file asked about. */
+  target: string[];
+  status: UnitStatus;
+}
+
+/** What filling strings from other files did, or would do. */
+export interface FillReport {
+  filled: number;
+  /** Left alone: other files translate them differently. */
+  conflicting: number;
+}
+
 /** The checks a project can tune, per target language. */
 export interface CheckSettings {
   length_ratio: number;

@@ -64,7 +64,7 @@ impl OpenCatalog {
                 || self.existing.get(&unit.id) != Some(&unit.target))
     }
 
-    fn index_of(&self, id: &UnitId) -> Result<usize> {
+    pub(crate) fn index_of(&self, id: &UnitId) -> Result<usize> {
         self.doc
             .units()
             .iter()

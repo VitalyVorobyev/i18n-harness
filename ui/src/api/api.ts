@@ -9,7 +9,9 @@ import type {
   ModelChoice,
   ModelSettings,
   CheckSettings,
+  FillReport,
   SaveReport,
+  SiblingView,
   TermUsage,
   TranslateScope,
   TranslationEvent,
@@ -30,6 +32,12 @@ export interface Api {
   /** The strings of one file, or of every file when `path` is `null`, that match `filter`. */
   listRows(path: string | null, filter: UnitFilter): Promise<UnitRow[]>;
   getUnit(path: string, id: string): Promise<UnitView>;
+  /** The same string in the other files of its language. */
+  siblings(path: string, id: string): Promise<SiblingView[]>;
+  /** Copy a string's translation to every other file; resolves with how many changed. */
+  useEverywhere(path: string, id: string): Promise<number>;
+  /** Fill strings to do in `paths` (every file when empty) from what other files agree on. */
+  fillFromOtherFiles(paths: string[], apply: boolean): Promise<FillReport>;
   setTranslation(path: string, id: string, forms: string[], done: boolean): Promise<UnitView>;
   setDone(path: string, ids: string[], done: boolean): Promise<UnitView[]>;
   save(path: string | null): Promise<SaveReport>;

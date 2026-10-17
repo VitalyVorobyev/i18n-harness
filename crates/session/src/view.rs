@@ -192,6 +192,29 @@ pub struct UnitRow {
     pub inconsistent: bool,
 }
 
+/// The same string in another file of the same language.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SiblingView {
+    /// That file's path.
+    pub path: String,
+    /// That file's name.
+    pub file: String,
+    /// Its translation there, one entry per form, in the placeholder syntax
+    /// of the file asked about (empty: none).
+    pub target: Vec<String>,
+    /// Its status there.
+    pub status: UnitStatus,
+}
+
+/// What filling strings from other files did (or would do).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillReport {
+    /// Strings that got the translation the other files agree on.
+    pub filled: usize,
+    /// Strings left alone because other files translate them differently.
+    pub conflicting: usize,
+}
+
 /// The settings of the checks that a project can tune, per target language.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CheckSettings {

@@ -13,6 +13,7 @@
 - [Translate a Qt Linguist file](tutorials/qt.md)
 - [Files pre-filled with another language](tutorials/pivot.md)
 - [Keep terms unchanged with a glossary](tutorials/glossary.md)
+- [Work across files](tutorials/across-files.md)
 - [Translate a gettext PO file](tutorials/po.md)
 - [Translate ICU message JSON](tutorials/icu-json.md)
 - [Choose a model with harness-lab](tutorials/lab.md)

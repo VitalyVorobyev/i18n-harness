@@ -29,12 +29,36 @@ fn ts(messages: &[(&str, &str, &str)]) -> String {
     out
 }
 
+/// A folder of Qt files for `sk_SK`, opened; paths in the order given.
+fn open_files(files: &[(&str, String)]) -> (tempfile::TempDir, Session, Vec<PathBuf>) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (name, text) in files {
+        std::fs::write(dir.path().join(name), text).expect("write fixture");
+    }
+    let session = Session::open_folder(dir.path()).expect("open folder");
+    let listed: Vec<PathBuf> = session
+        .catalogs()
+        .into_iter()
+        .map(|c| PathBuf::from(c.path))
+        .collect();
+    let paths = files
+        .iter()
+        .map(|(name, _)| {
+            listed
+                .iter()
+                .find(|p| p.file_name().is_some_and(|n| n == *name))
+                .expect("catalog listed")
+                .clone()
+        })
+        .collect();
+    (dir, session, paths)
+}
+
 /// Three files: A and B share "Open" (same translation) and "Close"
 /// (different translations); C has "Open" in another context, which is a
 /// different string.
 fn open() -> (tempfile::TempDir, Session, [PathBuf; 3]) {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let files = [
+    let (dir, session, paths) = open_files(&[
         (
             "A_sk_SK.ts",
             ts(&[
@@ -57,21 +81,9 @@ fn open() -> (tempfile::TempDir, Session, [PathBuf; 3]) {
             ]),
         ),
         ("C_sk_SK.ts", ts(&[("Other", "Open", "Otvoriť")])),
-    ];
-    for (name, text) in &files {
-        std::fs::write(dir.path().join(name), text).expect("write fixture");
-    }
-    let session = Session::open_folder(dir.path()).expect("open folder");
-    let path = |name: &str| {
-        session
-            .catalogs()
-            .into_iter()
-            .map(|c| PathBuf::from(c.path))
-            .find(|p| p.file_name().is_some_and(|n| n == name))
-            .expect("catalog listed")
-    };
-    let paths = [path("A_sk_SK.ts"), path("B_sk_SK.ts"), path("C_sk_SK.ts")];
-    (dir, session, paths)
+    ]);
+    let [a, b, c] = <[PathBuf; 3]>::try_from(paths).expect("three files");
+    (dir, session, [a, b, c])
 }
 
 fn show(show: Show) -> UnitFilter {
@@ -227,4 +239,99 @@ fn glossary_usage_counts_strings_and_translations_that_break_a_term() {
             .iter()
             .all(|u| u.strings == 0)
     );
+}
+
+/// A translates Open and Close; B agrees on Open only; C has both to do.
+fn open_to_fill() -> (tempfile::TempDir, Session, Vec<PathBuf>) {
+    open_files(&[
+        (
+            "A_sk_SK.ts",
+            ts(&[("Main", "Open", "Otvoriť"), ("Main", "Close", "Zavrieť")]),
+        ),
+        (
+            "B_sk_SK.ts",
+            ts(&[("Main", "Open", "Otvoriť"), ("Main", "Close", "Zatvoriť")]),
+        ),
+        (
+            "C_sk_SK.ts",
+            ts(&[
+                ("Main", "Open", ""),
+                ("Main", "Close", ""),
+                ("Main", "New", ""),
+            ]),
+        ),
+    ])
+}
+
+#[test]
+fn filling_copies_what_other_files_agree_on_and_leaves_conflicts_alone() {
+    let (_dir, mut session, paths) = open_to_fill();
+    let c = &paths[2];
+    // A preview changes nothing.
+    let preview = session.fill_from_other_files(&[], false).unwrap();
+    assert_eq!((preview.filled, preview.conflicting), (1, 1));
+    assert_eq!(session.catalog_summary(c).unwrap().counts.to_do, 3);
+
+    let report = session
+        .fill_from_other_files(std::slice::from_ref(c), true)
+        .unwrap();
+    assert_eq!((report.filled, report.conflicting), (1, 1));
+    let rows = session.rows(Some(c), &UnitFilter::default()).unwrap();
+    let open = rows.iter().find(|r| r.source == "Open").unwrap();
+    // Done in the other files, so done here too.
+    assert_eq!(open.target, "Otvoriť");
+    assert_eq!(open.status, i18n_harness_session::UnitStatus::Done);
+    let close = rows.iter().find(|r| r.source == "Close").unwrap();
+    assert_eq!(close.target, "");
+    assert!(close.inconsistent);
+    assert!(session.catalog_summary(c).unwrap().dirty);
+}
+
+#[test]
+fn siblings_show_each_files_translation() {
+    let (_dir, session, paths) = open_to_fill();
+    let id = session
+        .rows(Some(&paths[2]), &UnitFilter::default())
+        .unwrap()[1]
+        .id
+        .clone();
+    let siblings = session.siblings(&paths[2], &id).unwrap();
+    let mut seen: Vec<(String, Vec<String>)> =
+        siblings.into_iter().map(|s| (s.file, s.target)).collect();
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("A_sk_SK.ts".to_owned(), vec!["Zavrieť".to_owned()]),
+            ("B_sk_SK.ts".to_owned(), vec!["Zatvoriť".to_owned()]),
+        ]
+    );
+}
+
+#[test]
+fn one_translation_can_be_used_everywhere() {
+    let (_dir, mut session, paths) = open_to_fill();
+    let close = |s: &Session, p: &Path| {
+        s.rows(Some(p), &UnitFilter::default())
+            .unwrap()
+            .into_iter()
+            .find(|r| r.source == "Close")
+            .unwrap()
+    };
+    let id = close(&session, &paths[0]).id;
+    assert_eq!(session.use_everywhere(&paths[0], &id).unwrap(), 2);
+    for path in &paths {
+        let row = close(&session, path);
+        assert_eq!(row.target, "Zavrieť");
+        assert!(!row.inconsistent);
+    }
+    assert!(session.catalog_summary(&paths[1]).unwrap().dirty);
+    // Nothing to copy from a string without a translation.
+    let new = session
+        .rows(Some(&paths[2]), &UnitFilter::default())
+        .unwrap()
+        .into_iter()
+        .find(|r| r.source == "New")
+        .unwrap();
+    assert!(session.use_everywhere(&paths[2], &new.id).is_err());
 }

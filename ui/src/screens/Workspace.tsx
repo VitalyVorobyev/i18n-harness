@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CatalogSummary,
   CheckSettings,
+  FillReport,
   FolderView,
   GlossaryEntry,
   Language,
   ModelChoice,
   ModelSettings,
   Show,
+  SiblingView,
   TranslationEvent,
   TranslateScope,
   UnitRow,
@@ -19,7 +21,7 @@ import type {
 import { errorKind, errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 import { Editor } from "../workspace/Editor";
-import { FileList } from "../workspace/FileList";
+import { ALL_FILES, FileList, allFilesSummary } from "../workspace/FileList";
 import { Glossary } from "../workspace/Glossary";
 import { PivotDialog } from "../workspace/PivotDialog";
 import type { RunState } from "../workspace/RunBar";
@@ -66,8 +68,18 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pivotFor, setPivotFor] = useState<CatalogSummary | null>(null);
   const [glossaryIssues, setGlossaryIssues] = useState(0);
+  const [siblings, setSiblings] = useState<SiblingView[] | null>(null);
+  const [fillable, setFillable] = useState<FillReport>({ filled: 0, conflicting: 0 });
 
+  const allFiles = selected === ALL_FILES;
   const catalog = catalogs.find((c) => c.path === selected) ?? null;
+  // What the strings view shows: one file, or all of them together.
+  const shown = useMemo(
+    () => (allFiles ? allFilesSummary(catalogs) : catalog),
+    [allFiles, catalogs, catalog],
+  );
+  const activeCatalog = active ? (catalogs.find((c) => c.path === active.path) ?? null) : null;
+  const settingsCatalog = catalog ?? activeCatalog ?? catalogs[0] ?? null;
   const activeKey = active ? rowKey(active) : null;
   const dirty = catalogs.some((c) => c.dirty);
   const running = run.kind === "running";
@@ -88,18 +100,25 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     if (selected === null) return;
     let live = true;
     api
-      .listRows(selected, { statuses: tab === "all" ? [] : [tab], show, search: query || null })
+      .listRows(allFiles ? null : selected, {
+        statuses: tab === "all" ? [] : [tab],
+        show,
+        search: query || null,
+      })
       .then((next) => live && setRows(next))
       .catch((error: unknown) => live && fail("Could not load the strings", error));
     return () => {
       live = false;
     };
-  }, [api, selected, tab, show, query, reload, fail]);
+  }, [api, selected, allFiles, tab, show, query, reload, fail]);
 
-  // The full view of the selected string, for the editor.
+  // The full view of the selected string and the same string in other
+  // files, for the editor.
+  const [siblingsVersion, setSiblingsVersion] = useState(0);
   useEffect(() => {
     if (active === null) {
       setActiveUnit(null);
+      setSiblings(null);
       return;
     }
     let live = true;
@@ -107,10 +126,14 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
       .getUnit(active.path, active.id)
       .then((unit) => live && setActiveUnit(unit))
       .catch((error: unknown) => live && fail("Could not load the string", error));
+    api
+      .siblings(active.path, active.id)
+      .then((list) => live && setSiblings(list))
+      .catch(() => live && setSiblings(null));
     return () => {
       live = false;
     };
-  }, [api, active, fail]);
+  }, [api, active, siblingsVersion, fail]);
 
   // Model settings and the models the server offers.
   useEffect(() => {
@@ -298,6 +321,42 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     }
   };
 
+  const copyEverywhere = async () => {
+    if (!active) return;
+    try {
+      const changed = await api.useEverywhere(active.path, active.id);
+      toast({
+        tone: "success",
+        title: `Used in ${plural(changed, "other file", "other files")}`,
+        description: "Save to write the files.",
+      });
+      setSiblingsVersion((n) => n + 1);
+      setReload((n) => n + 1);
+      await refreshCatalogs();
+    } catch (error) {
+      fail("Could not copy the translation", error);
+    }
+  };
+
+  const fillFromOtherFiles = async () => {
+    try {
+      const report = await api.fillFromOtherFiles([], true);
+      toast({
+        tone: report.filled > 0 ? "success" : "info",
+        title: `${plural(report.filled, "string", "strings")} filled from other files`,
+        description:
+          report.conflicting > 0
+            ? `${plural(report.conflicting, "string is", "strings are")} translated differently in other files and left to do: choose "Translated differently in other files" to see them.`
+            : undefined,
+      });
+      setReload((n) => n + 1);
+      setSiblingsVersion((n) => n + 1);
+      await refreshCatalogs();
+    } catch (error) {
+      fail("Could not fill from other files", error);
+    }
+  };
+
   const translateUnit = async () => {
     if (!active) return;
     setBusyUnit(true);
@@ -320,6 +379,10 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
       .planSize(GLOSSARY_ISSUES)
       .then((n) => live && setGlossaryIssues(n))
       .catch(() => live && setGlossaryIssues(0));
+    void api
+      .fillFromOtherFiles([], false)
+      .then((report) => live && setFillable(report))
+      .catch(() => live && setFillable({ filled: 0, conflicting: 0 }));
     return () => {
       live = false;
     };
@@ -343,9 +406,9 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   };
 
   const openSettings = async () => {
-    if (!catalog) return;
+    if (!settingsCatalog) return;
     try {
-      setChecks(await api.getCheckSettings(catalog.locale));
+      setChecks(await api.getCheckSettings(settingsCatalog.locale));
       setSettingsOpen(true);
     } catch (error) {
       fail("Could not load the settings", error);
@@ -383,11 +446,13 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
             modelsError={modelsError}
             model={settings?.model ?? null}
             onModelChange={(id) => void chooseModel(id)}
-            toDoInFile={catalog?.counts.to_do ?? 0}
+            toDoInFile={shown?.counts.to_do ?? 0}
             toDoInFolder={toDoInFolder}
             running={running}
             dirty={dirty}
-            onTranslateFile={() => catalog && void translate([catalog.path])}
+            onTranslateFile={() => shown && void translate(allFiles ? [] : [shown.path])}
+            fillable={fillable.filled}
+            onFill={() => void fillFromOtherFiles()}
             onTranslateFolder={() => void translate([])}
             glossaryIssues={glossaryIssues}
             onApplyGlossary={() => void translate([], true)}
@@ -424,9 +489,10 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
               }}
               onShowStrings={showTermStrings}
             />
-          ) : catalog ? (
+          ) : shown ? (
             <Strings
-              catalog={catalog}
+              catalog={shown}
+              allFiles={allFiles}
               tab={tab}
               onTab={(t) => setView({ tab: t })}
               search={search}
@@ -443,11 +509,13 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
           )
         }
         right={
-          view === "strings" && catalog ? (
+          view === "strings" && shown ? (
             <Editor
               key={`${active?.path ?? ""}::${activeUnit?.id ?? ""}::${activeUnit?.target.join("\u0000") ?? ""}`}
-              catalog={catalog}
+              catalog={activeCatalog ?? shown}
               unit={activeUnit !== null && activeUnit.id === active?.id ? activeUnit : null}
+              siblings={siblings}
+              onUseEverywhere={() => void copyEverywhere()}
               canTranslate={settings?.model != null && !running}
               busy={busyUnit}
               autoFocus={focusKey !== null && focusKey === activeKey}
@@ -491,10 +559,10 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         />
       )}
 
-      {settingsOpen && catalog && settings && checks && (
+      {settingsOpen && settingsCatalog && settings && checks && (
         <SettingsDialog
-          locale={catalog.locale}
-          language={catalog.language}
+          locale={settingsCatalog.locale}
+          language={settingsCatalog.language}
           settings={settings}
           checks={checks}
           onClose={() => setSettingsOpen(false)}

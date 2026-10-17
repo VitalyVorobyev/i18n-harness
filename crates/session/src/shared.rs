@@ -51,6 +51,20 @@ impl SharedIndex {
         Self { groups, group_of }
     }
 
+    /// The other places the unit at `at` occurs.
+    pub(crate) fn siblings(&self, at: At) -> Vec<At> {
+        self.group_of
+            .get(&at)
+            .map(|&g| {
+                self.groups[g]
+                    .iter()
+                    .copied()
+                    .filter(|&other| other != at)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub(crate) fn info(&self, catalogs: &[OpenCatalog], at: At) -> SharedInfo {
         let Some(&group) = self.group_of.get(&at) else {
             return SharedInfo::default();

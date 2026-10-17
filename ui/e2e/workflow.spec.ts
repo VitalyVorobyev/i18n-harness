@@ -200,3 +200,53 @@ test("strings translated differently in another file can be listed", async ({ pa
   await expect(page.getByRole("cell", { name: "Priblížiť" })).toBeVisible();
   await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
 });
+
+test("strings to do are filled from what other files agree on", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  // No model is needed: nothing is translated, only copied.
+  await page.getByRole("button", { name: "More translate options" }).click();
+  await page.getByRole("menuitem", { name: "Fill from other files (1)" }).click();
+  await expect(page.getByText("1 string filled from other files")).toBeVisible();
+  // "Filter Size" is done in Viewer_sk_SK.ts, so it is done here too.
+  await page.getByRole("radio", { name: /Done/ }).click();
+  await expect(page.getByRole("cell", { name: "Veľkosť filtra" })).toBeVisible();
+});
+
+test("a translation differing between files is resolved from the editor", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
+  const editor = page.getByRole("complementary", { name: "Translation" });
+  const others = editor.getByRole("region", { name: "Other files" });
+  await expect(others.getByText("Report_sk_SK.ts")).toBeVisible();
+  await expect(others.getByText("Zväčšiť")).toBeVisible();
+
+  // "Use this" takes the other file's text into the editor.
+  await others.getByRole("button", { name: "Use this", exact: true }).click();
+  await expect(editor.getByRole("textbox")).toHaveValue("Zväčšiť");
+  await editor.getByRole("button", { name: "Undo" }).click();
+
+  // Or this file's translation goes to every file.
+  await others.getByRole("button", { name: "Use this translation in every file" }).click();
+  await expect(page.getByText("Used in 1 other file")).toBeVisible();
+  await expect(others.getByText("Priblížiť")).toBeVisible();
+  await page.getByRole("combobox", { name: "Which strings" }).click();
+  await expect(
+    page.getByRole("option", { name: "Translated differently in other files (0)" }),
+  ).toBeVisible();
+});
+
+test("all files can be listed together", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("navigation", { name: "Files" }).getByText("All files").click();
+  await page.getByRole("radio", { name: /All/ }).click();
+  await expect(page.getByRole("columnheader", { name: "File" })).toBeVisible();
+  // Only the rows in view are drawn; the search brings a later file's string up.
+  await page.getByRole("textbox", { name: "Search strings" }).fill("Print");
+  await expect(page.getByRole("cell", { name: "Report_sk_SK.ts" })).toBeVisible();
+  await page.getByRole("cell", { name: "Print", exact: true }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Translation" }).getByText("Print", { exact: true }),
+  ).toBeVisible();
+});

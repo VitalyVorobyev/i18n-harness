@@ -108,3 +108,12 @@ test("settings", async ({ page }) => {
   await expect(dialog.getByText("Context size (tokens)")).toBeVisible();
   await shot(page, "settings-server");
 });
+
+test("other files", async ({ page }) => {
+  await openFolder(page);
+  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Other files" })).toBeVisible();
+  await shot(page, "other-files");
+});
