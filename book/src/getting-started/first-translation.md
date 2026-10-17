@@ -162,12 +162,17 @@ you can fix it and save again.
 
 ## Settings
 
-The gear button in the toolbar opens **Settings**, with three tabs:
+**Glossary** in the toolbar (next to **Strings**) lists the terms to keep
+unchanged or translate a fixed way; see
+[Keep terms unchanged with a glossary](../tutorials/glossary.md).
 
-- **Glossary** — terms to keep unchanged or translate a fixed way; see
-  [Keep terms unchanged with a glossary](../tutorials/glossary.md).
+The gear button in the toolbar opens **Settings**, with two tabs:
+
 - **Checks** — when a translation counts as too long, for the language
   of the selected file:
+
+  ![Check settings](../images/settings-checks.png)
+
   - **Warn when a translation is longer than** — a factor of the
     original's length (1.3 means 30% longer);
   - **Skip originals shorter than** — short labels are not checked,

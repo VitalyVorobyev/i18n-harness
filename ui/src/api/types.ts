@@ -106,6 +106,13 @@ export interface GlossaryEntry {
   note: string | null;
 }
 
+/** How the strings of one language use a glossary term. */
+export interface TermUsage {
+  term: string;
+  strings: number;
+  breaking: number;
+}
+
 export type ServerKind = "ollama" | "openai-compatible";
 export type PromptStyle = "chat" | "completion" | "unknown";
 

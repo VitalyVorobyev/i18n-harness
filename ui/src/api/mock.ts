@@ -495,6 +495,24 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       return summary(c);
     },
     getGlossary: async () => glossary,
+    glossaryUsage: async (locale) =>
+      glossary.map((g) => {
+        const units = (catalogs ?? [])
+          .filter((c) => c.summary.locale === locale)
+          .flatMap((c) => {
+            refresh(c);
+            return c.units;
+          });
+        const uses = (u: MockUnit) =>
+          g.keep
+            ? u.source.includes(g.term)
+            : u.source.toLowerCase().includes(g.term.toLowerCase());
+        return {
+          term: g.term,
+          strings: units.filter(uses).length,
+          breaking: units.filter((u) => uses(u) && missingTerms(u).includes(g)).length,
+        };
+      }),
     setGlossary: async (_locale, entries) => {
       glossary = entries.filter((e) => e.term.trim() !== "");
       return glossary;

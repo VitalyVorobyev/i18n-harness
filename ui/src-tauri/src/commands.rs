@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use i18n_harness_locales::Locale;
 use i18n_harness_session::{
     CatalogSummary, CheckSettings, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session,
-    SessionError, TranslateScope, UnitFilter, UnitRow, UnitView,
+    SessionError, TermUsage, TranslateScope, UnitFilter, UnitRow, UnitView,
 };
 use serde::Serialize;
 
@@ -185,6 +185,15 @@ pub(crate) fn set_glossary(
         s.set_glossary(&locale, entries)?;
         Ok(s.glossary(&locale))
     })
+}
+
+/// How the strings of `locale` use each glossary term.
+#[tauri::command]
+pub(crate) fn glossary_usage(
+    locale: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<TermUsage>> {
+    state.with(|s| Ok(s.glossary_usage(&locale)))
 }
 
 /// The terms of a table file (CSV or tab separated), for the glossary

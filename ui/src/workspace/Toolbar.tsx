@@ -1,12 +1,25 @@
-import { Button, DropdownMenu, MenuItem, Select, ThemeToggle, Tooltip } from "@vitavision/ui";
+import {
+  Button,
+  DropdownMenu,
+  MenuItem,
+  SegmentedControl,
+  Select,
+  ThemeToggle,
+  Tooltip,
+} from "@vitavision/ui";
 import { ChevronDown, FolderClosed, Languages, Save, Settings } from "lucide-react";
 
 import type { ModelChoice } from "../api";
 import { modelLabel, modelNote, plural } from "../lib/format";
 import { folderName } from "../lib/recent";
 
+/** What the main area shows. */
+export type View = "strings" | "glossary";
+
 export function Toolbar(props: {
   root: string;
+  view: View;
+  onView: (view: View) => void;
   models: ModelChoice[] | null;
   modelsError: string | null;
   model: string | null;
@@ -39,6 +52,16 @@ export function Toolbar(props: {
           {folderName(props.root)}
         </span>
       </div>
+      <SegmentedControl
+        aria-label="View"
+        size="md"
+        value={props.view}
+        onValueChange={(v) => props.onView(v as View)}
+        options={[
+          { value: "strings", label: "Strings" },
+          { value: "glossary", label: "Glossary" },
+        ]}
+      />
       <div className="flex-1" />
 
       <div className="w-64">

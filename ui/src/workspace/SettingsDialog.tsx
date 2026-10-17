@@ -1,7 +1,6 @@
 import {
   Button,
   Callout,
-  Checkbox,
   Dialog,
   Field,
   Input,
@@ -10,77 +9,29 @@ import {
   Tabs,
   toast,
 } from "@vitavision/ui";
-import { FileUp, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { CheckSettings, GlossaryEntry, ModelSettings, ServerKind } from "../api";
+import type { CheckSettings, ModelSettings, ServerKind } from "../api";
 import { errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 
-type Tab = "glossary" | "checks" | "server";
+type Tab = "checks" | "server";
 
-interface Row extends GlossaryEntry {
-  rowId: number;
-}
-
-let nextRowId = 0;
-const withId = (entry: GlossaryEntry): Row => ({ ...entry, rowId: nextRowId++ });
-const withoutId = ({ rowId: _rowId, ...entry }: Row): GlossaryEntry => entry;
-
-/** One dialog for everything a project can be told: glossary, checks and model server. */
+/** How the project's strings are checked, and which model server translates them. */
 export function SettingsDialog(props: {
   locale: string;
   language: string;
-  glossary: GlossaryEntry[];
   settings: ModelSettings;
   checks: CheckSettings;
   onClose: () => void;
-  onSaved: (glossary: GlossaryEntry[], settings: ModelSettings) => void;
+  onSaved: (settings: ModelSettings) => void;
 }) {
   const api = useApi();
-  const [tab, setTab] = useState<Tab>("glossary");
-  const [entries, setEntries] = useState<Row[]>(() => props.glossary.map(withId));
+  const [tab, setTab] = useState<Tab>("checks");
   const [settings, setSettings] = useState<ModelSettings>(props.settings);
   const [checks, setChecks] = useState<CheckSettings>(props.checks);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
-
-  // Imported rows go into the draft; Save writes them like any edit.
-  const importTable = async () => {
-    try {
-      const path = await api.pickTable();
-      if (path === null) return;
-      const imported = await api.readGlossaryTable(path);
-      let added = 0;
-      let updated = 0;
-      const next = [...entries];
-      for (const entry of imported) {
-        const i = next.findIndex((e) => e.term === entry.term);
-        if (i >= 0) {
-          next[i] = { ...entry, rowId: next[i]!.rowId };
-          updated += 1;
-        } else {
-          next.push(withId(entry));
-          added += 1;
-        }
-      }
-      setEntries(next);
-      toast({
-        tone: "success",
-        title: `${plural(added, "term", "terms")} added, ${updated} updated`,
-        description: "Save the settings to keep them.",
-      });
-    } catch (error) {
-      toast({
-        tone: "error",
-        title: "Could not import the terms",
-        description: errorMessage(error),
-      });
-    }
-  };
-
-  const update = (rowId: number, patch: Partial<GlossaryEntry>) =>
-    setEntries(entries.map((e) => (e.rowId === rowId ? { ...e, ...patch } : e)));
 
   const test = async () => {
     setTestResult(null);
@@ -98,13 +49,8 @@ export function SettingsDialog(props: {
   const save = async () => {
     setSaving(true);
     try {
-      const glossary = await api.setGlossary(
-        props.locale,
-        entries.filter((e) => e.term.trim() !== "").map(withoutId),
-      );
       await api.setCheckSettings(props.locale, checks);
-      const saved = await api.setModelSettings(settings);
-      props.onSaved(glossary, saved);
+      props.onSaved(await api.setModelSettings(settings));
     } catch (error) {
       toast({
         tone: "error",
@@ -138,106 +84,10 @@ export function SettingsDialog(props: {
         active={tab}
         onSelect={setTab}
         items={[
-          { id: "glossary", label: "Glossary", count: entries.length },
           { id: "checks", label: "Checks" },
           { id: "server", label: "Model server" },
         ]}
       />
-
-      {tab === "glossary" && (
-        <div className="mt-4 space-y-3">
-          <p className="text-sm text-fg-muted">
-            Terms the model must keep unchanged (product names, class names such as ParamsManager,
-            units such as mm) or always translate the same way. Translations here are for{" "}
-            {props.language}.
-          </p>
-          <div className="max-h-[50vh] overflow-y-auto rounded-panel border border-line">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-surface text-left text-xs text-fg-subtle">
-                <tr>
-                  <th className="px-2 py-1.5 font-medium">Term</th>
-                  <th className="px-2 py-1.5 font-medium">Keep unchanged</th>
-                  <th className="px-2 py-1.5 font-medium">{props.language}</th>
-                  <th className="px-2 py-1.5 font-medium">Note</th>
-                  <th className="w-8" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {entries.map((entry) => (
-                  <tr key={entry.rowId}>
-                    <td className="px-2 py-1">
-                      <Input
-                        aria-label="Term"
-                        value={entry.term}
-                        onChange={(e) => update(entry.rowId, { term: e.target.value })}
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <Checkbox
-                        aria-label={`Keep ${entry.term || "this term"} unchanged`}
-                        checked={entry.keep}
-                        onCheckedChange={(keep) => update(entry.rowId, { keep })}
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <Input
-                        aria-label={`${props.language} translation`}
-                        value={entry.translation ?? ""}
-                        disabled={entry.keep}
-                        onChange={(e) =>
-                          update(entry.rowId, { translation: e.target.value || null })
-                        }
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <Input
-                        aria-label="Note"
-                        value={entry.note ?? ""}
-                        onChange={(e) => update(entry.rowId, { note: e.target.value || null })}
-                      />
-                    </td>
-                    <td className="px-1 py-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Remove ${entry.term || "term"}`}
-                        icon={<Trash2 aria-hidden size={14} />}
-                        onClick={() => setEntries(entries.filter((e) => e.rowId !== entry.rowId))}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {entries.length === 0 && <p className="p-3 text-sm text-fg-subtle">No terms yet.</p>}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              icon={<Plus aria-hidden size={16} />}
-              onClick={() =>
-                setEntries([
-                  ...entries,
-                  withId({ term: "", keep: true, translation: null, note: null }),
-                ])
-              }
-            >
-              Add term
-            </Button>
-            <Button
-              variant="secondary"
-              icon={<FileUp aria-hidden size={16} />}
-              onClick={() => void importTable()}
-            >
-              Import from a spreadsheet…
-            </Button>
-            <span className="text-xs text-fg-subtle">
-              CSV or tab-separated: term, {props.language} translation, note. No translation keeps
-              the term unchanged.
-            </span>
-          </div>
-        </div>
-      )}
 
       {tab === "checks" && (
         <div className="mt-4 space-y-4">

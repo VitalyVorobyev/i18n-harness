@@ -653,6 +653,17 @@ fn contains_inflected(text: &str, phrase: &str) -> bool {
         })
 }
 
+/// Whether glossary `term` occurs in the original `source` as the checks
+/// match it: whole words, and case-sensitively for a term kept unchanged,
+/// ignoring case for a term with a fixed translation.
+pub fn term_occurs(source: &str, term: &str, keep: bool) -> bool {
+    if keep {
+        count_word(source, term) > 0
+    } else {
+        count_word(&source.to_lowercase(), &term.to_lowercase()) > 0
+    }
+}
+
 /// Occurrences of `word` in `text` not glued to other letters or digits.
 fn count_word(text: &str, word: &str) -> u32 {
     if word.is_empty() {

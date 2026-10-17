@@ -20,12 +20,14 @@ import { errorKind, errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 import { Editor } from "../workspace/Editor";
 import { FileList } from "../workspace/FileList";
+import { Glossary } from "../workspace/Glossary";
 import { PivotDialog } from "../workspace/PivotDialog";
 import type { RunState } from "../workspace/RunBar";
 import { RunBar } from "../workspace/RunBar";
 import { SettingsDialog } from "../workspace/SettingsDialog";
 import type { StatusTab } from "../workspace/Strings";
 import { Strings, rowKey } from "../workspace/Strings";
+import type { View } from "../workspace/Toolbar";
 import { Toolbar } from "../workspace/Toolbar";
 
 /** Every translated string whose text breaks the glossary. */
@@ -58,7 +60,8 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const [run, setRun] = useState<RunState>({ kind: "idle" });
   const [busyUnit, setBusyUnit] = useState(false);
   const [languages, setLanguages] = useState<Language[]>([]);
-  const [glossary, setGlossary] = useState<GlossaryEntry[] | null>(null);
+  const [view, setMainView] = useState<View>("strings");
+  const [glossaryLocale, setGlossaryLocale] = useState<string | null>(null);
   const [checks, setChecks] = useState<CheckSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pivotFor, setPivotFor] = useState<CatalogSummary | null>(null);
@@ -323,15 +326,29 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   }, [api, catalogs, running, reload]);
 
   const toDoInFolder = useMemo(() => catalogs.reduce((n, c) => n + c.counts.to_do, 0), [catalogs]);
+  const targetLanguages = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const c of catalogs) seen.set(c.locale, c.language);
+    return [...seen].map(([locale, language]) => ({ locale, language }));
+  }, [catalogs]);
+  const shownLocale = glossaryLocale ?? catalog?.locale ?? targetLanguages[0]?.locale ?? null;
+
+  // A count in the glossary opens the strings that use or break a term.
+  const showTermStrings = (entry: GlossaryEntry, breaking: boolean) => {
+    setMainView("strings");
+    setActive(null);
+    setTab("all");
+    setShow(breaking ? (entry.keep ? "problems" : "warnings") : "everything");
+    setSearch(entry.term);
+  };
 
   const openSettings = async () => {
     if (!catalog) return;
     try {
-      setGlossary(await api.getGlossary(catalog.locale));
       setChecks(await api.getCheckSettings(catalog.locale));
       setSettingsOpen(true);
     } catch (error) {
-      fail("Could not load the glossary", error);
+      fail("Could not load the settings", error);
     }
   };
 
@@ -360,6 +377,8 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         header={
           <Toolbar
             root={props.folder.root}
+            view={view}
+            onView={setMainView}
             models={models}
             modelsError={modelsError}
             model={settings?.model ?? null}
@@ -388,7 +407,24 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         leftLabel="Files"
         leftSize={{ defaultSize: 280, minSize: 200, maxSize: "40%" }}
         main={
-          catalog ? (
+          view === "glossary" && shownLocale !== null ? (
+            <Glossary
+              locale={shownLocale}
+              language={
+                targetLanguages.find((l) => l.locale === shownLocale)?.language ?? shownLocale
+              }
+              languages={targetLanguages}
+              onLocale={setGlossaryLocale}
+              breaking={glossaryIssues}
+              canApply={settings?.model != null && !running}
+              onApply={() => void translate([], true)}
+              onChanged={() => {
+                setReload((n) => n + 1);
+                void refreshCatalogs();
+              }}
+              onShowStrings={showTermStrings}
+            />
+          ) : catalog ? (
             <Strings
               catalog={catalog}
               tab={tab}
@@ -407,7 +443,7 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
           )
         }
         right={
-          catalog ? (
+          view === "strings" && catalog ? (
             <Editor
               key={`${active?.path ?? ""}::${activeUnit?.id ?? ""}::${activeUnit?.target.join("\u0000") ?? ""}`}
               catalog={catalog}
@@ -455,20 +491,18 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         />
       )}
 
-      {settingsOpen && catalog && settings && glossary && checks && (
+      {settingsOpen && catalog && settings && checks && (
         <SettingsDialog
           locale={catalog.locale}
           language={catalog.language}
-          glossary={glossary}
           settings={settings}
           checks={checks}
           onClose={() => setSettingsOpen(false)}
-          onSaved={(_glossary, saved) => {
+          onSaved={(saved) => {
             setSettingsOpen(false);
             setSettings(saved);
             // Warnings and their counts depend on the check settings.
             void refreshCatalogs();
-            // Issues shown in the list depend on the glossary.
             setReload((n) => n + 1);
             toast({ tone: "success", title: "Settings saved" });
             void api
