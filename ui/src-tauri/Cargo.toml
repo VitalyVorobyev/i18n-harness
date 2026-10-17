@@ -20,11 +20,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # opts out with `--no-default-features` to keep the Vite dev server.
 default = ["ollama", "custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
-# Gemma/Ollama HTTP backend. Enabled by default — without it the
-# `translate_unit` command is unavailable and the UI falls back to
-# manual editing only. The backend crate's `manual` feature is on
-# unconditionally via its own defaults.
-ollama = ["i18n-harness-backend/ollama"]
+# Local Ollama servers. Without it the app edits catalogs but cannot
+# translate with a model.
+ollama = ["i18n-harness-session/ollama"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -34,25 +32,13 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = { workspace = true }
 i18n-harness-core = { workspace = true }
-i18n-harness-adapter-qt = { workspace = true }
-i18n-harness-formats = { workspace = true }
-i18n-harness-catalog = { workspace = true }
 i18n-harness-locales = { workspace = true }
 i18n-harness-backend = { workspace = true }
-i18n-harness-gate = { workspace = true }
-i18n-harness-glossary = { workspace = true }
-i18n-harness-project = { workspace = true }
-i18n-harness-reuse = { workspace = true }
+i18n-harness-session = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-thiserror = { workspace = true }
-uuid = { workspace = true }
-time = { workspace = true }
 
-[dev-dependencies]
-tempfile = "3"
 
 [lints]
 workspace = true

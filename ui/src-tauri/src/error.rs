@@ -1,34 +1,45 @@
-//! IPC error helpers for the Tauri command layer.
-//!
-//! Commands return `Result<T, String>` because that is what Tauri
-//! serializes to the JS layer. This module owns the small set of
-//! string-error mappers used across every command — lock-poisoned,
-//! "no catalog open", and similar.
+//! The error every command returns.
 
-use std::sync::{MutexGuard, PoisonError};
+use i18n_harness_session::SessionError;
+use serde::Serialize;
 
-#[allow(dead_code)] // used in future phases when commands move to their own modules
-pub(crate) type IpcResult<T> = Result<T, String>;
-
-/// Generic poisoned-lock mapper. Use as
-/// `.map_err(lock_poisoned("project"))`. The label is interpolated
-/// into the error string so every existing message stays byte-stable
-/// (current strings: `"catalog state lock poisoned"`,
-/// `"project state lock poisoned"`, …).
-pub(crate) fn lock_poisoned<T>(
-    label: &'static str,
-) -> impl FnOnce(PoisonError<MutexGuard<'_, T>>) -> String {
-    move |_| format!("{label} state lock poisoned")
+/// A command failure as the frontend receives it: `{ kind, message }`.
+#[derive(Debug, Serialize)]
+pub(crate) struct CommandError {
+    kind: &'static str,
+    message: String,
 }
 
-pub(crate) fn no_catalog() -> String {
-    "no catalog open".into()
+impl CommandError {
+    pub(crate) fn no_folder() -> Self {
+        Self {
+            kind: "no-folder",
+            message: "no folder is open".into(),
+        }
+    }
+
+    pub(crate) fn busy() -> Self {
+        Self {
+            kind: "busy",
+            message: "a translation run is already in progress".into(),
+        }
+    }
+
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self {
+            kind: "internal",
+            message: message.into(),
+        }
+    }
 }
 
-pub(crate) fn no_project() -> String {
-    "no project open".into()
+impl From<SessionError> for CommandError {
+    fn from(e: SessionError) -> Self {
+        Self {
+            kind: e.kind(),
+            message: e.to_string(),
+        }
+    }
 }
 
-pub(crate) fn no_catalog_in_project() -> String {
-    "catalog not open in project".into()
-}
+pub(crate) type CommandResult<T> = Result<T, CommandError>;
