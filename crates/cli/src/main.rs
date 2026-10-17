@@ -56,7 +56,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Verify the byte-stable round-trip contract on a Qt `.ts` file:
+    /// Verify the byte-stable round-trip contract on a catalog file:
     /// extract → apply with zero unit changes must produce byte-identical
     /// output. Exits non-zero on any diff.
     RoundTrip(RoundTripArgs),
@@ -99,7 +99,7 @@ enum Command {
     Reuse(ReuseArgs),
 
     /// Extract the writable-untranslated unit ids from a base catalog and
-    /// write them as a standalone Qt `.ts` remainder file. Run this right
+    /// write them as a standalone remainder catalog. Run this right
     /// after `reuse` to get the post-reuse leftover that needs translation.
     SplitRemainder(SplitRemainderArgs),
 
@@ -111,13 +111,13 @@ enum Command {
 
 #[derive(Parser, Debug)]
 struct RoundTripArgs {
-    /// Path to the Qt `.ts` file to round-trip.
+    /// Path to the catalog file to round-trip (any supported format).
     path: PathBuf,
 }
 
 #[derive(Parser, Debug)]
 struct GateArgs {
-    /// Path to the catalog file (Qt `.ts` for now).
+    /// Path to the catalog file (any supported format; detected from its content).
     path: PathBuf,
 
     /// Target locale id (e.g. `de_DE`).
@@ -152,7 +152,7 @@ struct OpenArgs {
 
 #[derive(Parser, Debug)]
 struct TranslateArgs {
-    /// Path to the catalog file (Qt `.ts` for now).
+    /// Path to the catalog file (any supported format; detected from its content).
     path: PathBuf,
 
     /// Target locale id (e.g. `de_DE`).
@@ -185,10 +185,9 @@ struct TranslateArgs {
 
 #[derive(Parser, Debug)]
 struct ExportBatchArgs {
-    /// Single-catalog mode: path to the Qt `.ts` catalog to export.
+    /// Single-catalog mode: path to the catalog to export.
     ///
-    /// Mutually exclusive with `--project`. Only Qt catalogs are supported in
-    /// this release; non-Qt catalogs in a project are warned about and skipped.
+    /// Mutually exclusive with `--project`.
     #[arg(group = "source", required_unless_present = "project")]
     path: Option<PathBuf>,
 
@@ -251,7 +250,7 @@ struct ImportBatchArgs {
 
 #[derive(Parser, Debug)]
 struct ReuseArgs {
-    /// Ad-hoc mode: base Qt `.ts` catalog to reuse translations into.
+    /// Ad-hoc mode: base catalog to reuse translations into.
     ///
     /// Mutually exclusive with `--project`. The file is read; output goes to
     /// `--out` if given, otherwise the base is overwritten in place.
@@ -263,7 +262,7 @@ struct ReuseArgs {
     /// Mutually exclusive with the positional `<PATH>` argument. The project
     /// manifest determines both the base catalogs (filtered to `--locale`) and
     /// the reference set for that locale; each matching base is written in
-    /// place. Non-Qt catalog entries are warned about and skipped.
+    /// place, using the references in the same format as the base.
     #[arg(long, group = "source")]
     project: Option<PathBuf>,
 
@@ -271,7 +270,7 @@ struct ReuseArgs {
     #[arg(long)]
     locale: String,
 
-    /// Ad-hoc mode only: one or more reference Qt `.ts` catalogs to pull
+    /// Ad-hoc mode only: one or more reference catalogs (same format as the base) to pull
     /// translations from. Repeated: `--reference a.ts --reference b.ts`.
     /// Required in ad-hoc mode; ignored in project mode (the manifest
     /// `[[references]]` for the locale are used instead).
@@ -292,7 +291,7 @@ struct ReuseArgs {
 
 #[derive(Parser, Debug)]
 struct SplitRemainderArgs {
-    /// Base Qt `.ts` catalog to split. Writable-untranslated units are written
+    /// Base catalog to split. Writable-untranslated units are written
     /// to `--out`; the base itself is not modified.
     ///
     /// Running this right after `reuse` gives the post-reuse leftover whose
@@ -306,10 +305,10 @@ struct SplitRemainderArgs {
 
 #[derive(Parser, Debug)]
 struct MergeArgs {
-    /// Base Qt `.ts` catalog (the half that was not sent for translation).
+    /// Base catalog (the half that was not sent for translation).
     base: PathBuf,
 
-    /// Translated remainder Qt `.ts` produced by a translator from the
+    /// Translated remainder catalog produced by a translator from the
     /// split step. Its unit ids must be a subset of `<BASE>`'s ids and
     /// disjoint from the base's finished-and-complete units.
     #[arg(long = "with")]
