@@ -388,3 +388,17 @@ state_dir = "/tmp/my-state"
     let (m, _) = ProjectManifest::from_toml(toml).expect("parse");
     assert_eq!(m.paths.state_dir, Some(PathBuf::from("/tmp/my-state")));
 }
+
+#[test]
+fn openai_compatible_backend_kind_parses_in_both_spellings() {
+    for spelling in ["openai-compatible", "open-ai-compatible"] {
+        let toml = format!(
+            "[project]\nname = \"p\"\nschema = 1\n\n[backend.default]\nkind = \"{spelling}\"\nhost = \"http://localhost:1234/v1\"\n"
+        );
+        let (m, _) = ProjectManifest::from_toml(&toml).expect(spelling);
+        assert_eq!(
+            m.backends.default.as_ref().map(|b| b.kind),
+            Some(BackendKind::OpenAiCompatible)
+        );
+    }
+}

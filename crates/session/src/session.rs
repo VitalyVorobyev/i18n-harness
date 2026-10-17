@@ -309,16 +309,24 @@ impl Session {
             }
         };
         let report = catalog.gate(unit, self.project.glossary());
-        let issues = if catalog.is_translation(unit) {
+        let translation = catalog.is_translation(unit);
+        let issues = if translation {
             issues(&report, unit, format)
         } else {
             Vec::new()
+        };
+        // In a pivot catalog, untouched text is the input, not a translation:
+        // show it as `existing` only, with an empty translation.
+        let target = if catalog.pivot.is_some() && !translation {
+            vec![String::new(); forms(&unit.target).len()]
+        } else {
+            forms(&unit.target)
         };
         UnitView {
             id: unit.id.0.clone(),
             source: native(&unit.source),
             existing: catalog.existing.get(&unit.id).map(forms),
-            target: forms(&unit.target),
+            target,
             plural_slots: plural_slots(catalog, unit),
             status: status_of(unit, catalog.pivot.is_some()),
             state: unit.state,

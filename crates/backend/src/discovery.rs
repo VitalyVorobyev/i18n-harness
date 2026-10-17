@@ -22,6 +22,7 @@ pub enum ServerKind {
     /// Ollama's native API (`/api/tags`, `/api/show`, `/api/chat`).
     Ollama,
     /// The OpenAI HTTP API (`/v1/models`, `/v1/chat/completions`).
+    #[serde(rename = "openai-compatible")]
     OpenAiCompatible,
 }
 

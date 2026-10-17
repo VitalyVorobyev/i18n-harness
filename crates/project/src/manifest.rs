@@ -219,6 +219,7 @@ pub enum BackendKind {
     /// Ollama local inference server.
     Ollama,
     /// Any OpenAI-compatible HTTP API (OpenAI, LM Studio, …).
+    #[serde(rename = "openai-compatible", alias = "open-ai-compatible")]
     OpenAiCompatible,
     /// Anthropic managed agent / Claude API.
     Agent,

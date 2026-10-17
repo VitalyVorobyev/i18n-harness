@@ -1407,7 +1407,7 @@ fn backend_kind_str(k: BackendKind) -> &'static str {
     match k {
         BackendKind::Manual => "manual",
         BackendKind::Ollama => "ollama",
-        BackendKind::OpenAiCompatible => "open-ai-compatible",
+        BackendKind::OpenAiCompatible => "openai-compatible",
         BackendKind::Agent => "agent",
     }
 }

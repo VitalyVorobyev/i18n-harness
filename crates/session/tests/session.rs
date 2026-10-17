@@ -104,6 +104,24 @@ fn views_show_native_placeholders_existing_text_and_plural_slots() {
 }
 
 #[test]
+fn untouched_pivot_text_is_shown_as_input_not_as_translation() {
+    let (_dir, mut session, path) = open();
+    session.set_pivot(&path, Some("de_DE")).unwrap();
+    let unit = session
+        .units(&path, &UnitFilter::default(), 0, usize::MAX)
+        .unwrap()
+        .units
+        .into_iter()
+        .find(|u| u.source == "Filter Size")
+        .unwrap();
+    assert_eq!(
+        unit.existing.as_deref(),
+        Some(&["Filtergröße".to_owned()][..])
+    );
+    assert_eq!(unit.target, [""]);
+}
+
+#[test]
 fn search_filters_by_text_and_context() {
     let (_dir, session, path) = open();
     let filter = |q: &str| UnitFilter {
