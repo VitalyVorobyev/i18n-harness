@@ -487,3 +487,23 @@ fn plural_forms_are_translated_with_their_sample_counts() {
             .translated
     );
 }
+
+#[test]
+fn a_translation_identical_to_the_pivot_text_is_shown_once_recorded() {
+    let (_dir, mut session, path) = open();
+    session.set_pivot(&path, Some("de_DE")).unwrap();
+    let plan = session.plan(&TranslateScope::default()).unwrap();
+    let (p, id) = plan
+        .iter()
+        .find(|(_, id)| id.0.contains("Filter Size"))
+        .unwrap();
+    let task = session.prepare(p, id, InputText::Auto).unwrap();
+    // A "model" that returns its input unchanged.
+    let echo = ManualBackend::new(|ctx: &PromptContext<'_>| {
+        ManualResponse::Singular(ctx.unit.source.clone())
+    });
+    let outcome = i18n_harness_session::translate_task(&echo, &task).unwrap();
+    let applied = session.apply(&task, outcome, Promotion::Review).unwrap();
+    assert_eq!(applied.unit.target, ["Filtergröße"]);
+    assert_eq!(applied.unit.status, UnitStatus::Check);
+}

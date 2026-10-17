@@ -48,8 +48,14 @@ impl OpenCatalog {
     /// language that can be judged: it has text, and in a pivot catalog it
     /// is not just the unedited pivot-language input.
     pub(crate) fn is_translation(&self, unit: &Unit) -> bool {
+        // Text identical to the pivot input is still a translation once a
+        // model or a person produced it (`mm<sup>2</sup>`, `<HEADER>`): the
+        // review store says so.
+        let reviewed = unit.review_status.is_some() && !unit.source_changed_since_review;
         has_target_text(&unit.target)
-            && (self.pivot.is_none() || self.existing.get(&unit.id) != Some(&unit.target))
+            && (self.pivot.is_none()
+                || reviewed
+                || self.existing.get(&unit.id) != Some(&unit.target))
     }
 
     fn index_of(&self, id: &UnitId) -> Result<usize> {
