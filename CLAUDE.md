@@ -174,8 +174,13 @@ it inline.
   (Tauri + React + Vite). A small UI tweak alongside a backend change
   is *not* this — keep those together in the main context.
 
-## Outstanding setup notes
+## Releases
 
-- CI workflow uses tagged action refs; pin to commit SHAs before any
-  public release tag.
-- Repository URL in `Cargo.toml`: `github.com/VitalyVorobyev/i18n-harness`.
+- A tag `vX.Y.Z` matching the workspace version runs
+  `.github/workflows/release.yml`: a draft GitHub release with the
+  desktop installers (macOS arm64/x64, Windows, Linux deb/AppImage) and
+  the `harness` / `harness-lab` archives. The draft is published by hand.
+- The workspace `Cargo.toml` is the only version; `tauri.conf.json` has
+  none. Workflow actions are pinned to commit SHAs (tag in a comment).
+- macOS signing turns on when the `APPLE_*` secrets exist; until then
+  builds are unsigned.
