@@ -1,0 +1,19 @@
+[book]
+title = "i18n-harness"
+description = "Translate application text with a language model that runs on your computer."
+authors = ["i18n-harness contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/VitalyVorobyev/i18n-harness"
+edit-url-template = "https://github.com/VitalyVorobyev/i18n-harness/edit/main/book/{path}"
+site-url = "/i18n-harness/"
+
+[output.html.fold]
+enable = true
+level = 1

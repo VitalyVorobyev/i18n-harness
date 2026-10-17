@@ -101,9 +101,17 @@ cd ui && bun run lint           # Biome — single tool for lint + format
 cd ui && bun audit --prod       # Production-dep vulnerability scan
 cd ui && bun run build
 cd ui && bun tauri:dev
+
+# User guide (mdBook 0.4, sources in book/src)
+mdbook build book               # writes book/build/; CI fails on a missing chapter
+mdbook serve book               # live preview at http://localhost:3000
+cd ui && BOOK_SCREENSHOTS=../book/src/images bunx playwright test e2e/book-screenshots.spec.ts
 ```
 
-CI runs all of the above on push and PR. See `.github/workflows/ci.yml`.
+CI runs all of the above on push and PR. See `.github/workflows/ci.yml`;
+`.github/workflows/book.yml` publishes the book to GitHub Pages from
+`main`. A user-visible change updates the matching book page (and its
+screenshots) in the same PR.
 
 ## Conventions
 
