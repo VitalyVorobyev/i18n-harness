@@ -19,6 +19,8 @@ const DOT: Record<UnitStatus, "neutral" | "warning" | "normal"> = {
 
 export function Strings(props: {
   catalog: CatalogSummary;
+  /** The strings of every file together: adds a File column. */
+  allFiles: boolean;
   tab: StatusTab;
   onTab: (tab: StatusTab) => void;
   search: string;
@@ -99,14 +101,14 @@ export function Strings(props: {
             // windowed table keeps measuring the scroll area it had before.
             key={rows.length === 0 ? "empty" : "rows"}
             caption={`${catalog.name}: strings`}
-            columns={columnsFor(catalog)}
+            columns={columnsFor(catalog, props.allFiles)}
             rows={rows}
             rowKey={rowKey}
             className="h-full"
             windowed={{ rowHeight: ROW_HEIGHT }}
             onRowClick={(row, _index, event) => props.onActivate(row, event.type === "keydown")}
             isRowActive={(row) => rowKey(row) === props.activeKey}
-            empty={emptyMessage(props.tab, props.search, props.show)}
+            empty={emptyMessage(props.tab, props.search, props.show, props.allFiles)}
           />
         )}
       </div>
@@ -114,7 +116,8 @@ export function Strings(props: {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-3 py-1.5 text-xs text-fg-subtle">
         <span>
           {rows === null ? "…" : plural(rows.length, "string", "strings")} shown ·{" "}
-          {plural(counts.only_here, "string", "strings")} only in this file
+          {plural(counts.only_here, "string", "strings")}{" "}
+          {props.allFiles ? "in only one file" : "only in this file"}
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
@@ -140,7 +143,7 @@ export function rowKey(row: UnitRow): string {
   return `${row.path}\u0000${row.id}`;
 }
 
-function columnsFor(catalog: CatalogSummary): Column<UnitRow>[] {
+function columnsFor(catalog: CatalogSummary, allFiles: boolean): Column<UnitRow>[] {
   return [
     {
       key: "status",
@@ -152,6 +155,16 @@ function columnsFor(catalog: CatalogSummary): Column<UnitRow>[] {
         </StatusDot>
       ),
     },
+    ...(allFiles
+      ? [
+          {
+            key: "file",
+            header: "File",
+            width: "9rem",
+            cell: (r: UnitRow) => <Text text={r.file} muted />,
+          },
+        ]
+      : []),
     {
       key: "source",
       header: "Original",
@@ -219,28 +232,31 @@ function Text(props: { text: string; title?: string; muted?: boolean; placeholde
   );
 }
 
-function emptyMessage(tab: StatusTab, search: string, show: Show): string {
+function emptyMessage(tab: StatusTab, search: string, show: Show, allFiles: boolean): string {
+  const here = allFiles ? "in any file" : "in this file";
   if (search.trim() !== "") return "No string matches the search.";
   switch (show) {
     case "problems":
-      return "No problems in this file.";
+      return `No problems ${here}.`;
     case "warnings":
-      return "No warnings in this file.";
+      return `No warnings ${here}.`;
     case "inconsistent":
-      return "Every string shared with other files is translated the same way there.";
+      return "Every string shared between files is translated the same way in each.";
     case "shared":
-      return "No string of this file occurs in another file.";
+      return allFiles
+        ? "No string occurs in more than one file."
+        : "No string of this file occurs in another file.";
     case "everything":
       break;
   }
   switch (tab) {
     case "to-do":
-      return "Nothing left to translate in this file.";
+      return `Nothing left to translate ${here}.`;
     case "check":
       return "Nothing waiting for a check.";
     case "done":
       return "No string is marked done yet.";
     case "all":
-      return "This file has no strings.";
+      return allFiles ? "The folder has no strings." : "This file has no strings.";
   }
 }

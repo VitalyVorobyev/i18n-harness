@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use i18n_harness_locales::Locale;
 use i18n_harness_session::{
-    CatalogSummary, CheckSettings, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session,
-    SessionError, TermUsage, TranslateScope, UnitFilter, UnitRow, UnitView,
+    CatalogSummary, CheckSettings, FillReport, GlossaryEntry, ModelChoice, ModelSettings,
+    SaveReport, Session, SessionError, SiblingView, TermUsage, TranslateScope, UnitFilter, UnitRow,
+    UnitView,
 };
 use serde::Serialize;
 
@@ -103,6 +104,37 @@ pub(crate) fn get_unit(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<UnitView> {
     state.with(|s| Ok(s.unit(Path::new(&path), &id)?))
+}
+
+/// The same string in the other files of its language.
+#[tauri::command]
+pub(crate) fn siblings(
+    path: String,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<SiblingView>> {
+    state.with(|s| Ok(s.siblings(Path::new(&path), &id)?))
+}
+
+/// Copy a string's translation to the same string in every other file.
+#[tauri::command]
+pub(crate) fn use_everywhere(
+    path: String,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<usize> {
+    state.with(|s| Ok(s.use_everywhere(Path::new(&path), &id)?))
+}
+
+/// Fill strings to do from what other files agree on (`apply` false: only
+/// count).
+#[tauri::command]
+pub(crate) fn fill_from_other_files(
+    paths: Vec<PathBuf>,
+    apply: bool,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<FillReport> {
+    state.with(|s| Ok(s.fill_from_other_files(&paths, apply)?))
 }
 
 #[tauri::command]

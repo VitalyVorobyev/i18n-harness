@@ -28,6 +28,9 @@ export function Toolbar(props: {
   toDoInFolder: number;
   /** Translated strings that break the glossary. */
   glossaryIssues: number;
+  /** Strings to do that other files translate the same way. */
+  fillable: number;
+  onFill: () => void;
   running: boolean;
   dirty: boolean;
   onTranslateFile: () => void;
@@ -99,16 +102,27 @@ export function Toolbar(props: {
             <Button
               variant="primary"
               aria-label="More translate options"
-              disabled={!canTranslate}
+              disabled={props.running}
               className="rounded-l-none border-l border-signal-fg/30 px-2"
               icon={<ChevronDown aria-hidden size={16} />}
             />
           }
         >
-          <MenuItem disabled={props.toDoInFolder === 0} onSelect={props.onTranslateFolder}>
+          <MenuItem
+            disabled={!canTranslate || props.toDoInFolder === 0}
+            onSelect={props.onTranslateFolder}
+          >
             Translate all files ({props.toDoInFolder.toLocaleString()} to do)
           </MenuItem>
-          <MenuItem disabled={props.glossaryIssues === 0} onSelect={props.onApplyGlossary}>
+          <MenuItem disabled={props.fillable === 0} onSelect={props.onFill}>
+            {props.fillable > 0
+              ? `Fill from other files (${props.fillable.toLocaleString()})`
+              : "Nothing to fill from other files"}
+          </MenuItem>
+          <MenuItem
+            disabled={!canTranslate || props.glossaryIssues === 0}
+            onSelect={props.onApplyGlossary}
+          >
             {props.glossaryIssues > 0
               ? `Apply the glossary (${plural(props.glossaryIssues, "string breaks", "strings break")} it)`
               : "Every translation follows the glossary"}

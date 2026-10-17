@@ -1,8 +1,8 @@
 import { Badge, Button, Callout, Empty, Field, Kbd, Textarea } from "@vitavision/ui";
-import { Check, Languages, Undo2 } from "lucide-react";
+import { Check, Copy, Languages, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { CatalogSummary, UnitView } from "../api";
+import type { CatalogSummary, SiblingView, UnitView } from "../api";
 import { STATUS_LABEL } from "../lib/format";
 
 /**
@@ -14,6 +14,10 @@ export function Editor(props: {
   unit: UnitView | null;
   canTranslate: boolean;
   busy: boolean;
+  /** The same string in other files of the language (`null`: not known yet). */
+  siblings: SiblingView[] | null;
+  /** Copy the saved translation to every other file. */
+  onUseEverywhere: () => void;
   /** Take keyboard focus when shown (the string was chosen from the keyboard). */
   autoFocus: boolean;
   onSave: (forms: string[], done: boolean) => void;
@@ -138,6 +142,76 @@ export function Editor(props: {
               );
             })}
         </section>
+
+        {props.siblings && props.siblings.length > 0 && (
+          <section aria-label="Other files" className="space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
+              Other files
+            </h3>
+            <ul className="divide-y divide-line rounded-panel border border-line">
+              {props.siblings.map((s) => {
+                const translated = s.target.some((t) => t !== "");
+                const same = s.target.every((t, i) => t === unit.target[i]);
+                return (
+                  <li key={s.path} className="flex items-start gap-2 px-2.5 py-2 text-sm">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs text-fg-subtle">{s.file}</span>
+                      {translated ? (
+                        <span className="block whitespace-pre-wrap break-words">
+                          {s.target.join(" · ")}
+                        </span>
+                      ) : (
+                        <span className="block italic text-fg-subtle">Not translated</span>
+                      )}
+                    </span>
+                    <Badge
+                      tone={
+                        s.status === "done"
+                          ? "normal"
+                          : s.status === "check"
+                            ? "warning"
+                            : "neutral"
+                      }
+                    >
+                      {STATUS_LABEL[s.status]}
+                    </Badge>
+                    {translated && !same && s.target.length === draft.length && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!unit.editable || props.busy}
+                        onClick={() => setDraft(s.target)}
+                      >
+                        Use this
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {(() => {
+              const differ = props.siblings.some(
+                (s) => !s.target.every((t, i) => t === unit.target[i]),
+              );
+              const savedText = unit.target.every((t) => t !== "");
+              return (
+                differ &&
+                savedText && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    icon={<Copy aria-hidden size={14} />}
+                    disabled={changed || props.busy}
+                    title={changed ? "Save your edit first" : undefined}
+                    onClick={props.onUseEverywhere}
+                  >
+                    Use this translation in every file
+                  </Button>
+                )
+              );
+            })()}
+          </section>
+        )}
 
         {unit.issues.length > 0 && (
           <section aria-label="Problems" className="space-y-2">
