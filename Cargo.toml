@@ -12,6 +12,7 @@ members = [
     "crates/project",
     "crates/reuse",
     "crates/session",
+    "crates/lab",
     "crates/cli",
     "ui/src-tauri",
     "xtask",
