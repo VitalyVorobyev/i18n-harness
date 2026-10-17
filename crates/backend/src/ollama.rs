@@ -83,6 +83,7 @@ use serde::Deserialize;
 
 use crate::context::PromptContext;
 use crate::error::BackendError;
+use crate::http::{build_agent, map_ureq_error};
 use crate::outcome::{FailureKind, TranslatedText, TranslationOutcome};
 use crate::prompt::PromptTemplate;
 use crate::trait_def::TranslationBackend;
@@ -260,7 +261,7 @@ impl TranslationBackend for OllamaBackend {
     ) -> Result<Vec<TranslationOutcome>, BackendError> {
         let mut outcomes = Vec::with_capacity(batch.units.len());
 
-        let agent = build_agent(self.request_timeout)?;
+        let agent = build_agent(self.request_timeout);
 
         for unit in &batch.units {
             let register = glossary
@@ -628,44 +629,6 @@ struct V2Flag {
     kind: Flag,
     #[serde(default)]
     note: Option<String>,
-}
-
-/// Build a `ureq::Agent` with the given timeout applied globally.
-fn build_agent(timeout: Duration) -> Result<ureq::Agent, BackendError> {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .build();
-    Ok(ureq::Agent::new_with_config(config))
-}
-
-/// Map a `ureq::Error` (transport-level) to a [`BackendError`].
-///
-/// `send_json` raises `ureq::Error::StatusCode` for non-2xx responses that
-/// come back with a body; all other variants are transport failures.
-fn map_ureq_error(e: ureq::Error, backend: &str) -> BackendError {
-    match &e {
-        ureq::Error::StatusCode(code) => {
-            let code = *code;
-            match code {
-                401 | 403 => BackendError::Auth {
-                    backend: backend.to_owned(),
-                    message: format!("HTTP {code}"),
-                },
-                404 => BackendError::Configuration {
-                    backend: backend.to_owned(),
-                    message: format!("HTTP 404 — model not found or endpoint wrong: {e}"),
-                },
-                _ => BackendError::Network {
-                    backend: backend.to_owned(),
-                    message: format!("HTTP {code}: {e}"),
-                },
-            }
-        }
-        _ => BackendError::Network {
-            backend: backend.to_owned(),
-            message: e.to_string(),
-        },
-    }
 }
 
 /// 1:1 passthrough from the locales-crate `Register` to the glossary-crate

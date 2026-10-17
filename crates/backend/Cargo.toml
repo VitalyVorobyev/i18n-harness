@@ -19,7 +19,9 @@ manual = []
 # `TranslationOutcome`; they are not guarded here because removing them would
 # break the outcome serialisation surface that the non-ollama build needs.
 ollama = ["dep:ureq"]
-# `openai-compatible` comes in M4.
+# Any server speaking the OpenAI HTTP API (`/v1/models`,
+# `/v1/chat/completions`): LM Studio, vLLM, llama.cpp server, cloud APIs.
+openai-compatible = ["dep:ureq"]
 
 [dependencies]
 i18n-harness-core.workspace = true

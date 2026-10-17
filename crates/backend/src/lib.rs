@@ -78,6 +78,11 @@ pub mod manual;
 #[cfg(feature = "ollama")]
 pub mod ollama;
 
+#[cfg(any(feature = "ollama", feature = "openai-compatible"))]
+mod http;
+
+pub mod discovery;
+
 pub mod agent_batch;
 
 pub use agent_batch::{AgentBatchError, ExportedUnit, read_targets, read_unit_ids, write_export};
