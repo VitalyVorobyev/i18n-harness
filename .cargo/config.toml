@@ -1,0 +1,6 @@
+[alias]
+# The desktop app, debug by default; add `--release` for an optimised build.
+# The build script rebuilds the frontend bundle (ui/dist) when its sources
+# changed, so only `bun install` in ui/ is needed once.
+app = "build -p i18n-harness-ui"
+app-run = "run -p i18n-harness-ui"
