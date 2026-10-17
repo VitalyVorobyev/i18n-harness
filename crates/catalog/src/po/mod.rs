@@ -30,11 +30,12 @@ use tracing::warn;
 
 use crate::catalog::Catalog;
 use crate::error::{CatalogError, PlaceholderError};
-use crate::format::CatalogFormat;
+use crate::format::{CatalogFormat, FormatDoc, SniffHit};
 
 pub(crate) mod parse;
 pub(crate) mod placeholder;
-mod write;
+mod sniff;
+pub(crate) mod write;
 
 pub(crate) use parse::ExtractStatePo;
 
@@ -47,21 +48,20 @@ impl CatalogFormat for PoFormat {
         "gettext-po"
     }
 
+    fn display_name(&self) -> &'static str {
+        "gettext PO"
+    }
+
     fn extensions(&self) -> &'static [&'static str] {
         &["po", "pot"]
     }
 
-    fn extract(&self, path: &Path) -> Result<Catalog, CatalogError> {
-        parse::extract(path)
+    fn sniff(&self, _path: &Path, head: &[u8]) -> Option<SniffHit> {
+        sniff::sniff(head)
     }
 
-    fn apply(
-        &self,
-        catalog: &Catalog,
-        units: &[i18n_harness_core::Unit],
-        out: &Path,
-    ) -> Result<(), CatalogError> {
-        write::apply(catalog, units, out)
+    fn open(&self, path: &Path) -> Result<Box<dyn FormatDoc>, CatalogError> {
+        Ok(Box::new(self.extract(path)?))
     }
 
     fn placeholders_to_icu(&self, native: &str) -> Result<String, PlaceholderError> {
@@ -70,6 +70,36 @@ impl CatalogFormat for PoFormat {
 
     fn placeholders_from_icu(&self, icu: &str) -> Result<String, PlaceholderError> {
         placeholder::from_icu(icu)
+    }
+}
+
+/// The shared instance [`FormatDoc::format`] hands out for gettext PO documents.
+pub(crate) static PO_FORMAT: PoFormat = PoFormat;
+
+impl PoFormat {
+    /// Parse the catalog at `path`. Same as [`CatalogFormat::open`], but
+    /// returns the concrete [`Catalog`].
+    ///
+    /// # Errors
+    ///
+    /// See [`CatalogFormat::open`].
+    pub fn extract(&self, path: &Path) -> Result<Catalog, CatalogError> {
+        parse::extract(path)
+    }
+
+    /// Render `units` into `catalog`'s bytes and write them atomically to
+    /// `out`. Same as [`FormatDoc::write`] on the concrete [`Catalog`].
+    ///
+    /// # Errors
+    ///
+    /// See [`FormatDoc::write`].
+    pub fn apply(
+        &self,
+        catalog: &Catalog,
+        units: &[i18n_harness_core::Unit],
+        out: &Path,
+    ) -> Result<(), CatalogError> {
+        catalog.write(units, out)
     }
 }
 

@@ -60,7 +60,7 @@ pub(crate) fn translate_unit_in_project(
         &id,
         &backend,
         &backend_name,
-        locale,
+        &locale,
         glossary.as_ref(),
     )
 }
@@ -266,7 +266,7 @@ fn run_batch_worker(
     total: usize,
     backend: i18n_harness_backend::OllamaBackend,
     backend_name: String,
-    locale: &'static i18n_harness_locales::Locale,
+    locale: i18n_harness_locales::Locale,
     glossary: Option<i18n_harness_glossary::Glossary>,
     token: crate::cancellation::CancellationToken,
     active_slot: crate::jobs::BatchSlot,
@@ -314,7 +314,7 @@ fn run_batch_worker(
             unit_id,
             &backend,
             &backend_name,
-            locale,
+            &locale,
             glossary.as_ref(),
         ) {
             Ok(result) => {

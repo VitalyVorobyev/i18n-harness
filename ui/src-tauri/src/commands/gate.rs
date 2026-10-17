@@ -66,7 +66,7 @@ pub(crate) fn gate_catalog_in_project(
         .map_err(error::lock_poisoned("project_catalogs"))?;
     let entry = store.get(&abs).ok_or_else(error::no_catalog_in_project)?;
 
-    let (reports, stats) = gate_units(entry.catalog.units(), locale, glossary.as_ref());
+    let (reports, stats) = gate_units(entry.catalog.units(), &locale, glossary.as_ref());
     Ok(CatalogGateResponse {
         path: abs.to_string_lossy().into_owned(),
         reports,
@@ -81,7 +81,7 @@ pub(crate) fn gate_catalog_in_project(
 fn resolve_project_gate_context(
     state: &tauri::State<'_, AppState>,
     abs: &Path,
-) -> Result<(&'static Locale, Option<Glossary>), String> {
+) -> Result<(Locale, Option<Glossary>), String> {
     let project_guard = state
         .project
         .lock()
@@ -94,8 +94,8 @@ fn resolve_project_gate_context(
     let locale_id = &catalog_ref.locale;
     let locale = project
         .locale(locale_id)
-        .map(|r| r.workspace_locale())
-        .or_else(|| Locale::by_id(locale_id))
+        .map(|r| r.effective_locale())
+        .or_else(|| Locale::by_id(locale_id).copied())
         .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
     let glossary = project.glossary().cloned();
     Ok((locale, glossary))

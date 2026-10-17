@@ -10,7 +10,7 @@
 //! - **Split** ([`writable_untranslated_ids`], plus
 //!   [`ReuseReport::remaining_ids`]) — identify the leftover untranslated units
 //!   so the caller can carve a standalone remainder `.ts` with
-//!   `adapter_qt::write_subset`.
+//!   `FormatDoc::render_subset`.
 //! - **Merge** ([`merge_back`]) — fold a translated remainder back into its
 //!   base, with subset and disjointness guards.
 //!
@@ -23,7 +23,7 @@
 //! - know about project state, manifests, or the review store — those live in
 //!   the Tauri layer, which calls this crate and persists its reports;
 //! - write catalogs — it returns the extracted [`Catalog`] and the override
-//!   `units` so the **caller** runs `adapter_qt::apply` / `write_subset`,
+//!   `units` so the **caller** runs `FormatDoc::write` / `render_subset`,
 //!   keeping every catalog write behind the adapter (and thus the round-trip
 //!   contract);
 //! - run a translation backend — moving existing text is deterministic Rust,
@@ -40,7 +40,7 @@
 //! [`Unit`] and [`UnitId`]), but the catalog read/write is hard-wired to the
 //! Qt adapter for now; generalizing to other formats is a later step.
 //!
-//! [`Catalog`]: i18n_harness_adapter_qt::Catalog
+//! [`Catalog`]: i18n_harness_formats::FormatDoc
 //! [`Unit`]: i18n_harness_core::Unit
 //! [`UnitId`]: i18n_harness_core::UnitId
 

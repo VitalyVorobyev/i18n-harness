@@ -177,7 +177,7 @@ fn translate_one(
                     failure_kind: FailureKind::Unspecified,
                 };
             }
-            let expected = locale.plural_arity() as usize;
+            let expected = locale.plural_slot_count() as usize;
             if forms.len() != expected {
                 return TranslationOutcome::Failed {
                     reason: format!(

@@ -36,6 +36,7 @@
 mod batch;
 mod error;
 mod flag;
+pub mod fs;
 mod intermediate;
 mod placeholder;
 mod review;
@@ -47,4 +48,4 @@ pub use flag::{Flag, FlagSet, FlagSeverity};
 pub use intermediate::{Intermediate, IntermediateLine, SCHEMA_VERSION};
 pub use placeholder::{IcuForm, Placeholder, PlaceholderKind};
 pub use review::ReviewStatus;
-pub use unit::{Provenance, Target, Unit, UnitId, UnitState, compute_source_hash};
+pub use unit::{Provenance, Target, Unit, UnitContext, UnitId, UnitState, compute_source_hash};

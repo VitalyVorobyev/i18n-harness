@@ -35,7 +35,7 @@ pub(crate) fn run_evaluation_in_project(
     // 1. Collect everything we need from the project under a brief lock.
     // Each element: (source, human_target, locale_id, flag_strs).
     type EvalExample = (String, String, String, Vec<String>);
-    type LocaleEntry = (String, &'static Locale);
+    type LocaleEntry = (String, Locale);
     // Capture the project's EvaluationStore here so the worker thread persists
     // to the project that LAUNCHED the eval, even if the global project slot
     // is replaced via open_project / close_project mid-flight (codex P1 on
@@ -70,7 +70,7 @@ pub(crate) fn run_evaluation_in_project(
         }
 
         let mut examples = Vec::new();
-        let mut locale_map_build: std::collections::BTreeMap<String, &'static Locale> =
+        let mut locale_map_build: std::collections::BTreeMap<String, Locale> =
             std::collections::BTreeMap::new();
 
         // Read all corrections once for resolution.
@@ -90,8 +90,8 @@ pub(crate) fn run_evaluation_in_project(
             // Resolve Locale lazily; skip if unknown.
             let locale = project
                 .locale(locale_id)
-                .map(|r| r.workspace_locale())
-                .or_else(|| Locale::by_id(locale_id));
+                .map(|r| r.effective_locale())
+                .or_else(|| Locale::by_id(locale_id).copied());
             let Some(locale) = locale else {
                 tracing::warn!(locale = %locale_id, "run_evaluation: unknown locale, example skipped");
                 continue;
@@ -142,7 +142,7 @@ pub(crate) fn run_evaluation_in_project(
 
     // 5. Build a (locale_id → &'static Locale) map for the worker. The worker
     //    needs this but cannot hold the project lock.
-    let locale_lookup: std::collections::BTreeMap<String, &'static Locale> =
+    let locale_lookup: std::collections::BTreeMap<String, Locale> =
         locale_map.into_iter().collect();
 
     // 6. Spawn the worker.
@@ -200,7 +200,7 @@ pub(crate) fn run_evaluation_in_project(
 
                 let outcomes = match backend.translate_batch(
                     &batch,
-                    locale,
+                    &locale,
                     glossary.as_ref(),
                 ) {
                     Ok(o) => o,

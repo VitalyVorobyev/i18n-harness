@@ -91,7 +91,7 @@ pub(crate) struct OllamaSettings {
 pub(crate) fn resolve_project_translate_context(
     state: &tauri::State<'_, crate::AppState>,
     abs: &Path,
-) -> Result<(&'static Locale, Option<Glossary>, OllamaSettings), String> {
+) -> Result<(Locale, Option<Glossary>, OllamaSettings), String> {
     use i18n_harness_project::BackendKind;
 
     let project_guard = state
@@ -109,8 +109,8 @@ pub(crate) fn resolve_project_translate_context(
     // doesn't declare this locale id (defensive, not the common path).
     let locale = project
         .locale(locale_id)
-        .map(|r| r.workspace_locale())
-        .or_else(|| Locale::by_id(locale_id))
+        .map(|r| r.effective_locale())
+        .or_else(|| Locale::by_id(locale_id).copied())
         .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
 
     let ollama_settings = if let Some(backend_cfg) = &project.manifest().backends.default {

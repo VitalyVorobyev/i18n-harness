@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use i18n_harness_project::{
     BackendConfig, BackendKind, ClassificationConfidence, DraftCatalog, DraftManifest, FormatGuess,
-    GlossaryConfig, InMemoryFs, LocaleConfig, Project, ProjectFs,
+    FormatId, GlossaryConfig, InMemoryFs, LocaleConfig, Project, ProjectFs,
 };
 
 const ROOT: &str = "/myapp";
@@ -48,7 +48,7 @@ fn basic_draft() -> DraftManifest {
         catalogs: vec![
             DraftCatalog {
                 path: PathBuf::from(ROOT).join("translations/app_de.ts"),
-                format: FormatGuess::QtTs,
+                format: FormatGuess::Known(FormatId::from("qt-ts")),
                 locale: Some("de_DE".to_owned()),
                 confidence: ClassificationConfidence::High,
                 reason: "test fixture".to_owned(),
@@ -56,7 +56,7 @@ fn basic_draft() -> DraftManifest {
             },
             DraftCatalog {
                 path: PathBuf::from(ROOT).join("translations/app_es.ts"),
-                format: FormatGuess::QtTs,
+                format: FormatGuess::Known(FormatId::from("qt-ts")),
                 locale: Some("es_ES".to_owned()),
                 confidence: ClassificationConfidence::High,
                 reason: "test fixture".to_owned(),
@@ -170,6 +170,6 @@ fn draft_skips_unknown_format_catalogs() {
         project
             .catalogs()
             .iter()
-            .all(|c| c.format == i18n_harness_project::CatalogFormat::QtTs)
+            .all(|c| c.format == i18n_harness_project::FormatId::from("qt-ts"))
     );
 }

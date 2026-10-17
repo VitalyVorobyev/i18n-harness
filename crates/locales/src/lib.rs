@@ -4,33 +4,30 @@
 //!
 //! # Storage choice
 //!
-//! Locale records are stored as a `static` Rust slice with `&'static str`
-//! fields, *not* as an embedded YAML/TOML asset. Rationale:
+//! Two layers of data, no per-language code:
 //!
-//! - **Compile-time checked.** Typos in field names, wrong enum variants,
-//!   missing fields are caught by `rustc`, not at first run.
-//! - **No runtime parse cost.** Looking up a locale is an array scan; no
-//!   `serde_yaml::from_str` overhead on every CLI invocation.
-//! - **No new dependency.** The crate stays free of `serde_yaml` / `serde`,
-//!   keeping the dep graph minimal.
-//! - **The dataset is small.** Two rows now, perhaps a dozen later. The
-//!   ergonomic argument for YAML kicks in around tens of rows with many
-//!   reviewers; we are far from that. If/when we add the full CLDR locale
-//!   list we will revisit this — the `Locale::by_id` API is the abstraction
-//!   that lets the implementation change without breaking callers.
+//! - `src/cldr.rs` — plural categories, likely script and English display
+//!   name for every CLDR language, generated from pinned CLDR JSON by
+//!   `cargo run -p xtask -- gen-locales` and checked in. Compile-time
+//!   checked, no runtime parse.
+//! - `data/defaults.toml` — the harness's own defaults (register, length
+//!   ratio) by language and script, embedded and parsed once.
+//!
+//! A new language therefore needs no code at all; a project tunes it in its
+//! manifest's `[locales.<id>]` table.
 //!
 //! # What this crate guarantees
 //!
 //! - [`Locale::by_id`] returns the same `&'static Locale` for the same id
 //!   across the lifetime of the process.
-//! - The set of locales is closed: a missing id yields `None`, never a
+//! - An id whose language CLDR does not know yields `None`, never a
 //!   default — there is no "fallback locale" because there is no honest
 //!   default for translation quality.
 //!
 //! # What this crate does NOT guarantee
 //!
 //! - That a locale's `cldr_plural` field matches the latest CLDR release —
-//!   we pin to a CLDR version when we add a locale and update deliberately,
+//!   the table is pinned to [`CLDR_VERSION`] and regenerated deliberately,
 //!   not silently.
 //! - That `register` semantics are universally agreed on. "Formal" for
 //!   German means *Sie*; for Spanish it means *usted*; we do not try to
@@ -94,28 +91,79 @@ pub enum Register {
 pub enum Script {
     /// Latin script (de, en, es, fr, …).
     Latin,
-    /// Han / CJK ideographs.
+    /// Han / CJK ideographs (Simplified or Traditional Chinese).
     Han,
+    /// Japanese (Han plus kana).
+    Japanese,
+    /// Korean (Hangul plus Han).
+    Korean,
     /// Arabic script.
     Arabic,
     /// Cyrillic script.
     Cyrillic,
+    /// Greek script.
+    Greek,
+    /// Hebrew script.
+    Hebrew,
+    /// Devanagari script.
+    Devanagari,
+    /// Thai script.
+    Thai,
+    /// Any other script.
+    Other,
+}
+
+impl Script {
+    /// Map an ISO 15924 code (`Latn`, `Hans`, …) to a script family.
+    pub fn from_iso15924(code: &str) -> Self {
+        match code {
+            "Latn" => Self::Latin,
+            "Hans" | "Hant" | "Hani" => Self::Han,
+            "Jpan" => Self::Japanese,
+            "Kore" | "Hang" => Self::Korean,
+            "Arab" => Self::Arabic,
+            "Cyrl" => Self::Cyrillic,
+            "Grek" => Self::Greek,
+            "Hebr" => Self::Hebrew,
+            "Deva" => Self::Devanagari,
+            "Thai" => Self::Thai,
+            _ => Self::Other,
+        }
+    }
 }
 
 /// One locale record.
 ///
-/// All fields are `'static` so the whole table can live in `.rodata`.
+/// All fields are `'static`: a record is built once per id from the CLDR
+/// table and the harness defaults, then reused for the life of the process.
 #[derive(Debug, Clone, Copy)]
 pub struct Locale {
-    /// Locale identifier. We use the underscored BCP-47-ish form most i18n
-    /// tooling uses (`de_DE`, `zh_Hans`, `en`), not the dash form
-    /// (`de-DE`). Adapters that read the dash form must translate at the
-    /// boundary.
+    /// Locale identifier in the underscored form most i18n tooling uses
+    /// (`de_DE`, `zh_Hans`, `en`), not the dash form (`de-DE`). Lookups accept
+    /// either and normalize to this form.
     pub id: &'static str,
+
+    /// Base language subtag (`sk` for `sk_SK`).
+    pub language: &'static str,
+
+    /// English display name of the language (`"Slovak"`), from CLDR.
+    pub name: &'static str,
 
     /// CLDR plural categories applicable to **cardinal** numbers in this
     /// locale, in CLDR canonical order. Arity = `cldr_plural.len()`.
+    ///
+    /// This is the category set ICU MessageFormat uses. File formats with
+    /// their own per-language form tables (Qt `<numerusform>`, gettext
+    /// `Plural-Forms`) may use fewer forms; see [`Self::integer_plural_forms`].
     pub cldr_plural: &'static [PluralCategory],
+
+    /// The categories that a small integer count can select, each with a
+    /// representative count, in canonical order. For Slovak:
+    /// `[(One, 1), (Few, 2), (Other, 0)]` — `many` applies only to fractions.
+    ///
+    /// Qt and gettext tables have one form per entry here, which makes this the
+    /// fallback when a file carries no plural-form count of its own.
+    pub integer_plural_forms: &'static [(PluralCategory, u32)],
 
     /// Register / formality.
     pub register: Register,
@@ -138,76 +186,43 @@ pub struct Locale {
 impl Locale {
     /// Plural arity for this locale (number of CLDR plural categories).
     pub fn plural_arity(&self) -> u32 {
-        // Safe cast: arity is small (max 6 in CLDR).
-        self.cldr_plural.len() as u32
+        u32::try_from(self.cldr_plural.len()).unwrap_or(u32::MAX)
     }
 
-    /// Look up a locale by its `id` string. Returns `None` for unknown ids
-    /// — there is no default-locale fallback.
+    /// Number of plural forms a per-language plural table (Qt
+    /// `<numerusform>`, gettext `msgstr[N]`) has for this locale, for files
+    /// that do not state their own count. One per [`Self::integer_plural_forms`]
+    /// entry.
+    pub fn plural_slot_count(&self) -> u32 {
+        u32::try_from(self.integer_plural_forms.len()).unwrap_or(u32::MAX)
+    }
+
+    /// Look up a locale by id (`sk_SK`, `sk-SK`, `zh_Hans`, `pt_BR`, `en`).
+    ///
+    /// Resolution: the CLDR entry for `language_REGION` when CLDR has
+    /// region-specific rules (`pt_PT`), else the entry for the language. An
+    /// explicit script subtag (`sr_Latn`) overrides the language's likely
+    /// script. Returns `None` for ids whose language CLDR does not know.
+    ///
+    /// The same id always yields the same `&'static Locale`.
     pub fn by_id(id: &str) -> Option<&'static Locale> {
-        LOCALES.iter().find(|l| l.id == id)
+        registry::resolve(id)
     }
 
-    /// Iterate every known locale in the order they appear in the table.
+    /// Every language in the CLDR table, by its base id (`ar`, `de`, …,
+    /// `pt_PT`, …), in id order.
     pub fn all() -> impl Iterator<Item = &'static Locale> {
-        LOCALES.iter()
+        cldr::LANGUAGES
+            .iter()
+            .filter_map(|lang| Locale::by_id(lang.code))
     }
 }
 
-/// The locale table.
-///
-/// Rationale per row:
-/// - `en` — source locale. `length_warn_ratio = 1.0` because expansion is
-///   measured *from* English, not into it. `Register::Neutral` because the
-///   source side does not have a single formality pick.
-/// - `de_DE` — first target locale. German runs 30–40 % longer than
-///   English in UI strings; `1.4` matches the reference table in
-///   `.claude/skills/add-locale/SKILL.md`. CLDR cardinal arity is 2
-///   (`[one, other]`). The maintainer ships `Sie`/formal as default.
-/// - `es_ES` — Romance target. CLDR cardinal arity 2 (`[one, other]`). The
-///   maintainer ships `usted`/formal as default; informal `tú` projects
-///   override via the glossary's `[locale.es_ES]` block.
-/// - `zh_Hans` — Simplified Chinese. CLDR cardinal arity 1 (`[other]` only)
-///   — no singular/plural distinction, no agreement to worry about. Han
-///   script activates the gate's `CjkPunctuationTolerated` soft rule.
-///   `register = Neutral`: Mandarin's formal/informal distinction lives in
-///   word choice (e.g., `您` vs `你`) rather than a fixed dialectal pick,
-///   so we don't encode it at the locale level; projects with strong
-///   register requirements should bake that into the glossary.
-static LOCALES: &[Locale] = &[
-    Locale {
-        id: "en",
-        cldr_plural: &[PluralCategory::One, PluralCategory::Other],
-        register: Register::Neutral,
-        variant: "en",
-        script: Script::Latin,
-        length_warn_ratio: 1.0,
-    },
-    Locale {
-        id: "de_DE",
-        cldr_plural: &[PluralCategory::One, PluralCategory::Other],
-        register: Register::Formal,
-        variant: "de_DE",
-        script: Script::Latin,
-        length_warn_ratio: 1.4,
-    },
-    Locale {
-        id: "es_ES",
-        cldr_plural: &[PluralCategory::One, PluralCategory::Other],
-        register: Register::Formal,
-        variant: "es_ES",
-        script: Script::Latin,
-        length_warn_ratio: 1.3,
-    },
-    Locale {
-        id: "zh_Hans",
-        cldr_plural: &[PluralCategory::Other],
-        register: Register::Neutral,
-        variant: "zh_Hans",
-        script: Script::Han,
-        length_warn_ratio: 0.6,
-    },
-];
+/// CLDR release the plural and name data comes from.
+pub use cldr::CLDR_VERSION;
+
+mod cldr;
+mod registry;
 
 #[cfg(test)]
 mod tests {
@@ -245,11 +260,22 @@ mod tests {
     #[test]
     fn es_es_loads_with_expected_arity_and_ratio() {
         let es = Locale::by_id("es_ES").expect("es_ES must be present");
-        assert_eq!(es.plural_arity(), 2, "es_ES CLDR arity is 2 (one, other)");
+        // CLDR 38+ gives Spanish a `many` category for large round numbers
+        // ("1 millón de …"); gettext and Qt still use two forms.
+        assert_eq!(
+            es.plural_arity(),
+            3,
+            "es_ES CLDR arity is 3 (one, many, other)"
+        );
         assert_eq!(
             es.cldr_plural,
-            &[PluralCategory::One, PluralCategory::Other]
+            &[
+                PluralCategory::One,
+                PluralCategory::Many,
+                PluralCategory::Other
+            ]
         );
+        assert_eq!(es.integer_plural_forms.len(), 2);
         assert!(
             (es.length_warn_ratio - 1.3).abs() < f32::EPSILON,
             "es_ES length_warn_ratio must be 1.3 (Romance ~25% longer)",
@@ -282,8 +308,82 @@ mod tests {
     }
 
     #[test]
-    fn all_iterates_in_table_order() {
+    fn all_lists_every_cldr_language_once() {
         let ids: Vec<_> = Locale::all().map(|l| l.id).collect();
-        assert_eq!(ids, vec!["en", "de_DE", "es_ES", "zh_Hans"]);
+        assert!(
+            ids.len() > 200,
+            "CLDR has ~220 languages, got {}",
+            ids.len()
+        );
+        assert!(ids.contains(&"sk") && ids.contains(&"de") && ids.contains(&"pt_PT"));
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), ids.len(), "no duplicates");
+    }
+
+    #[test]
+    fn slovak_has_four_cldr_categories_and_three_integer_forms() {
+        let sk = Locale::by_id("sk_SK").expect("sk_SK resolves through the language");
+        assert_eq!(sk.id, "sk_SK");
+        assert_eq!(sk.language, "sk");
+        assert_eq!(sk.name, "Slovak");
+        assert_eq!(
+            sk.cldr_plural,
+            &[
+                PluralCategory::One,
+                PluralCategory::Few,
+                PluralCategory::Many,
+                PluralCategory::Other
+            ]
+        );
+        let integer: Vec<_> = sk.integer_plural_forms.iter().map(|(c, _)| *c).collect();
+        assert_eq!(
+            integer,
+            [
+                PluralCategory::One,
+                PluralCategory::Few,
+                PluralCategory::Other
+            ]
+        );
+        assert_eq!(sk.register, Register::Formal);
+        assert_eq!(sk.script, Script::Latin);
+    }
+
+    #[test]
+    fn dash_and_underscore_ids_resolve_to_the_same_record() {
+        let a = Locale::by_id("sk-SK").unwrap();
+        let b = Locale::by_id("sk_SK").unwrap();
+        assert!(std::ptr::eq(a, b), "one record per canonical id");
+    }
+
+    #[test]
+    fn region_specific_plural_rules_win_over_the_language() {
+        // Brazilian Portuguese counts 0 as singular ("0 arquivo"); European
+        // Portuguese does not. Same category names, different rules.
+        let pt = Locale::by_id("pt").unwrap();
+        let pt_pt = Locale::by_id("pt_PT").unwrap();
+        assert_eq!(pt.integer_plural_forms[0], (PluralCategory::One, 0));
+        assert_eq!(pt_pt.integer_plural_forms[0], (PluralCategory::One, 1));
+        // A region without its own rules falls back to the language.
+        let pt_br = Locale::by_id("pt_BR").unwrap();
+        assert_eq!(pt_br.integer_plural_forms, pt.integer_plural_forms);
+    }
+
+    #[test]
+    fn explicit_script_subtag_overrides_the_likely_script() {
+        assert_eq!(Locale::by_id("sr").unwrap().script, Script::Cyrillic);
+        assert_eq!(Locale::by_id("sr_Latn").unwrap().script, Script::Latin);
+    }
+
+    #[test]
+    fn french_large_number_category_is_not_an_integer_form() {
+        let fr = Locale::by_id("fr_FR").unwrap();
+        assert!(fr.cldr_plural.contains(&PluralCategory::Many));
+        assert_eq!(
+            fr.integer_plural_forms.len(),
+            2,
+            "one / other, like gettext"
+        );
     }
 }

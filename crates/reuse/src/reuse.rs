@@ -36,8 +36,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use i18n_harness_adapter_qt::{Catalog, extract};
 use i18n_harness_core::{Target, Unit, UnitId, UnitState};
+use i18n_harness_formats::{FormatDoc, FormatRegistry};
 use i18n_harness_gate::validate;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
@@ -50,16 +50,16 @@ use crate::report::{
 /// Result of [`reuse_from_references`].
 ///
 /// `base` is the extracted base catalog; `units` are the merged override units
-/// the caller passes straight to `adapter_qt::apply(&base, &units, out)`. The
+/// the caller passes straight to `base.write(&units, out)`. The
 /// `units` vector contains **every** base unit (writable and non-writable) so
 /// the apply call is a complete picture; only writable units that received an
 /// agreed translation differ from the on-disk truth. `report` describes what
 /// happened.
 #[derive(Debug)]
 pub struct ReuseOutcome {
-    /// The extracted base catalog. Hand it to `adapter_qt::apply` together with
+    /// The extracted base catalog. Hand it to `FormatDoc::write` together with
     /// [`Self::units`].
-    pub base: Catalog,
+    pub base: Box<dyn FormatDoc>,
     /// The merged unit set: copied/promoted writable units plus every other
     /// base unit unchanged. Apply-ready.
     pub units: Vec<Unit>,
@@ -81,7 +81,7 @@ pub struct ReuseOutcome {
 /// pass in front of it. The reuse→split flow uses
 /// [`ReuseReport::remaining_ids`] directly instead, because that set already
 /// excludes units a reference could fill.
-pub fn writable_untranslated_ids(catalog: &Catalog) -> HashSet<UnitId> {
+pub fn writable_untranslated_ids(catalog: &dyn FormatDoc) -> HashSet<UnitId> {
     catalog
         .units()
         .iter()
@@ -110,7 +110,7 @@ pub fn reuse_from_references(
     locale: &Locale,
     glossary: Option<&Glossary>,
 ) -> Result<ReuseOutcome, ReuseError> {
-    let base = extract(base_path).map_err(|source| ReuseError::Extract {
+    let base = open_catalog(base_path).map_err(|source| ReuseError::Extract {
         path: base_path.to_path_buf(),
         source,
     })?;
@@ -120,7 +120,7 @@ pub fn reuse_from_references(
     // Indexing once is O(refs · units); the per-base-unit lookup is then O(1).
     let mut candidates: HashMap<UnitId, Vec<Candidate>> = HashMap::new();
     for ref_path in reference_paths {
-        let ref_catalog = extract(ref_path).map_err(|source| ReuseError::Extract {
+        let ref_catalog = open_catalog(ref_path).map_err(|source| ReuseError::Extract {
             path: ref_path.to_path_buf(),
             source,
         })?;
@@ -309,4 +309,10 @@ fn conflict_text(target: &Target) -> ConflictText {
 /// layer. Centralized so the choice is made once.
 fn needs_review_status() -> Option<i18n_harness_core::ReviewStatus> {
     Some(i18n_harness_core::ReviewStatus::NeedsReview)
+}
+
+fn open_catalog(
+    path: &std::path::Path,
+) -> Result<Box<dyn FormatDoc>, i18n_harness_formats::CatalogError> {
+    FormatRegistry::builtin().open(path, None)
 }

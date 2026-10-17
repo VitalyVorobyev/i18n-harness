@@ -94,7 +94,37 @@ use i18n_harness_locales::Locale;
 /// evaluated regardless of whether earlier rules fired, so a single call
 /// reports every diagnosable issue at once.
 pub fn validate(unit: &Unit, locale: &Locale, glossary: Option<&Glossary>) -> GateReport {
-    check::run(unit, locale, glossary)
+    validate_with(
+        unit,
+        &GateContext {
+            locale,
+            glossary,
+            plural_forms: None,
+        },
+    )
+}
+
+/// Everything the gate knows about where a unit lives.
+#[derive(Debug, Clone, Copy)]
+pub struct GateContext<'a> {
+    /// Target locale.
+    pub locale: &'a Locale,
+    /// Project glossary, if any.
+    pub glossary: Option<&'a Glossary>,
+    /// Plural-form count the catalog file itself declares or exhibits
+    /// (`FormatDoc::plural_forms`). Plural targets must have exactly this many
+    /// forms; when `None`, the locale's [`Locale::plural_slot_count`] applies.
+    pub plural_forms: Option<u32>,
+}
+
+/// Validate one unit with the full [`GateContext`]. See [`validate`].
+pub fn validate_with(unit: &Unit, ctx: &GateContext<'_>) -> GateReport {
+    check::run(unit, ctx)
+}
+
+/// [`validate_batch`] with the full [`GateContext`].
+pub fn validate_batch_with(units: &[Unit], ctx: &GateContext<'_>) -> Vec<GateReport> {
+    units.iter().map(|u| validate_with(u, ctx)).collect()
 }
 
 /// Validate a slice of [`Unit`]s in document order.

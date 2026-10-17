@@ -1,17 +1,16 @@
 [package]
-name = "i18n-harness-adapter-react"
+name = "i18n-harness-formats"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "React-side adapter — thin wrapper over PO and ICU-JSON serializers from `i18n-harness-catalog`."
+description = "Registry of every built-in catalog format (Qt .ts, gettext PO, ICU-JSON) behind the CatalogFormat trait."
 
 [lints]
 workspace = true
 
 [dependencies]
-i18n-harness-core.workspace = true
 i18n-harness-catalog.workspace = true
-thiserror.workspace = true
+i18n-harness-adapter-qt.workspace = true

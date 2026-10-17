@@ -24,6 +24,8 @@ jobs:
           - { name: "clippy", run: "cargo clippy --workspace --all-targets -- -D warnings" }
           - { name: "test",   run: "cargo test --workspace --all-targets" }
           - { name: "doc",    run: "cargo doc --workspace --no-deps --document-private-items" }
+          # Backend features no workspace member enables by default.
+          - { name: "backend-features", run: "cargo clippy -p i18n-harness-backend --all-targets --all-features -- -D warnings && cargo test -p i18n-harness-backend --all-features" }
     steps:
       # TODO: pin third-party actions to commit SHAs before any public release tag.
       - uses: actions/checkout@v4

@@ -178,3 +178,48 @@ fn marking_finished_without_text_produces_empty_target_flag() {
         "expected at least one EmptyTargetWhenFinished flag",
     );
 }
+
+fn sk_plural_unit() -> i18n_harness_core::Unit {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/qt/sk_SK_pivot.ts");
+    extract(&path)
+        .expect("extract sk fixture")
+        .units()
+        .iter()
+        .find(|u| u.plural_arity.is_some())
+        .expect("plural unit")
+        .clone()
+}
+
+fn arity_flagged(unit: &i18n_harness_core::Unit, plural_forms: Option<u32>) -> bool {
+    let ctx = i18n_harness_gate::GateContext {
+        locale: Locale::by_id("sk_SK").expect("sk_SK"),
+        glossary: None,
+        plural_forms,
+    };
+    i18n_harness_gate::validate_with(unit, &ctx)
+        .flags
+        .contains(Flag::PluralArityMismatch)
+}
+
+fn with_forms(n: usize) -> i18n_harness_core::Unit {
+    let mut unit = sk_plural_unit();
+    unit.target = Target::Plural {
+        forms: (0..n).map(|i| Some(format!("{{count}} f{i}"))).collect(),
+    };
+    unit.state = UnitState::Proposed;
+    unit
+}
+
+#[test]
+fn slovak_qt_plural_with_three_forms_passes_without_file_evidence() {
+    // CLDR has four Slovak categories, but Qt's (and gettext's) table has
+    // three; `many` covers fractions only.
+    assert!(!arity_flagged(&with_forms(3), None));
+    assert!(arity_flagged(&with_forms(4), None));
+}
+
+#[test]
+fn file_declared_plural_count_overrides_the_locale_default() {
+    assert!(!arity_flagged(&with_forms(4), Some(4)));
+    assert!(arity_flagged(&with_forms(3), Some(4)));
+}

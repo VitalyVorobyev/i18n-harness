@@ -4,30 +4,25 @@
 use std::path::{Path, PathBuf};
 
 use i18n_harness_project::{
-    BackendConfig, CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig, PromptsConfig,
+    BackendConfig, CatalogEntry, FormatId, GlossaryConfig, LocaleConfig, PromptsConfig,
 };
 
 use crate::dto::ProjectOpenResponse;
 use crate::error;
 use crate::state::AppState;
 
-/// Guess a `CatalogFormat` from a file extension, or `None` for unsupported
-/// extensions (the file is then ignored by the folder scan).
-fn format_from_ext(path: &Path) -> Option<CatalogFormat> {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())?
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "ts" => Some(CatalogFormat::QtTs),
-        "po" | "pot" => Some(CatalogFormat::GettextPo),
-        "json" => Some(CatalogFormat::IcuJson),
-        _ => None,
+/// The registered format that recognizes `path`, or `None` when the file is
+/// not a catalog (the folder scan then ignores it).
+fn detect_format(path: &Path) -> Option<FormatId> {
+    let registry = i18n_harness_formats::FormatRegistry::builtin();
+    if !registry.claims_extension(path) {
+        return None;
     }
+    let best = registry.sniff(path).ok()?.into_iter().next()?;
+    Some(FormatId::new(best.format.id()))
 }
 
-/// Recursively collect catalog files (`.ts` / `.po` / `.json`) under `dir`.
+/// Recursively collect catalog files (any registered format) under `dir`.
 /// Symlinks are not followed; unreadable subdirectories are skipped silently.
 fn collect_catalog_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -40,7 +35,7 @@ fn collect_catalog_files(dir: &Path, out: &mut Vec<PathBuf>) {
         };
         if file_type.is_dir() {
             collect_catalog_files(&path, out);
-        } else if file_type.is_file() && format_from_ext(&path).is_some() {
+        } else if file_type.is_file() && detect_format(&path).is_some() {
             out.push(path);
         }
     }
@@ -123,7 +118,7 @@ pub(crate) fn add_catalogs_from_folder(
     let mut warnings: Vec<String> = Vec::new();
 
     for abs in files {
-        let Some(format) = format_from_ext(&abs) else {
+        let Some(format) = detect_format(&abs) else {
             continue;
         };
         let file_name = abs

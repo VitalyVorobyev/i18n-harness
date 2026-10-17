@@ -4,7 +4,7 @@ target/
 # Per-project i18n-harness state (metrics, intermediate, batch progress)
 .i18n-harness/
 
-# UI tooling (lands in M3)
+# UI tooling
 node_modules/
 dist/
 
@@ -19,7 +19,7 @@ ui/coverage/
 *.swo
 
 # Local scratch translation projects (private data)
-data/
+/data/
 
 # Codegraph index (generated, machine-local)
 .codegraph/

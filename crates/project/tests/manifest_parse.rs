@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use i18n_harness_project::{
-    BackendKind, CatalogFormat, ProjectError, ProjectManifest, RegisterOverride, SCHEMA_VERSION,
+    BackendKind, FormatId, ProjectError, ProjectManifest, RegisterOverride, SCHEMA_VERSION,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -298,24 +298,27 @@ kind = "{kind}"
     ProjectManifest::from_toml(&toml).expect("parse")
 }
 
-// ── CatalogFormat variants ────────────────────────────────────────────────────
+// ── FormatId variants ────────────────────────────────────────────────────
 
 #[test]
 fn catalog_format_qt_ts_parses() {
-    assert_eq!(parse_catalog_format("qt-ts"), CatalogFormat::QtTs);
+    assert_eq!(parse_catalog_format("qt-ts"), FormatId::from("qt-ts"));
 }
 
 #[test]
 fn catalog_format_gettext_po_parses() {
-    assert_eq!(parse_catalog_format("gettext-po"), CatalogFormat::GettextPo);
+    assert_eq!(
+        parse_catalog_format("gettext-po"),
+        FormatId::from("gettext-po")
+    );
 }
 
 #[test]
 fn catalog_format_icu_json_parses() {
-    assert_eq!(parse_catalog_format("icu-json"), CatalogFormat::IcuJson);
+    assert_eq!(parse_catalog_format("icu-json"), FormatId::from("icu-json"));
 }
 
-fn parse_catalog_format(fmt: &str) -> CatalogFormat {
+fn parse_catalog_format(fmt: &str) -> FormatId {
     let toml = format!(
         r#"
 [project]
@@ -329,7 +332,7 @@ locale = "de_DE"
 "#
     );
     let (m, _) = ProjectManifest::from_toml(&toml).expect("parse");
-    m.catalogs[0].format
+    m.catalogs[0].format.clone()
 }
 
 // ── RegisterOverride variants ─────────────────────────────────────────────────

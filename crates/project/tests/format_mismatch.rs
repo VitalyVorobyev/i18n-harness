@@ -47,10 +47,8 @@ fn qt_ts_declared_but_json_content_returns_mismatch() {
     assert!(
         matches!(
             err,
-            ProjectError::CatalogFormatMismatch {
-                declared: i18n_harness_project::CatalogFormat::QtTs,
-                ..
-            }
+            ProjectError::CatalogFormatMismatch { ref declared, .. }
+            if declared.as_str() == "qt-ts"
         ),
         "expected CatalogFormatMismatch(QtTs), got {err:?}"
     );
@@ -68,10 +66,8 @@ fn gettext_po_declared_but_qt_content_returns_mismatch() {
     assert!(
         matches!(
             err,
-            ProjectError::CatalogFormatMismatch {
-                declared: i18n_harness_project::CatalogFormat::GettextPo,
-                ..
-            }
+            ProjectError::CatalogFormatMismatch { ref declared, .. }
+            if declared.as_str() == "gettext-po"
         ),
         "expected CatalogFormatMismatch(GettextPo), got {err:?}"
     );
@@ -90,10 +86,8 @@ fn icu_json_declared_but_po_content_returns_mismatch() {
     assert!(
         matches!(
             err,
-            ProjectError::CatalogFormatMismatch {
-                declared: i18n_harness_project::CatalogFormat::IcuJson,
-                ..
-            }
+            ProjectError::CatalogFormatMismatch { ref declared, .. }
+            if declared.as_str() == "icu-json"
         ),
         "expected CatalogFormatMismatch(IcuJson), got {err:?}"
     );

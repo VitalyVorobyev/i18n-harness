@@ -39,8 +39,8 @@ pub enum PlaceholderError {
     UnknownNamedPlaceholder(String),
 }
 
-/// Failures that can occur in [`crate::CatalogFormat::extract`] /
-/// [`crate::CatalogFormat::apply`].
+/// Failures that can occur in [`crate::CatalogFormat::open`] /
+/// [`crate::FormatDoc::render`].
 #[derive(Debug, Error)]
 pub enum CatalogError {
     /// The file could not be read or written.
@@ -96,6 +96,16 @@ pub enum CatalogError {
     /// programming error — surface it loudly.
     #[error("unsupported catalog format: {0}")]
     UnsupportedFormat(String),
+
+    /// The format does not implement an optional operation (for example
+    /// [`crate::FormatDoc::render_subset`]).
+    #[error("the {format} format does not support {operation}")]
+    Unsupported {
+        /// Format id.
+        format: &'static str,
+        /// Name of the operation that was requested.
+        operation: &'static str,
+    },
 
     /// A placeholder converter failed inside an extract / apply path.
     #[error("placeholder conversion failed: {0}")]

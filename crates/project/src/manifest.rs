@@ -119,7 +119,7 @@ pub struct CatalogEntry {
     /// Path to the catalog file, relative to the project root.
     pub path: PathBuf,
     /// Declared format of the catalog.
-    pub format: CatalogFormat,
+    pub format: FormatId,
     /// Locale id this catalog serves (e.g. `"de_DE"`).
     pub locale: String,
 }
@@ -134,21 +134,42 @@ pub struct ReferenceEntry {
     /// Path to the reference catalog file, relative to the project root.
     pub path: PathBuf,
     /// Declared format of the reference catalog.
-    pub format: CatalogFormat,
+    pub format: FormatId,
     /// Locale id this reference serves (e.g. `"de_DE"`).
     pub locale: String,
 }
 
-/// Catalog file format discriminator.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CatalogFormat {
-    /// Qt Linguist `.ts` XML format.
-    QtTs,
-    /// GNU gettext `.po` / `.pot` format.
-    GettextPo,
-    /// ICU MessageFormat JSON (flat key → message map).
-    IcuJson,
+/// Manifest id of a catalog format (`"qt-ts"`, `"gettext-po"`, `"icu-json"`, …).
+///
+/// A plain string on purpose: formats are plugins listed by the format
+/// registry, not variants of an enum here. [`crate::Project::open`] rejects
+/// ids the registry does not know.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FormatId(String);
+
+impl FormatId {
+    /// Wrap a format id.
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// The id as written in the manifest.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for FormatId {
+    fn from(id: &str) -> Self {
+        Self::new(id)
+    }
+}
+
+impl std::fmt::Display for FormatId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 /// `[glossary]` sub-table.
@@ -221,21 +242,57 @@ pub struct PathsConfig {
 
 /// Format guess produced by the discovery heuristic.
 ///
-/// Defined here (rather than in a future `discovery` module) so that
+/// Defined here (rather than in the `discovery` module) so that
 /// [`crate::error::ProjectError::CatalogFormatMismatch`] can reference it
 /// without a forward dependency on the discovery module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+///
+/// Serializes as the format id, or `"unknown"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FormatGuess {
-    /// Content sniff identified Qt Linguist XML.
-    QtTs,
-    /// Content sniff identified GNU gettext PO.
-    GettextPo,
-    /// Content sniff identified ICU MessageFormat JSON.
-    IcuJson,
-    /// File looked plausible but neither sniff nor extension confirmed a
-    /// format. UI shows it greyed-out with "skip" preselected.
+    /// A registered format recognized the content.
+    Known(FormatId),
+    /// File looked plausible but no format confirmed it. The UI shows it
+    /// greyed-out with "skip" preselected.
     Unknown,
+}
+
+impl FormatGuess {
+    /// The recognized format, if any.
+    pub fn format(&self) -> Option<&FormatId> {
+        match self {
+            Self::Known(id) => Some(id),
+            Self::Unknown => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FormatGuess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Known(id) => id.fmt(f),
+            Self::Unknown => f.write_str("an unknown format"),
+        }
+    }
+}
+
+impl Serialize for FormatGuess {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Known(id) => serializer.serialize_str(id.as_str()),
+            Self::Unknown => serializer.serialize_str("unknown"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for FormatGuess {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(deserializer)?;
+        Ok(if id == "unknown" {
+            Self::Unknown
+        } else {
+            Self::Known(FormatId::new(id))
+        })
+    }
 }
 
 impl ProjectManifest {
@@ -417,9 +474,9 @@ locale = "es_ES"
             manifest.references[0].path,
             PathBuf::from("expert/app_de.ts")
         );
-        assert_eq!(manifest.references[0].format, CatalogFormat::QtTs);
+        assert_eq!(manifest.references[0].format, FormatId::from("qt-ts"));
         assert_eq!(manifest.references[0].locale, "de_DE");
-        assert_eq!(manifest.references[1].format, CatalogFormat::GettextPo);
+        assert_eq!(manifest.references[1].format, FormatId::from("gettext-po"));
     }
 
     #[test]

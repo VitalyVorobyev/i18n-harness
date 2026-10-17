@@ -45,6 +45,25 @@ fn fixture_dir_is_not_empty() {
 }
 
 #[test]
+fn open_through_the_format_trait_then_render_is_byte_identical() {
+    let fmt: &dyn CatalogFormat = &PoFormat;
+    for fixture in all_po_fixtures() {
+        let doc = fmt
+            .open(&fixture)
+            .unwrap_or_else(|e| panic!("open({}): {e}", fixture.display()));
+        assert_eq!(doc.format().id(), fmt.id());
+        let rendered = doc
+            .render(doc.units())
+            .unwrap_or_else(|e| panic!("render({}): {e}", fixture.display()));
+        assert!(
+            rendered == doc.source_bytes(),
+            "trait round-trip differs for {}",
+            fixture.display()
+        );
+    }
+}
+
+#[test]
 fn extract_then_apply_with_no_changes_is_byte_identical() {
     let fmt = PoFormat;
     for fixture in all_po_fixtures() {

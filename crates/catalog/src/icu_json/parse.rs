@@ -159,6 +159,7 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
             plural_arity: None,
             flags: Default::default(),
             provenance,
+            context: Default::default(),
             state,
             source_hash,
             review_status: None,

@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::manifest::CatalogFormat;
+use crate::manifest::FormatId;
 use crate::memory::CorrectionId;
 
 /// Discovery format guess — forward-declared here so `CatalogFormatMismatch`
@@ -72,14 +72,26 @@ pub enum ProjectError {
 
     /// The file does not match its declared format. The UI should offer to
     /// re-declare the format or remove the entry.
-    #[error("catalog {} declared {declared:?} but content looks like {sniffed:?}", path.display())]
+    #[error("catalog {} is declared as {declared} but its content looks like {sniffed}", path.display())]
     CatalogFormatMismatch {
         /// Absolute path of the mismatched file.
         path: PathBuf,
         /// Format the manifest declared.
-        declared: CatalogFormat,
+        declared: FormatId,
         /// Format the content sniffer detected.
         sniffed: FormatGuess,
+    },
+
+    /// A `[[catalogs]]` or `[[references]]` entry names a format id the
+    /// format registry does not know.
+    #[error("catalog {} uses unknown format `{format}` (known formats: {known})", path.display())]
+    UnknownCatalogFormat {
+        /// Manifest-relative path of the entry.
+        path: PathBuf,
+        /// The unrecognized id.
+        format: FormatId,
+        /// Comma-separated list of the ids the registry knows.
+        known: String,
     },
 
     /// Two `[[catalogs]]` entries share the same path.
@@ -215,7 +227,7 @@ pub enum ProjectWarning {
         /// Absolute path of the mismatched file.
         path: PathBuf,
         /// Format the manifest declared.
-        declared: CatalogFormat,
+        declared: FormatId,
         /// Format the content sniffer detected.
         sniffed: FormatGuess,
     },

@@ -74,7 +74,7 @@ pub fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, ApplyError> 
         // for this unit is also the pristine snapshot: that preserves the
         // byte-identical round-trip for `render(&catalog, &[])`.
         let candidate = overrides.get(&idx).copied().unwrap_or(pristine);
-        plan_edits_for_unit(candidate, pristine, ep, &catalog.source_bytes, &mut edits);
+        plan_edits_for_unit(candidate, pristine, ep, &catalog.source_bytes, &mut edits)?;
     }
 
     edits.sort_by_key(|e| e.start);
@@ -117,10 +117,10 @@ fn plan_edits_for_unit(
     ep: &EditPoint,
     source: &[u8],
     edits: &mut Vec<Edit>,
-) {
+) -> Result<(), ApplyError> {
     // Vanished and obsolete are sacred — never touched by the harness.
     if matches!(ep.original_state, UnitState::Vanished | UnitState::Obsolete) {
-        return;
+        return Ok(());
     }
 
     let mut singular_body: Option<Vec<u8>> = None;
@@ -141,6 +141,16 @@ fn plan_edits_for_unit(
             promote_to_finished = matches!(text.as_deref(), Some(s) if !s.is_empty());
         }
         Target::Plural { forms } => {
+            // The file's `<numerusform>` count is the language's form count in
+            // Qt's own table. A different count would drop a form or leave a
+            // stale one behind, so refuse it instead of writing half a plural.
+            if forms.len() != ep.numerus_bodies.len() && candidate.target != original.target {
+                return Err(ApplyError::PluralFormCount {
+                    id: candidate.id.0.clone(),
+                    expected: ep.numerus_bodies.len(),
+                    found: forms.len(),
+                });
+            }
             promote_to_finished = !forms.is_empty();
             for (i, form) in forms.iter().enumerate() {
                 let new_body = form
@@ -174,7 +184,7 @@ fn plan_edits_for_unit(
     // on CDATA or anything else `extract` had to simplify into a plain
     // string actually work: we compare *intent*, not *bytes*.
     if candidate.target == original.target && !needs_state_strip {
-        return;
+        return Ok(());
     }
 
     // Emit body edits.
@@ -218,6 +228,7 @@ fn plan_edits_for_unit(
             });
         }
     }
+    Ok(())
 }
 
 fn rebuild_open_tag_without_type(source: &[u8], ep: &EditPoint, attr: &TypeAttr) -> Vec<u8> {

@@ -6,7 +6,8 @@ use std::fs;
 use std::path::Path;
 
 use i18n_harness_core::{
-    Placeholder, PlaceholderKind, Provenance, Target, Unit, UnitId, UnitState, compute_source_hash,
+    Placeholder, PlaceholderKind, Provenance, Target, Unit, UnitContext, UnitId, UnitState,
+    compute_source_hash,
 };
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -241,7 +242,8 @@ impl ParseState {
     ) -> Result<bool, ParseError> {
         let mut source_text: Option<String> = None;
         let mut comment: Option<String> = None; // disambiguation
-        let mut extracomment: Option<String> = None; // developer comment; hashed but not stored
+        let mut extracomment: Option<String> = None; // developer comment
+        let mut translator_notes: Vec<String> = Vec::new();
         let mut translation_open: Option<(usize, usize)> = None; // (start of <, end of >)
         let mut translation_body_start: Option<usize> = None;
         let mut translation_body_end: Option<usize> = None;
@@ -284,6 +286,9 @@ impl ParseState {
                             Some(prev) => format!("{prev}\n{txt}"),
                             None => txt,
                         });
+                    }
+                    QName(b"translatorcomment") => {
+                        translator_notes.push(read_text_until_close(reader, b"translatorcomment")?);
                     }
                     QName(b"translation") => {
                         let event_end = reader.buffer_position() as usize;
@@ -427,6 +432,17 @@ impl ParseState {
             plural_arity: numerus.then_some(numerus_originals.len() as u32),
             flags: Default::default(),
             provenance: Provenance::default(),
+            context: UnitContext {
+                group: (!context.is_empty()).then(|| context.to_owned()),
+                disambiguation: comment.clone().filter(|c| !c.is_empty()),
+                developer_notes: extracomment
+                    .iter()
+                    .flat_map(|c| c.split('\n'))
+                    .filter(|line| !line.trim().is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+                translator_notes,
+            },
             state: state_from_attr,
             source_hash,
             review_status: None,

@@ -1,10 +1,12 @@
 # CLAUDE.md — i18n-harness working agreement
 
 A local-first, offline-by-default desktop translation harness. The
-default path is a local model server (Ollama + Gemma 4) with no API key
-and no cloud egress; the `openai-compatible` backend supports cloud
-LLMs (OpenAI, Anthropic, vLLM, LM Studio) as an opt-in per-project
-config, and the two-phase agent CLI (`harness export-batch` /
+default path is a local model server (Ollama, with whatever models the
+user installed — discovered at runtime, never bundled or named in code)
+with no API key and no cloud egress; OpenAI-compatible servers (vLLM,
+LM Studio, cloud LLMs) are an opt-in per-project config (model
+discovery is in, the translation transport is next), and the two-phase
+agent CLI (`harness export-batch` /
 `harness import-batch` plus the `translate-i18n-batch` skill) delegates
 to an external Claude Code / Copilot / Codex session on the user's
 machine. Catalogs: Qt `.ts`, gettext PO, ICU-JSON. The full design
@@ -62,18 +64,19 @@ sub-milestone history.
 | Crate | Purpose |
 |---|---|
 | `crates/core` | `Unit`, intermediate (ICU) representation, batches, shared errors |
-| `crates/locales` | Locale records + CLDR plural-arity tables (data, not code) |
+| `crates/locales` | Generated CLDR table (`src/cldr.rs`) + harness defaults (`data/defaults.toml`) — data, not code |
 | `crates/gate` | CLDR-driven validation gate; hard + soft checks; metric events |
 | `crates/glossary` | TOML glossary loader + validator |
-| `crates/backend` | `TranslationBackend` trait + impls (manual, ollama, openai-compatible) |
-| `crates/catalog` | `CatalogFormat` trait + PO/ICU-JSON serializers |
-| `crates/adapter-qt` | Qt `.ts` adapter (reference adapter; XML round-trip + subset writer) |
-| `crates/adapter-react` | React adapter over the catalog serializers |
+| `crates/backend` | `TranslationBackend` trait + impls (manual, ollama); runtime model discovery (Ollama, OpenAI-compatible) |
+| `crates/catalog` | `CatalogFormat` (plugin) / `FormatDoc` (open file) traits + PO/ICU-JSON |
+| `crates/adapter-qt` | Qt `.ts` format (XML round-trip + subset writer) |
+| `crates/formats` | `FormatRegistry`: every built-in format, ranked sniffing — the only place formats are listed |
 | `crates/project` | Project manifest (multi-catalog + `[[references]]`), path/locale resolution, per-project state |
 | `crates/reuse` | Deterministic reference-reuse / remainder-split / merge over Qt catalogs (no model) |
 | `crates/cli` | `harness` binary; entry point for humans and the Tauri UI |
 | `ui/` | Tauri 2 + Vite + React + TS desktop shell ([ui/README.md](ui/README.md)) |
 | `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
+| `xtask` | Maintainer tasks; `cargo run -p xtask -- gen-locales` regenerates the CLDR table |
 
 `crates/adapter-log/` is *not* present and will not be created until
 the structured-log adapter milestone is planned — that work is

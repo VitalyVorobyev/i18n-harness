@@ -45,9 +45,13 @@ as data" invariant.
    | CJK               | 0.6                           | often shorter           |
    | Arabic            | 1.25                          | RTL; check direction    |
 
-3. **Write the locale record** in `crates/locales/` following the format
-   of the existing `de_DE` row. Fields: `cldr_plural`, `register`,
-   `variant`, `length_warn_ratio`, `script`.
+3. **No locale record to write.** Plural categories, script and display
+   name come from the generated CLDR table (`crates/locales/src/cldr.rs`);
+   check that `Locale::by_id("<id>")` resolves. Only if the harness
+   default register or length ratio is wrong for the language, add a
+   `[languages.<lang>]` row to `crates/locales/data/defaults.toml`. If the
+   language is missing from CLDR, or CLDR moved on, regenerate the table
+   with `cargo run -p xtask -- gen-locales` (see `xtask/src/main.rs`).
 4. **Extend the gate's fixture table** in `crates/gate/tests/` with a
    positive and negative case for the new arity. If the arity differs
    from any existing locale's, you MUST add a fresh plural fixture.
@@ -56,8 +60,10 @@ as data" invariant.
    - `cargo test -p i18n-harness-adapter-qt` is green.
    - `cargo run -p i18n-harness-cli -- round-trip fixtures/qt/<new>.ts`
      reports zero diffs.
-6. **Update `CLAUDE.md`** if the new locale is in M0–M3 scope (otherwise
-   leave it for M4+).
+6. Plural *targets* in Qt and gettext files follow the file's own form
+   table (`FormatDoc::plural_forms`, falling back to
+   `Locale::plural_slot_count`), which can be smaller than the CLDR
+   category count — cover that in the fixture if the language differs.
 
 ## What you do NOT do
 

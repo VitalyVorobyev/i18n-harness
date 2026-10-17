@@ -61,25 +61,6 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // gettext-po and icu-json are both wired; all manifest
-        // formats are now handled through `extract_for_format`. The guard
-        // remains in case future formats land in the manifest enum before
-        // their wiring is finished — surface the gap loudly rather than
-        // failing later in extract.
-        if !matches!(
-            catalog_ref.format,
-            i18n_harness_project::CatalogFormat::QtTs
-                | i18n_harness_project::CatalogFormat::GettextPo
-                | i18n_harness_project::CatalogFormat::IcuJson,
-        ) {
-            tracing::warn!(
-                path = %catalog_ref.manifest_path,
-                format = ?catalog_ref.format,
-                "scan_project_review_state: format not yet wired"
-            );
-            continue;
-        }
-
         let abs = PathBuf::from(&catalog_ref.absolute_path);
 
         // Check whether already cached.
@@ -93,7 +74,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
 
         if !already_open {
             // Extract from disk via the format-aware backing dispatcher.
-            let mut catalog = extract_for_format(&abs, catalog_ref.format)
+            let mut catalog = extract_for_format(&abs, &catalog_ref.format)
                 .map_err(|e| format!("{} ({}): {e}", catalog_ref.manifest_path, "extract"))?;
 
             // Fold review state in.

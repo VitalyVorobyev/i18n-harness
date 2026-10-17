@@ -273,3 +273,20 @@ fn workspace_locale_carries_workspace_register_not_resolved() {
     // workspace_locale() still shows Formal (the workspace value).
     assert_eq!(r.workspace_locale().register, Register::Formal);
 }
+
+#[test]
+fn effective_locale_carries_every_manifest_override() {
+    let cfg = LocaleConfig {
+        register: Some(RegisterOverride::Informal),
+        variant: Some("de_CH".to_owned()),
+        length_warn_ratio: Some(1.8),
+    };
+    let r = resolve_with_manifest("de_DE", cfg);
+    let effective = r.effective_locale();
+    assert_eq!(effective.register, Register::Informal);
+    assert_eq!(effective.variant, "de_CH");
+    assert!((effective.length_warn_ratio - 1.8).abs() < f32::EPSILON);
+    // Data that the manifest cannot override comes from the workspace record.
+    assert_eq!(effective.id, "de_DE");
+    assert_eq!(effective.cldr_plural, r.workspace_locale().cldr_plural);
+}

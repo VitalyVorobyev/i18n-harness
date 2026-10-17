@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::error::{ProjectError, ProjectWarning};
 use crate::fs::{ProjectFs, RealFs};
-use crate::manifest::{CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig};
+use crate::manifest::{CatalogEntry, GlossaryConfig, LocaleConfig};
 use crate::project::Project;
 
 pub(crate) mod locale_infer;
@@ -223,12 +223,7 @@ impl Project {
             .iter()
             .filter(|dc| dc.format != FormatGuess::Unknown)
             .filter_map(|dc| {
-                let format = match dc.format {
-                    FormatGuess::QtTs => CatalogFormat::QtTs,
-                    FormatGuess::GettextPo => CatalogFormat::GettextPo,
-                    FormatGuess::IcuJson => CatalogFormat::IcuJson,
-                    FormatGuess::Unknown => return None,
-                };
+                let format = dc.format.format()?.clone();
                 let locale = dc.locale.clone().unwrap_or_default();
                 // Store path as relative to root.
                 let rel = dc.path.strip_prefix(root).unwrap_or(&dc.path).to_path_buf();

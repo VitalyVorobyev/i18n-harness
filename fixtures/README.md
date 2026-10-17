@@ -1,12 +1,13 @@
 # Fixtures
 
-Test inputs for the round-trip (M0) and gate (M1) suites.
+Test inputs for the round-trip and gate suites.
 
 ## Layout
 
 - `qt/` — Qt Linguist `.ts` files for `adapter-qt` round-trip + gate tests.
-- `po/` — gettext / Lingui PO files for `crates/catalog` round-trip + gate
-  tests (lands in M4).
+- `po/` — gettext PO files for `crates/catalog` round-trip + gate tests.
+- `icu-json/` — ICU MessageFormat JSON files for `crates/catalog`.
+- `agent-batch/` — export/import fixtures for the two-phase agent flow.
 
 ## Sourcing policy
 
