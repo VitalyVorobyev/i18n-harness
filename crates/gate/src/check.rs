@@ -157,15 +157,24 @@ fn arity_check(unit: &Unit, ctx: &GateContext<'_>, findings: &mut Vec<Finding>) 
 
 fn placeholder_check(source: &Message, targets: &[ParsedTarget], findings: &mut Vec<Finding>) {
     let source_multiset = placeholder_multiset(source);
+    let mut source_typed = source.typed.clone();
+    source_typed.sort();
     for t in targets {
         let Some(ref msg) = t.msg else {
             continue;
         };
         let target_multiset = placeholder_multiset(msg);
-        if source_multiset == target_multiset {
+        let mut target_typed = msg.typed.clone();
+        target_typed.sort();
+        if source_multiset == target_multiset && source_typed == target_typed {
             continue;
         }
-        let (missing, extra) = diff_multisets(&source_multiset, &target_multiset);
+        let (mut missing, mut extra) = diff_multisets(&source_multiset, &target_multiset);
+        // A typed argument whose keyword changed (`plural` → `pluriel`) keeps
+        // its name; report the typed forms.
+        let (typed_missing, typed_extra) = diff_multisets(&source_typed, &target_typed);
+        missing.extend(typed_missing);
+        extra.extend(typed_extra);
         findings.push(Finding {
             flag: Flag::PlaceholderMismatch,
             detail: FindingDetail::PlaceholderMismatch(PlaceholderMismatchDetail {
@@ -290,7 +299,13 @@ fn length_warn_check(
     if source_chars < 8 {
         return;
     }
-    let target_chars: u32 = slots.iter().map(|s| s.text.chars().count() as u32).sum();
+    // Each plural form stands alone in the interface; compare the longest
+    // one, not the sum of all forms.
+    let target_chars: u32 = slots
+        .iter()
+        .map(|s| s.text.chars().count() as u32)
+        .max()
+        .unwrap_or(0);
     let threshold = locale.length_warn_ratio;
     // UI strings are tiny (a screen at a time); even at 100 KB per slot
     // the loss of precision converting u32 → f32 is irrelevant for a

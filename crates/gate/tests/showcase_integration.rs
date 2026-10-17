@@ -268,3 +268,36 @@ fn keep_unchanged_glossary_terms_must_survive_translation() {
             .contains(Flag::ProtectedTermMismatch)
     );
 }
+
+#[test]
+fn a_translated_icu_keyword_is_a_placeholder_mismatch() {
+    let mut u = i18n_harness_core::Unit::untranslated_singular(
+        "id",
+        "{count, plural, one {# file} other {# files}}",
+    );
+    u.target = Target::Singular {
+        text: Some("{count, pluriel, un {# fichier} other {# fichiers}}".into()),
+    };
+    u.state = UnitState::Proposed;
+    let report = i18n_harness_gate::validate(&u, Locale::by_id("fr_FR").unwrap(), None);
+    assert!(
+        report.flags.contains(Flag::PlaceholderMismatch),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn plural_lengths_are_compared_form_by_form() {
+    let mut u = i18n_harness_core::Unit::untranslated_singular("id", "{count} files were imported");
+    u.plural_arity = Some(3);
+    u.target = Target::Plural {
+        forms: vec![
+            Some("{count} súbor importovaný".into()),
+            Some("{count} súbory importované".into()),
+            Some("{count} súborov importovaných".into()),
+        ],
+    };
+    u.state = UnitState::Proposed;
+    let report = i18n_harness_gate::validate(&u, Locale::by_id("sk_SK").unwrap(), None);
+    assert!(!report.flags.contains(Flag::LengthWarn), "{report:?}");
+}
