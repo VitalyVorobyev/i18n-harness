@@ -87,3 +87,35 @@ test("settings edit the glossary", async ({ page }) => {
   await dialog.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText("Settings saved")).toBeVisible();
 });
+
+test("a glossary imported later is applied to finished translations", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("combobox", { name: "Translation model" }).click();
+  await page.getByRole("option", { name: /eurollm-9b-instruct/ }).click();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("button", { name: "Import from a spreadsheet…" }).click();
+  await expect(page.getByText("2 terms added, 0 updated")).toBeVisible();
+  await expect(dialog.getByRole("textbox", { name: "Term" }).last()).toHaveValue("Blob");
+  // A required translation that a finished string ("Save" → "Uložiť") breaks.
+  await dialog.getByRole("button", { name: "Add term" }).click();
+  await dialog.getByRole("textbox", { name: "Term" }).last().fill("Save");
+  await dialog.getByRole("checkbox", { name: "Keep Save unchanged" }).click();
+  await dialog
+    .getByRole("textbox", { name: /translation$/ })
+    .last()
+    .fill("Zachovať");
+  await dialog.getByRole("button", { name: "Save settings" }).click();
+  await expect(page.getByText("Settings saved")).toBeVisible();
+
+  await page.getByRole("button", { name: "More translate options" }).click();
+  await page.getByRole("menuitem", { name: "Apply the glossary (1 string breaks it)" }).click();
+  await expect(page.getByRole("status")).toContainText("Finished. 1 translated", {
+    timeout: 20_000,
+  });
+  await page.getByRole("button", { name: "More translate options" }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Every translation follows the glossary" }),
+  ).toBeVisible();
+});

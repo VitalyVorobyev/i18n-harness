@@ -270,6 +270,7 @@ fn flag_rule_name(flag: Flag) -> &'static str {
         Flag::AccelMismatch => "accel-mismatch",
         Flag::LengthWarn => "length-warn",
         Flag::CjkPunctuationTolerated => "cjk-punctuation-tolerated",
+        Flag::TermTranslationMissing => "term-translation-missing",
         Flag::PlaceholderAgreementRisk => "placeholder-agreement-risk",
         Flag::AmbiguousSource => "ambiguous-source",
         Flag::Idiom => "idiom",

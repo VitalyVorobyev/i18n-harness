@@ -23,6 +23,15 @@ export const tauriApi: Api = {
   setPivot: (path, pivot) => invoke("set_pivot", { path, pivot }),
   getGlossary: (locale) => invoke("get_glossary", { locale }),
   setGlossary: (locale, entries) => invoke("set_glossary", { locale, entries }),
+  pickTable: async () => {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Term table", extensions: ["csv", "tsv", "txt"] }],
+    });
+    return typeof picked === "string" ? picked : null;
+  },
+  readGlossaryTable: (path) => invoke("read_glossary_table", { path }),
+  planSize: (scope) => invoke("plan_size", { scope }),
   getModelSettings: () => invoke("get_model_settings"),
   setModelSettings: (settings) => invoke("set_model_settings", { settings }),
   listModels: (settings) => invoke("list_models", { settings }),

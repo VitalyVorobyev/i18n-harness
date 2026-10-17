@@ -619,3 +619,66 @@ fn a_held_back_translation_is_to_do_again_after_a_restart() {
     let reopened = Session::open_folder(session.root()).unwrap();
     assert!(ids_with(&reopened, &path, UnitStatus::ToDo).contains(&id));
 }
+
+#[test]
+fn a_dictionary_added_later_finds_and_fixes_the_strings_it_breaks() {
+    let (_dir, mut session, path) = open();
+    // Translate everything with a model that knows no dictionary.
+    let naive = ManualBackend::new(|ctx: &PromptContext<'_>| {
+        ManualResponse::Singular(ctx.unit.source.replace("Filter Size", "Veľkosť filtra"))
+    });
+    session
+        .translate(
+            &TranslateScope::default(),
+            InputText::Source,
+            Promotion::Deliver,
+            &naive,
+            &mut |_| {},
+            &CancelToken::new(),
+        )
+        .unwrap();
+    let dictionary = TranslateScope {
+        glossary_issues: true,
+        ..TranslateScope::default()
+    };
+    assert!(session.plan(&dictionary).unwrap().is_empty());
+
+    let summary = session
+        .import_glossary(
+            "sk_SK",
+            "term;translation;note\nfilter size;Rozmer filtra;\nParamsManager;;\n",
+        )
+        .unwrap();
+    assert_eq!((summary.added, summary.updated), (2, 0));
+    let plan = session.plan(&dictionary).unwrap();
+    assert_eq!(plan.len(), 1, "{plan:?}");
+    assert!(plan[0].1.0.contains("Filter Size"));
+    let filter = UnitFilter {
+        statuses: vec![UnitStatus::Done],
+        ..UnitFilter::default()
+    };
+    let flagged = session.units(&path, &filter, 0, usize::MAX).unwrap();
+    let issue = flagged
+        .units
+        .iter()
+        .flat_map(|u| &u.issues)
+        .find(|i| i.message.contains("Glossary"))
+        .expect("glossary warning shown");
+    assert_eq!(issue.severity, IssueSeverity::Warning);
+
+    // A model that follows the dictionary fixes it; nothing is left.
+    let careful = ManualBackend::new(|_: &PromptContext<'_>| {
+        ManualResponse::Singular("Rozmeru filtra".into())
+    });
+    session
+        .translate(
+            &dictionary,
+            InputText::Source,
+            Promotion::Deliver,
+            &careful,
+            &mut |_| {},
+            &CancelToken::new(),
+        )
+        .unwrap();
+    assert!(session.plan(&dictionary).unwrap().is_empty());
+}

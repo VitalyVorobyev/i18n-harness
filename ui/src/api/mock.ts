@@ -9,6 +9,7 @@ import type {
   ModelChoice,
   ModelSettings,
   StatusCounts,
+  TranslateScope,
   TranslationEvent,
   UnitFilter,
   UnitStatus,
@@ -206,6 +207,40 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
   const listeners = new Set<(event: TranslationEvent) => void>();
   let cancelled = false;
 
+  // A required translation missing from a translated string, as the
+  // session's glossary-issues scope sees it (without inflection tolerance).
+  const missingTerms = (u: MockUnit): GlossaryEntry[] =>
+    u.status === "to-do"
+      ? []
+      : glossary.filter((g) => {
+          const source = u.source.toLowerCase();
+          const target = u.target.join(" ").toLowerCase();
+          if (g.keep) return u.source.includes(g.term) && !u.target.join(" ").includes(g.term);
+          return (
+            g.translation !== null &&
+            source.includes(g.term.toLowerCase()) &&
+            !target.includes(g.translation.toLowerCase())
+          );
+        });
+
+  const inScope = (scope: TranslateScope) => {
+    const statuses =
+      scope.statuses.length > 0
+        ? scope.statuses
+        : scope.glossary_issues
+          ? (["to-do", "check", "done"] as UnitStatus[])
+          : (["to-do"] as UnitStatus[]);
+    return (catalogs ?? [])
+      .filter((c) => scope.catalogs.length === 0 || scope.catalogs.includes(c.summary.path))
+      .flatMap((c) => {
+        refresh(c);
+        return c.units
+          .filter((u) => statuses.includes(u.status))
+          .filter((u) => !scope.glossary_issues || missingTerms(u).length > 0)
+          .map((u) => ({ c, u }));
+      });
+  };
+
   const refresh = (c: MockCatalog) => {
     const pivot = c.summary.pivot !== null;
     for (const u of c.units) {
@@ -329,6 +364,12 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       glossary = entries.filter((e) => e.term.trim() !== "");
       return glossary;
     },
+    pickTable: async () => "/demo/terms.csv",
+    readGlossaryTable: async () => [
+      { term: "Threshold", keep: false, translation: "Prahová hodnota", note: null },
+      { term: "Blob", keep: true, translation: null, note: "Technical term" },
+    ],
+    planSize: async (scope) => inScope(scope).length,
     getModelSettings: async () => settings,
     setModelSettings: async (next) => {
       settings = next;
@@ -356,13 +397,7 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
     },
     startTranslation: async (scope) => {
       if (!settings.model) throw new MockError("needs-model", "no translation model is selected");
-      const statuses = scope.statuses.length > 0 ? scope.statuses : ["to-do"];
-      const plan = (catalogs ?? [])
-        .filter((c) => scope.catalogs.length === 0 || scope.catalogs.includes(c.summary.path))
-        .flatMap((c) => {
-          refresh(c);
-          return c.units.filter((u) => statuses.includes(u.status)).map((u) => ({ c, u }));
-        });
+      const plan = inScope(scope);
       cancelled = false;
       const total = plan.length;
       void (async () => {
@@ -378,7 +413,10 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
             return;
           }
           await sleep(delayMs);
-          u.target = machine(u, c.summary.pivot !== null);
+          const missing = scope.glossary_issues ? missingTerms(u) : [];
+          u.target = machine(u, c.summary.pivot !== null).map((form) =>
+            [form, ...missing.map((g) => g.translation ?? g.term)].join(" "),
+          );
           u.status = "check";
           c.dirty = true;
           done += 1;

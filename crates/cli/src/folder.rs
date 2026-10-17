@@ -41,6 +41,11 @@ pub(crate) struct TranslateFolderArgs {
     /// Write the catalogs when the run ends.
     #[arg(long)]
     save: bool,
+    /// Retranslate only strings whose translation breaks the glossary
+    /// (`glossary.toml`), whatever their status: for a glossary added or
+    /// changed after the strings were translated.
+    #[arg(long)]
+    fix_glossary: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -123,8 +128,12 @@ pub(crate) fn translate_folder(args: TranslateFolderArgs) -> Result<()> {
             started.elapsed().as_secs_f64()
         ),
     };
+    let scope = TranslateScope {
+        glossary_issues: args.fix_glossary,
+        ..TranslateScope::default()
+    };
     session.translate(
-        &TranslateScope::default(),
+        &scope,
         input,
         promotion,
         backend.as_ref(),
@@ -133,6 +142,18 @@ pub(crate) fn translate_folder(args: TranslateFolderArgs) -> Result<()> {
     )?;
 
     print_problems(&session)?;
+    if args.fix_glossary {
+        let left = session.plan(&scope)?.len();
+        if left > 0 {
+            eprintln!(
+                "{left} string(s) still break the glossary. Models that only translate \
+                 (no chat template) cannot follow it; fix these by hand, with a chat model, \
+                 or through `harness export-batch`."
+            );
+        } else {
+            eprintln!("every translation follows the glossary");
+        }
+    }
 
     if args.save {
         let saved = session.save(None)?;

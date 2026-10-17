@@ -11,6 +11,7 @@ import type {
   ModelSettings,
   TranslationEvent,
   UnitPage,
+  TranslateScope,
   UnitView,
 } from "../api";
 import { errorKind, errorMessage, useApi } from "../api";
@@ -24,6 +25,14 @@ import { SettingsDialog } from "../workspace/SettingsDialog";
 import type { StatusTab } from "../workspace/Strings";
 import { PAGE_SIZE, Strings } from "../workspace/Strings";
 import { Toolbar } from "../workspace/Toolbar";
+
+/** Every translated string whose text breaks the glossary. */
+const GLOSSARY_ISSUES: TranslateScope = {
+  catalogs: [],
+  statuses: [],
+  ids: null,
+  glossary_issues: true,
+};
 
 export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const api = useApi();
@@ -46,6 +55,7 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const [glossary, setGlossary] = useState<GlossaryEntry[] | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pivotFor, setPivotFor] = useState<CatalogSummary | null>(null);
+  const [glossaryIssues, setGlossaryIssues] = useState(0);
 
   const catalog = catalogs.find((c) => c.path === selected) ?? null;
   const activeUnit = page?.units.find((u) => u.id === activeId) ?? null;
@@ -167,10 +177,12 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     }
   };
 
-  const translate = async (paths: string[]) => {
+  const translate = async (paths: string[], glossaryIssuesOnly = false) => {
     try {
       const total = await api.startTranslation(
-        { catalogs: paths, statuses: ["to-do"], ids: null },
+        glossaryIssuesOnly
+          ? GLOSSARY_ISSUES
+          : { catalogs: paths, statuses: ["to-do"], ids: null, glossary_issues: false },
         "auto",
       );
       if (total === 0) toast({ tone: "info", title: "Nothing to translate" });
@@ -253,6 +265,20 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     }
   };
 
+  // Recount after every change, but not per string during a run: the
+  // count checks every translation and the run holds the session.
+  useEffect(() => {
+    if (running) return;
+    let live = true;
+    void api
+      .planSize(GLOSSARY_ISSUES)
+      .then((n) => live && setGlossaryIssues(n))
+      .catch(() => live && setGlossaryIssues(0));
+    return () => {
+      live = false;
+    };
+  }, [api, catalogs, running, reload]);
+
   const toDoInFolder = useMemo(() => catalogs.reduce((n, c) => n + c.counts.to_do, 0), [catalogs]);
 
   const openSettings = async () => {
@@ -293,6 +319,8 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
             dirty={dirty}
             onTranslateFile={() => catalog && void translate([catalog.path])}
             onTranslateFolder={() => void translate([])}
+            glossaryIssues={glossaryIssues}
+            onApplyGlossary={() => void translate([], true)}
             onSave={() => void save()}
             onSettings={() => void openSettings()}
             onClose={props.onClose}
@@ -387,6 +415,8 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
           onSaved={(_glossary, saved) => {
             setSettingsOpen(false);
             setSettings(saved);
+            // Issues shown in the list depend on the glossary.
+            setReload((n) => n + 1);
             toast({ tone: "success", title: "Settings saved" });
             void api
               .listModels(saved)

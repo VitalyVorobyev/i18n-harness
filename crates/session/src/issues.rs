@@ -129,6 +129,15 @@ pub(crate) fn issues(report: &GateReport, unit: &Unit, format: &dyn CatalogForma
                         )
                     },
                 ),
+                FindingDetail::TermTranslationMissing(d) => (
+                    IssueSeverity::Warning,
+                    format!(
+                        "Glossary: \"{}\" should be translated as \"{}\"{}",
+                        d.term,
+                        d.expected,
+                        form(d.slot, plural)
+                    ),
+                ),
                 FindingDetail::PlaceholderAgreementRisk(d) => (
                     IssueSeverity::Warning,
                     format!(

@@ -335,3 +335,31 @@ fn gettext_plural_forms_follow_msgid_plural() {
         "{report:?}"
     );
 }
+
+#[test]
+fn a_required_term_translation_tolerates_inflection() {
+    let (glossary, _) = i18n_harness_glossary::Glossary::from_toml(
+        r#"
+[meta]
+schema_version = 1
+
+[[term]]
+source = "threshold"
+translations = { sk_SK = "prahová hodnota" }
+"#,
+    )
+    .unwrap();
+    let sk = Locale::by_id("sk_SK").unwrap();
+    let check = |target: &str| {
+        let mut u = i18n_harness_core::Unit::untranslated_singular("id", "Set the Threshold");
+        u.target = Target::Singular {
+            text: Some(target.into()),
+        };
+        u.state = UnitState::Proposed;
+        i18n_harness_gate::validate(&u, sk, Some(&glossary)).flags
+    };
+    assert!(!check("Nastavte prahovú hodnotu").contains(Flag::TermTranslationMissing));
+    let flags = check("Nastavte hraničnú hodnotu");
+    assert!(flags.contains(Flag::TermTranslationMissing));
+    assert!(!flags.has_hard());
+}
