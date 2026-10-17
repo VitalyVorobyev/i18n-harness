@@ -81,7 +81,13 @@ pub mod ollama;
 #[cfg(any(feature = "ollama", feature = "openai-compatible"))]
 mod http;
 
+#[cfg(any(feature = "ollama", feature = "openai-compatible"))]
+mod model;
+#[cfg(any(feature = "ollama", feature = "openai-compatible"))]
+pub use model::ModelBackend;
+
 pub mod discovery;
+pub mod profile;
 
 pub mod agent_batch;
 

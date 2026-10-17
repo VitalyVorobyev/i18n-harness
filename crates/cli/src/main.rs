@@ -12,6 +12,8 @@
 //!   (Claude Code / Copilot / Codex) fills, `import-batch` ingests the
 //!   result through the manual backend.
 
+mod folder;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -107,6 +109,10 @@ enum Command {
     /// must be a subset of the base (ids present in base); ids that are
     /// finished-and-complete in both files are treated as an overlap error.
     Merge(MergeArgs),
+
+    /// Translate every string still to do in a folder of catalogs with a
+    /// model, through the same session the desktop app uses.
+    TranslateFolder(folder::TranslateFolderArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -360,6 +366,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Reuse(args) => reuse(args),
         Command::SplitRemainder(args) => split_remainder(args),
         Command::Merge(args) => merge(args),
+        Command::TranslateFolder(args) => folder::translate_folder(args),
     }
 }
 
@@ -555,6 +562,10 @@ fn render_detail(f: &Finding) -> String {
         FindingDetail::BackendMalformedResponse(detail) => {
             format!("backend response could not be parsed: {}", detail.reason)
         }
+        FindingDetail::ProtectedTermMismatch(d) => format!(
+            "slot {}: keep-unchanged term {:?} appears {} time(s) in source, {} in target",
+            d.slot, d.term, d.source_count, d.target_count
+        ),
     }
 }
 
@@ -566,6 +577,7 @@ fn flag_name(flag: Flag) -> &'static str {
         Flag::PluralArityMismatch => "plural-arity-mismatch",
         Flag::IcuParseError => "icu-parse-error",
         Flag::EmptyTargetWhenFinished => "empty-target-when-finished",
+        Flag::ProtectedTermMismatch => "protected-term-mismatch",
         Flag::AccelMismatch => "accel-mismatch",
         Flag::LengthWarn => "length-warn",
         Flag::CjkPunctuationTolerated => "cjk-punctuation-tolerated",

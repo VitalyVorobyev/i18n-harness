@@ -30,7 +30,7 @@ use crate::icu::{Message, parse, placeholder_multiset};
 use crate::report::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
     IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
-    PlaceholderMismatchDetail, PluralArityMismatchDetail,
+    PlaceholderMismatchDetail, PluralArityMismatchDetail, ProtectedTermMismatchDetail,
 };
 
 /// Entry point used by [`crate::validate`].
@@ -59,6 +59,7 @@ pub(crate) fn run(unit: &Unit, ctx: &GateContext<'_>) -> GateReport {
     cjk_punctuation_check(locale, &target_slots, &mut findings);
     placeholder_agreement_check(locale, &target_slots, &mut findings);
     markup_tag_check(unit, &target_slots, &mut findings);
+    protected_term_check(unit, ctx, &target_slots, &mut findings);
 
     GateReport::from_findings(unit.id.clone(), findings)
 }
@@ -514,6 +515,55 @@ fn markup_tag_check(unit: &Unit, slots: &[TargetSlot<'_>], findings: &mut Vec<Fi
     }
 }
 
+/// Every "keep unchanged" glossary term found in the source must appear as
+/// often in each target slot (whole words, case-sensitive).
+fn protected_term_check(
+    unit: &Unit,
+    ctx: &GateContext<'_>,
+    slots: &[TargetSlot<'_>],
+    findings: &mut Vec<Finding>,
+) {
+    let Some(glossary) = ctx.glossary else {
+        return;
+    };
+    for term in glossary.do_not_translate() {
+        let source_count = count_word(&unit.source, term);
+        if source_count == 0 {
+            continue;
+        }
+        for slot in slots {
+            let target_count = count_word(slot.text, term);
+            if target_count != source_count {
+                findings.push(Finding {
+                    flag: Flag::ProtectedTermMismatch,
+                    detail: FindingDetail::ProtectedTermMismatch(ProtectedTermMismatchDetail {
+                        slot: slot.slot,
+                        term: term.to_owned(),
+                        source_count,
+                        target_count,
+                    }),
+                });
+            }
+        }
+    }
+}
+
+/// Occurrences of `word` in `text` not glued to other letters or digits.
+fn count_word(text: &str, word: &str) -> u32 {
+    if word.is_empty() {
+        return 0;
+    }
+    let hits = text
+        .match_indices(word)
+        .filter(|(i, _)| {
+            let before = text[..*i].chars().next_back();
+            let after = text[i + word.len()..].chars().next();
+            !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+        })
+        .count();
+    u32::try_from(hits).unwrap_or(u32::MAX)
+}
+
 /// HTML / Qt-rich-text tag names recognized as markup. Restricting the lexer
 /// to this set is what keeps literal angle-bracket labels — `<No ID>`,
 /// `<empty>`, `<unset>` and the like, common in UI source strings — from being
@@ -630,10 +680,58 @@ fn extract_tag_names(text: &str) -> Vec<String> {
         if let Ok(name) = std::str::from_utf8(&bytes[name_start..j]) {
             let lowered = name.to_ascii_lowercase();
             if MARKUP_TAG_NAMES.contains(&lowered.as_str()) {
-                out.push(lowered);
+                let closing = name_start > i + 1;
+                // Attributes as written, whitespace collapsed, without a
+                // self-closing slash: `<br/>` and `<br>` are the same tag.
+                let attrs = normalize_attributes(
+                    std::str::from_utf8(&bytes[j..k])
+                        .unwrap_or_default()
+                        .trim_end_matches('/'),
+                );
+                let mut tag = if closing {
+                    format!("/{lowered}")
+                } else {
+                    lowered
+                };
+                if !attrs.is_empty() {
+                    tag.push(' ');
+                    tag.push_str(&attrs);
+                }
+                out.push(tag);
             }
         }
         i = k + 1;
+    }
+    out
+}
+
+/// Attributes with whitespace collapsed and names lower-cased; quoted
+/// values are kept exactly, since a changed value (a link target, a style)
+/// changes what the application renders.
+fn normalize_attributes(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut quote: Option<char> = None;
+    let mut pending_space = false;
+    for c in raw.chars() {
+        match quote {
+            Some(q) => {
+                out.push(c);
+                if c == q {
+                    quote = None;
+                }
+            }
+            None if c.is_whitespace() => pending_space = !out.is_empty(),
+            None => {
+                if pending_space {
+                    out.push(' ');
+                    pending_space = false;
+                }
+                if c == '"' || c == '\'' {
+                    quote = Some(c);
+                }
+                out.push(c.to_ascii_lowercase());
+            }
+        }
     }
     out
 }

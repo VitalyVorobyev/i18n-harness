@@ -223,3 +223,48 @@ fn file_declared_plural_count_overrides_the_locale_default() {
     assert!(!arity_flagged(&with_forms(4), Some(4)));
     assert!(arity_flagged(&with_forms(3), Some(4)));
 }
+
+#[test]
+fn keep_unchanged_glossary_terms_must_survive_translation() {
+    let (glossary, _) = i18n_harness_glossary::Glossary::from_toml(
+        "[meta]\nschema_version = 1\n\n[[term]]\nsource = \"Blob\"\ndo_not_translate = true\n\n\
+         [[term]]\nsource = \"ParamsManager\"\ndo_not_translate = true\n",
+    )
+    .unwrap();
+    let ctx = i18n_harness_gate::GateContext {
+        locale: Locale::by_id("sk_SK").unwrap(),
+        glossary: Some(&glossary),
+        plural_forms: None,
+    };
+    let unit = |target: &str| {
+        let mut u =
+            i18n_harness_core::Unit::untranslated_singular("id", "Open ParamsManager for the Blob");
+        u.target = Target::Singular {
+            text: Some(target.into()),
+        };
+        u.state = UnitState::Proposed;
+        u
+    };
+    let flagged = |t: &str| {
+        i18n_harness_gate::validate_with(&unit(t), &ctx)
+            .flags
+            .contains(Flag::ProtectedTermMismatch)
+    };
+    assert!(!flagged("Otvoriť ParamsManager pre Blob"));
+    assert!(
+        flagged("Otvoriť správcu parametrov pre Blob"),
+        "translated identifier"
+    );
+    assert!(
+        flagged("Otvoriť ParamsManager pre Blobu"),
+        "declined term is not the term"
+    );
+    // Terms absent from the source impose nothing.
+    let mut other = unit("Uložiť");
+    other.source = "Save".into();
+    assert!(
+        !i18n_harness_gate::validate_with(&other, &ctx)
+            .flags
+            .contains(Flag::ProtectedTermMismatch)
+    );
+}

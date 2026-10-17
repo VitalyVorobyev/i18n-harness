@@ -1,0 +1,21 @@
+# Prompt profile for machine-translation models that continue a raw prompt
+# instead of following chat instructions (their server-side template is a
+# bare pass-through). The prompt is the model's own training format; such
+# models cannot take notes, so glossary terms are enforced by the gate.
+id = "completion"
+mode = "completion"
+
+prompt = """Translate this from {source_language} to {target_language}:
+{source_language}: {text}
+{target_language}:"""
+
+# A single-line text ends at the line break; multi-line texts end where the
+# model starts another example.
+stop = ["\nTranslate this from"]
+stop_single_line = ["\n"]
+keep_alive = "15m"
+
+[options]
+temperature = 0.0
+seed = 42
+top_k = 1

@@ -76,3 +76,43 @@ pub(crate) fn spawn_mock_server(responses: Vec<String>) -> (String, std::thread:
     });
     (host, handle)
 }
+
+/// Like [`spawn_mock_server`], but also returns each request (first line and
+/// body) in the order received.
+pub(crate) fn spawn_capturing_server(
+    responses: Vec<String>,
+) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = format!("http://{}", listener.local_addr().unwrap());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for response in responses {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut head = Vec::new();
+            let mut byte = [0u8; 1];
+            while !head.ends_with(b"\r\n\r\n") {
+                if stream.read(&mut byte).unwrap_or(0) == 0 {
+                    break;
+                }
+                head.push(byte[0]);
+            }
+            let head = String::from_utf8_lossy(&head).into_owned();
+            let length: usize = head
+                .lines()
+                .find_map(|l| {
+                    l.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .map(|v| v.trim().parse().unwrap_or(0))
+                })
+                .unwrap_or(0);
+            let mut body = vec![0u8; length];
+            let _ = stream.read_exact(&mut body);
+            let first = head.lines().next().unwrap_or_default().to_owned();
+            let _ = tx.send((first, String::from_utf8_lossy(&body).into_owned()));
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (host, rx)
+}

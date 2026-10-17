@@ -70,6 +70,7 @@ pub use report::{
     AccelDetail, BackendMalformedResponseDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding,
     FindingDetail, GateReport, IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail,
     PlaceholderAgreementDetail, PlaceholderMismatchDetail, PluralArityMismatchDetail,
+    ProtectedTermMismatchDetail,
 };
 
 use i18n_harness_core::Unit;

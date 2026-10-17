@@ -509,17 +509,30 @@ fn gate_rule_table_drives_every_check() {
             forbidden: &[Flag::MarkupTagMismatch],
         },
         Fixture {
-            name: "markup-tag/negative/case-and-attribute-insensitive",
+            name: "markup-tag/negative/name-case-insensitive",
             unit: make_singular(
                 "msg::attrs",
                 "See <a href=\"/help\">docs</a>",
-                // Same `a` tag name; attributes differ; case differs.
-                Some("Siehe <A HREF=\"/de/hilfe\">Dokumente</A>"),
+                // Same tag and attribute; only the name's case differs.
+                Some("Siehe <A HREF=\"/help\">Dokumente</A>"),
                 UnitState::Proposed,
             ),
             locale: de_de(),
             expected: &[],
             forbidden: &[Flag::MarkupTagMismatch],
+        },
+        Fixture {
+            name: "markup-tag/positive/attribute-value-changed",
+            unit: make_singular(
+                "msg::attrs2",
+                "See <a href=\"/help\">docs</a>",
+                // A changed attribute value changes what is rendered.
+                Some("Siehe <a href=\"/de/hilfe\">Dokumente</a>"),
+                UnitState::Proposed,
+            ),
+            locale: de_de(),
+            expected: &[Flag::MarkupTagMismatch],
+            forbidden: &[],
         },
         Fixture {
             name: "markup-tag/negative/source-has-no-tags",

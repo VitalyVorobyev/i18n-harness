@@ -29,6 +29,7 @@ i18n-harness-locales.workspace = true
 i18n-harness-glossary.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 thiserror.workspace = true
 ureq = { workspace = true, optional = true }
 

@@ -155,6 +155,10 @@ pub enum FindingDetail {
     /// named tags.
     MarkupTagMismatch(MarkupTagMismatchDetail),
 
+    /// A "keep unchanged" glossary term from the source is missing from (or
+    /// repeated in) the target.
+    ProtectedTermMismatch(ProtectedTermMismatchDetail),
+
     /// The translation backend returned a response the strict parser
     /// could not validate (unknown flag kind, confidence out of range,
     /// JSON shape wrong). NOT produced by the gate's [`crate::validate`]
@@ -260,12 +264,24 @@ pub struct PlaceholderAgreementDetail {
     pub determiner: String,
 }
 
+/// Detail for [`Flag::ProtectedTermMismatch`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtectedTermMismatchDetail {
+    /// Which target slot the mismatch was found in.
+    pub slot: u32,
+    /// The glossary term.
+    pub term: String,
+    /// Occurrences in the source.
+    pub source_count: u32,
+    /// Occurrences in the target slot.
+    pub target_count: u32,
+}
+
 /// Detail for [`Flag::MarkupTagMismatch`].
 ///
-/// Each entry is a tag NAME (with no `<`/`>`, no attributes) — e.g. `b`,
-/// `a`, `strong`. Self-closing tags like `<br/>` and `<br>` are normalised
-/// to the same name and counted as both an opening and a closing
-/// occurrence for multiset comparison.
+/// Each entry is a tag as written without `<`/`>`: its lower-cased name
+/// followed by its attributes with whitespace collapsed — e.g. `b`, `/b`,
+/// `a href="x"`. `<br/>` and `<br>` both read `br`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarkupTagMismatchDetail {
     /// Which target slot the mismatch was found in.

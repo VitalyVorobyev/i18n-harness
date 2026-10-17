@@ -96,15 +96,18 @@ pub(crate) fn issues(report: &GateReport, unit: &Unit, format: &dyn CatalogForma
                     ),
                 ),
                 FindingDetail::MarkupTagMismatch(d) => {
+                    let tags = |tags: &[String]| {
+                        tags.iter().map(|t| format!("<{t}>")).collect::<Vec<_>>().join(", ")
+                    };
                     let mut parts = Vec::new();
                     if !d.missing.is_empty() {
-                        parts.push(format!("missing {}", d.missing.join(", ")));
+                        parts.push(format!("missing {}", tags(&d.missing)));
                     }
                     if !d.extra.is_empty() {
-                        parts.push(format!("unexpected {}", d.extra.join(", ")));
+                        parts.push(format!("unexpected {}", tags(&d.extra)));
                     }
                     (
-                        IssueSeverity::Warning,
+                        IssueSeverity::Error,
                         format!(
                             "Formatting tags do not match the original{}: {}",
                             form(d.slot, plural),
@@ -112,6 +115,20 @@ pub(crate) fn issues(report: &GateReport, unit: &Unit, format: &dyn CatalogForma
                         ),
                     )
                 }
+                FindingDetail::ProtectedTermMismatch(d) => (
+                    IssueSeverity::Error,
+                    if d.target_count == 0 {
+                        format!("\"{}\" must stay unchanged{}", d.term, form(d.slot, plural))
+                    } else {
+                        format!(
+                            "\"{}\" appears {} time(s) in the original and {} in the translation{}",
+                            d.term,
+                            d.source_count,
+                            d.target_count,
+                            form(d.slot, plural)
+                        )
+                    },
+                ),
                 FindingDetail::PlaceholderAgreementRisk(d) => (
                     IssueSeverity::Warning,
                     format!(

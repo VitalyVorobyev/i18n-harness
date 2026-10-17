@@ -154,6 +154,8 @@ fn hard_rules_emit_gate_reject_soft_rules_emit_soft_warning() {
         "plural-arity-mismatch",
         "icu-parse-error",
         "empty-target-when-finished",
+        "markup-tag-mismatch",
+        "protected-term-mismatch",
     ]
     .into_iter()
     .collect();
