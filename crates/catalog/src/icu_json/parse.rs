@@ -238,6 +238,7 @@ pub(crate) fn extract_lingui(path: &Path) -> Result<Catalog, CatalogError> {
             id: UnitId::from(id.to_owned()),
             source_hash: Some(compute_source_hash(&source_icu, "", "", false)),
             source: source_icu,
+            source_plural: None,
             target: Target::Singular {
                 text: (!target_icu.is_empty()).then_some(target_icu),
             },
