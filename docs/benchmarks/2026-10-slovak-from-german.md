@@ -59,6 +59,46 @@ Mean score by kind of string:
 - A runaway generation (a chat model looping until the request timed out) made
   the harness cap each answer's length; see `ModelBackend`.
 
+## Follow-up: a cloud model, Claude Haiku 5.5 (2026-10-17)
+
+The same 170 strings, English input, translated by Claude Haiku 5.5 (an
+Anthropic cloud model) with the rules every chat model gets (see the `chat`
+prompt profile), plus each string's code context and developer comment.
+Scored blind against MiLMMT-46-4B (English input) by the same judge, two
+candidates per string behind shuffled letters, identical outputs scored once
+(52 of 170 were identical); the deterministic gate checked both through the
+session, as the app does.
+
+| Configuration | Mean score | Score 4–5 | Score 1–2 (wrong meaning or unusable) | Hard gate errors | Warnings |
+|---|---|---|---|---|---|
+| Claude Haiku 5.5 | **4.79** | **99%** | **0%** | 0 | 15 |
+| MiLMMT-46-4B, English input | 4.04 | 74% | 12% | 0 | 27 |
+
+Haiku scored higher on 72 strings, lower on 10, the same on 88. It led in
+every kind of string (identifiers 4.70 vs 3.80, markup 4.70 vs 3.83, long
+4.85 vs 3.95). Its 10 losses are minor: lower-case labels where the
+original capitalises (`plocha` for *Area*), *Prah* for *Threshold*, keeping
+a camelCase key that the customer's German translates (the instruction to
+keep camelCase identifiers caused that). MiLMMT's wrong-meaning errors that
+Haiku avoided include *Circularity* → *Kruhové hospodárstvo* (circular
+economy), *Open Chat* → *Otvorený chat* (an opened chat), *Filter tickets* →
+*Filtrovať vstupenky* (event tickets), *Role Name* → *Názov úlohy* (task) and
+Czech words (*úkol*).
+
+Caveats:
+
+- The judge (Claude) belongs to the same model family as the candidate;
+  self-preference cannot be ruled out. A native Slovak reviewer's blind
+  check is the stronger evidence.
+- Judge consistency: MiLMMT's identical outputs scored 4.24 in the first
+  round (four candidates) and 4.04 here (next to a stronger candidate), so
+  scores move by about ±0.2 between rounds; the 0.75 gap is well beyond that.
+- Haiku saw each string's context and developer comment; MiLMMT, a
+  completion model, cannot take them. This compares the two as the app runs
+  them, not the bare models.
+- Haiku translated the 170 strings in about a minute. The text is sent to
+  Anthropic's API, so it needs the customer's consent; MiLMMT runs offline.
+
 ## Licences (for the customer's question about legal use)
 
 - EuroLLM-9B-Instruct-2512: Apache License 2.0 (model card).
