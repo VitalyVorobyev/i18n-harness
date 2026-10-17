@@ -19,7 +19,7 @@ ui/coverage/
 *.swo
 
 # Local scratch translation projects (private data)
-data/
+/data/
 
 # Codegraph index (generated, machine-local)
 .codegraph/

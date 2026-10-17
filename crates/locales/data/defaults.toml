@@ -1,0 +1,65 @@
+# Harness defaults layered on top of the generated CLDR table (src/cldr.rs).
+#
+# CLDR supplies plural categories, the likely script and the display name for
+# every language. This file supplies what CLDR does not: the register a
+# translation should default to and how much longer than the source a target
+# may run before the gate's length check fires. A project's
+# `[locales.<id>]` table overrides both per project.
+#
+# Lookup order for a locale id such as `de_AT`: the exact id, then the
+# language (`de`), then the script default, then `fallback`.
+
+[fallback]
+register = "neutral"
+length_warn_ratio = 1.3
+
+# Typical expansion of UI text relative to English, by script.
+[scripts]
+Latn = 1.3
+Cyrl = 1.3
+Grek = 1.3
+Arab = 1.2
+Hebr = 1.1
+Deva = 1.3
+Thai = 1.2
+Hans = 0.6
+Hant = 0.6
+Jpan = 0.7
+Kore = 0.8
+
+[languages.en]
+length_warn_ratio = 1.0
+
+[languages.de]
+register = "formal"
+length_warn_ratio = 1.4
+
+[languages.es]
+register = "formal"
+
+[languages.fr]
+register = "formal"
+
+[languages.it]
+register = "formal"
+
+[languages.pt]
+register = "formal"
+
+[languages.nl]
+register = "formal"
+
+[languages.pl]
+register = "formal"
+
+[languages.cs]
+register = "formal"
+
+[languages.sk]
+register = "formal"
+
+[languages.ru]
+register = "formal"
+
+[languages.uk]
+register = "formal"
