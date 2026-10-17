@@ -53,8 +53,9 @@ pub enum Promotion {
     /// Awaits a human check (status [`UnitStatus::Check`]).
     #[default]
     Review,
-    /// Counts as done when it has no warnings and no errors. For unattended
-    /// runs whose output is delivered as is.
+    /// Counts as done unless it has an error; warnings stay visible but do
+    /// not hold a string back. For unattended runs whose output is
+    /// delivered as is.
     Deliver,
 }
 
@@ -509,8 +510,11 @@ impl Session {
         candidate.state = UnitState::Proposed;
 
         let report = self.catalogs[slot].gate(&candidate, self.project.glossary());
-        let clean = report.findings.is_empty();
-        let deliver = promotion == Promotion::Deliver && clean && !candidate.flags.has_hard();
+        // Delivery holds back only what is broken; a warning is a hint for a
+        // reviewer, not a reason to ship the string unfinished.
+        let deliver = promotion == Promotion::Deliver
+            && !report.flags.has_hard()
+            && !candidate.flags.has_hard();
         if deliver {
             candidate.state = UnitState::Finished;
         }

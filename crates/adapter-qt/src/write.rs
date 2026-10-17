@@ -178,12 +178,22 @@ fn plan_edits_for_unit(
         && promote_to_finished
         && ep.type_attr.is_some();
 
+    // The reverse: a message the file had finished that is now only a
+    // proposal (a machine translation awaiting a check) must carry
+    // `type="unfinished"`, or `lrelease` ships it.
+    let needs_unfinished_mark = ep.type_attr.is_none()
+        && ep.original_state == UnitState::Finished
+        && matches!(
+            candidate.state,
+            UnitState::Proposed | UnitState::Untranslated
+        );
+
     // If the caller passed the unit through unchanged (target identical to
     // what `extract` produced) AND there is no state-only strip to emit,
     // bail out — no edits at all. This is what makes byte-stable round-trip
     // on CDATA or anything else `extract` had to simplify into a plain
     // string actually work: we compare *intent*, not *bytes*.
-    if candidate.target == original.target && !needs_state_strip {
+    if candidate.target == original.target && !needs_state_strip && !needs_unfinished_mark {
         return Ok(());
     }
 
@@ -228,7 +238,27 @@ fn plan_edits_for_unit(
             });
         }
     }
+    if needs_unfinished_mark {
+        edits.push(Edit {
+            start: ep.translation_open_tag.0,
+            end: ep.translation_open_tag.1,
+            replacement: open_tag_with_unfinished(source, ep),
+        });
+    }
     Ok(())
+}
+
+/// `<translation …>` with ` type="unfinished"` right after the element
+/// name, where `lupdate` puts it.
+fn open_tag_with_unfinished(source: &[u8], ep: &EditPoint) -> Vec<u8> {
+    const NAME: &[u8] = b"<translation";
+    let (tag_start, tag_end) = ep.translation_open_tag;
+    let tag = &source[tag_start..tag_end];
+    let mut out = Vec::with_capacity(tag.len() + 18);
+    out.extend_from_slice(&tag[..NAME.len()]);
+    out.extend_from_slice(b" type=\"unfinished\"");
+    out.extend_from_slice(&tag[NAME.len()..]);
+    out
 }
 
 fn rebuild_open_tag_without_type(source: &[u8], ep: &EditPoint, attr: &TypeAttr) -> Vec<u8> {

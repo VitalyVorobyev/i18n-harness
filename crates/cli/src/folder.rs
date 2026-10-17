@@ -34,8 +34,8 @@ pub(crate) struct TranslateFolderArgs {
     /// Server address.
     #[arg(long, default_value = i18n_harness_session::DEFAULT_OLLAMA_HOST)]
     host: String,
-    /// Mark clean translations as done (finished in the file) instead of
-    /// leaving them to check. For output that is delivered as is.
+    /// Mark translations without errors as done (finished in the file)
+    /// instead of leaving them to check. For output that is delivered as is.
     #[arg(long)]
     deliver: bool,
     /// Write the catalogs when the run ends.

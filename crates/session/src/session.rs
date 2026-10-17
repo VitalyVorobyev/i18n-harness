@@ -29,6 +29,9 @@ pub(crate) struct OpenCatalog {
     pub(crate) pivot: Option<&'static Locale>,
     /// Non-empty targets as they were when the catalog was opened.
     pub(crate) existing: HashMap<UnitId, Target>,
+    /// States as they were when the catalog was opened, for strings with
+    /// [`Self::existing`] text.
+    pub(crate) existing_state: HashMap<UnitId, UnitState>,
     pub(crate) dirty: bool,
 }
 
@@ -549,12 +552,9 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
         .as_deref()
         .map(|id| Locale::by_id(id).ok_or_else(|| SessionError::UnknownLocale(id.to_owned())))
         .transpose()?;
-    let existing = doc
-        .units()
-        .iter()
-        .filter(|u| has_target_text(&u.target))
-        .map(|u| (u.id.clone(), u.target.clone()))
-        .collect();
+    let opened = || doc.units().iter().filter(|u| has_target_text(&u.target));
+    let existing = opened().map(|u| (u.id.clone(), u.target.clone())).collect();
+    let existing_state = opened().map(|u| (u.id.clone(), u.state)).collect();
     Ok(OpenCatalog {
         path,
         relative: catalog.manifest_path.clone(),
@@ -562,6 +562,7 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
         locale,
         pivot,
         existing,
+        existing_state,
         dirty: false,
     })
 }
@@ -571,7 +572,12 @@ fn open_catalog(project: &Project, catalog: &CatalogRef) -> Result<OpenCatalog> 
 fn held_back_version(catalog: &OpenCatalog, unit: &Unit) -> Unit {
     let mut original = unit.clone();
     match catalog.existing.get(&unit.id) {
-        Some(target) => original.target = target.clone(),
+        Some(target) => {
+            original.target = target.clone();
+            if let Some(state) = catalog.existing_state.get(&unit.id) {
+                original.state = *state;
+            }
+        }
         None => {
             original.target = match &unit.target {
                 Target::Singular { .. } => Target::Singular { text: None },

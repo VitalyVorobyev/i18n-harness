@@ -507,3 +507,27 @@ fn a_translation_identical_to_the_pivot_text_is_shown_once_recorded() {
     assert_eq!(applied.unit.target, ["Filtergröße"]);
     assert_eq!(applied.unit.status, UnitStatus::Check);
 }
+
+#[test]
+fn a_saved_translation_awaiting_review_is_unfinished_in_a_pivot_file() {
+    let (_dir, mut session, path) = open();
+    session.set_pivot(&path, Some("de_DE")).unwrap();
+    let plan = session.plan(&TranslateScope::default()).unwrap();
+    let (p, id) = plan
+        .iter()
+        .find(|(_, id)| id.0.contains("Filter Size"))
+        .unwrap();
+    let task = session.prepare(p, id, InputText::Auto).unwrap();
+    let backend = ManualBackend::new(|_: &PromptContext<'_>| {
+        ManualResponse::Singular("Veľkosť filtra".into())
+    });
+    let outcome = i18n_harness_session::translate_task(&backend, &task).unwrap();
+    session.apply(&task, outcome, Promotion::Review).unwrap();
+    session.save(None).unwrap();
+
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        written.contains(r#"<translation type="unfinished">Veľkosť filtra</translation>"#),
+        "{written}"
+    );
+}
