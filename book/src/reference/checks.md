@@ -10,8 +10,8 @@ There are two severities:
 
 | Severity | Shown as | Effect |
 |---|---|---|
-| **Error** | red, *Problem* label, counted by **Problems only** | The translation is **not written** to the file. On save, the app keeps the file's previous text for that string (an empty translation if there was none) and reports *Saved, with problems held back*; the translation stays in the app to be fixed. `harness import-batch` and `harness translate` write nothing for a file with any error. |
-| **Warning** | yellow | Saved normally. `harness translate-folder --deliver` marks such translations done like clean ones; `import-batch` leaves them unfinished (to check). |
+| **Error** | red, listed under **Problems** | The translation is **not written** to the file. On save, the app keeps the file's previous text for that string (an empty translation if there was none) and reports *Saved, with problems held back*; the translation stays in the app to be fixed. `harness import-batch` and `harness translate` write nothing for a file with any error. |
+| **Warning** | yellow, listed under **Warnings** | Saved normally. `harness translate-folder --deliver` marks such translations done like clean ones; `import-batch` leaves them unfinished (to check). |
 
 The messages below are those the app shows. For a plural string, a
 message about one form ends with *(form N)*. Placeholders are shown in
@@ -100,10 +100,13 @@ does not count). Counted over all plural forms together.
 and may not fit*
 
 The translation is longer than the original by more than the language's
-length factor (see `length_warn_ratio` in
-[The settings file](settings-file.md#localesid)). Originals shorter than
-8 characters are not checked. For plural strings, the longest form is
-compared with the longest form of the original.
+length factor. Originals shorter than 8 characters are not checked. For
+plural strings, the longest form is compared with the longest form of
+the original.
+
+Both numbers can be changed per language in the app (**Settings** →
+**Checks**) or in the settings file (`length_warn_ratio` and
+`length_warn_min_chars` in [`[locales.<id>]`](settings-file.md#localesid)).
 
 ### Agreement
 

@@ -50,15 +50,38 @@ The middle of the window lists the strings of the selected file:
   - **Done** — confirmed.
 - **Search** finds text in the original, the translation, the context or
   the string's id.
-- **Problems only** shows just the strings whose translation has a
-  problem (see step 5).
+- The list next to the search narrows it further, with counts:
+  - **Everything**;
+  - **Problems**: translations that would break the application
+    (see step 5);
+  - **Warnings**: translations worth a second look, for example ones much
+    longer than the original;
+  - **Translated differently in other files**: the same string has another
+    translation in another file of the folder;
+  - **Also in other files**: strings that occur in more than one file.
 
-The columns are **Original** (the source text, with its context
-underneath) and the target language. For files that arrived filled with
+The columns are **Original** (the source text; hover it to see its
+context) and the target language. For files that arrived filled with
 another language there is also a **From …** column; see
-[Files pre-filled with another language](../tutorials/pivot.md).
+[Files pre-filled with another language](../tutorials/pivot.md). Icons at
+the end of a row mark a problem, a warning, or a string translated
+differently elsewhere. The line under the list counts the strings shown
+and how many of the file's strings occur in no other file.
 
 Click a string to open it in the editor on the right.
+
+### Keyboard
+
+| Keys | Does |
+|---|---|
+| <kbd>Enter</kbd> on a string | Opens it with the cursor in the translation |
+| <kbd>Esc</kbd> in the editor | Back to the list, on the same string |
+| <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd> in the editor | The previous / next string |
+| <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd>) | Done, and on to the next string |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> (<kbd>⌘</kbd>+<kbd>F</kbd>) | The search field |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> (<kbd>⌘</kbd>+<kbd>S</kbd>) | Save |
+
+The line under the list repeats the most useful ones.
 
 ## 3. Choose a model
 
@@ -113,8 +136,8 @@ form and an example number.
 ### Problems
 
 If a translation would break the application, the editor shows the
-problem in red, the string gets a **Problem** label in the list, and
-**Problems only** counts it:
+problem in red, the string gets a red mark in the list, and **Problems** in the list
+next to the search counts it:
 
 ![A translation with a problem](../images/editor-problem.png)
 
@@ -139,10 +162,18 @@ you can fix it and save again.
 
 ## Settings
 
-The gear button in the toolbar opens **Settings**, with two tabs:
+The gear button in the toolbar opens **Settings**, with three tabs:
 
 - **Glossary** — terms to keep unchanged or translate a fixed way; see
   [Keep terms unchanged with a glossary](../tutorials/glossary.md).
+- **Checks** — when a translation counts as too long, for the language
+  of the selected file:
+  - **Warn when a translation is longer than** — a factor of the
+    original's length (1.3 means 30% longer);
+  - **Skip originals shorter than** — short labels are not checked,
+    8 characters by default.
+
+  See [Length](../reference/checks.md#length).
 - **Model server** — which server to use:
 
   ![Model server settings](../images/settings-server.png)

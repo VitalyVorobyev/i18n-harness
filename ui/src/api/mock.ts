@@ -5,6 +5,7 @@
 import type { Api } from "./api";
 import type {
   CatalogSummary,
+  CheckSettings,
   GlossaryEntry,
   ModelChoice,
   ModelSettings,
@@ -12,6 +13,7 @@ import type {
   TranslateScope,
   TranslationEvent,
   UnitFilter,
+  UnitRow,
   UnitStatus,
   UnitView,
 } from "./types";
@@ -118,6 +120,52 @@ export function sampleProject(): MockCatalog[] {
     },
     {
       summary: {
+        path: "/demo/translations/Viewer_sk_SK.ts",
+        name: "Viewer_sk_SK.ts",
+        relative_path: "translations/Viewer_sk_SK.ts",
+        format: "qt-ts",
+        format_name: "Qt Linguist",
+        locale: "sk_SK",
+        language: "Slovak",
+        pivot: null,
+        pivot_language: null,
+      },
+      dirty: false,
+      units: [
+        unit("Settings::Filter Size", "Filter Size", "Veľkosť filtra", "Settings", {
+          status: "done",
+        }),
+        unit("Viewer::Zoom in", "Zoom in", "Priblížiť", "Viewer", { status: "done" }),
+        unit("Viewer::Zoom out", "Zoom out", null, "Viewer"),
+        unit(
+          "Viewer::Fit the image to the window",
+          "Fit the image to the window",
+          "Prispôsobiť veľkosť obrázka tak, aby sa celý zmestil do okna prehliadača",
+          "Viewer",
+          { status: "check", state: "proposed" },
+        ),
+      ],
+    },
+    {
+      summary: {
+        path: "/demo/translations/Report_sk_SK.ts",
+        name: "Report_sk_SK.ts",
+        relative_path: "translations/Report_sk_SK.ts",
+        format: "qt-ts",
+        format_name: "Qt Linguist",
+        locale: "sk_SK",
+        language: "Slovak",
+        pivot: null,
+        pivot_language: null,
+      },
+      dirty: false,
+      units: [
+        unit("Viewer::Zoom in", "Zoom in", "Zväčšiť", "Viewer", { status: "done" }),
+        unit("Report::Print", "Print", null, "Report"),
+      ],
+    },
+    {
+      summary: {
         path: "/demo/po/messages.po",
         name: "messages.po",
         relative_path: "po/messages.po",
@@ -165,12 +213,15 @@ function sameList(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
-function issuesFor(u: MockUnit): UnitView["issues"] {
+const DEFAULT_CHECKS: CheckSettings = { length_ratio: 1.3, length_min_chars: 8 };
+
+function issuesFor(u: MockUnit, pivot: boolean, checks: CheckSettings): UnitView["issues"] {
   const hasText = u.target.some((t) => t !== "");
   const edited = !sameList(u.target, u.original ?? []);
-  if (!hasText || !edited) return [];
+  // As the session does: untouched pivot text is input, not a translation.
+  if (!hasText || (pivot && !edited)) return [];
   const want = placeholders(u.source);
-  return u.target.flatMap((t) => {
+  const errors = u.target.flatMap((t) => {
     const got = placeholders(t);
     if (sameList(got, want)) return [];
     const missing = want.filter((p) => !got.includes(p));
@@ -181,6 +232,18 @@ function issuesFor(u: MockUnit): UnitView["issues"] {
       },
     ];
   });
+  const longest = Math.max(...u.target.map((t) => t.length));
+  const long =
+    u.source.length >= checks.length_min_chars && longest > u.source.length * checks.length_ratio;
+  return long
+    ? [
+        ...errors,
+        {
+          severity: "warning" as const,
+          message: `The translation is much longer than the original (${longest} vs ${u.source.length} characters) and may not fit`,
+        },
+      ]
+    : errors;
 }
 
 function statusFor(u: MockUnit, pivot: boolean): UnitStatus {
@@ -201,6 +264,8 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
     model: null,
     num_ctx: null,
   };
+  const checks = new Map<string, CheckSettings>();
+  const checksFor = (locale: string) => checks.get(locale) ?? DEFAULT_CHECKS;
   let glossary: GlossaryEntry[] = [
     { term: "ParamsManager", keep: true, translation: null, note: "Class name" },
   ];
@@ -245,17 +310,50 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
     const pivot = c.summary.pivot !== null;
     for (const u of c.units) {
       u.status = statusFor(u, pivot);
-      u.issues = issuesFor(u);
+      u.issues = issuesFor(u, pivot, checksFor(c.summary.locale));
     }
+  };
+  // A translation, as the session judges one: text that is not untouched pivot input.
+  const translation = (c: MockCatalog, u: MockUnit): string | null => {
+    if (u.target.every((t) => t === "")) return null;
+    if (c.summary.pivot !== null && sameList(u.target, u.original ?? [])) return null;
+    return u.target.join("\u0000");
+  };
+  // The same string in other files: same language, id and original.
+  const relation = (c: MockCatalog, u: MockUnit) => {
+    const group = (catalogs ?? []).flatMap((other) =>
+      other.summary.locale === c.summary.locale
+        ? other.units
+            .filter((x) => x.id === u.id && x.source === u.source)
+            .map((x) => ({ c: other, u: x }))
+        : [],
+    );
+    const texts = new Set(
+      group.map((m) => translation(m.c, m.u)).filter((t): t is string => t !== null),
+    );
+    return { shared: group.length > 1, inconsistent: group.length > 1 && texts.size > 1 };
   };
   const summary = (c: MockCatalog): CatalogSummary => {
     refresh(c);
-    const counts: StatusCounts = { total: c.units.length, to_do: 0, check: 0, done: 0, errors: 0 };
+    const counts: StatusCounts = {
+      total: c.units.length,
+      to_do: 0,
+      check: 0,
+      done: 0,
+      errors: 0,
+      warnings: 0,
+      inconsistent: 0,
+      only_here: 0,
+    };
     for (const u of c.units) {
       if (u.status === "to-do") counts.to_do += 1;
       if (u.status === "check") counts.check += 1;
       if (u.status === "done") counts.done += 1;
       if (u.issues.some((i) => i.severity === "error")) counts.errors += 1;
+      if (u.issues.some((i) => i.severity === "warning")) counts.warnings += 1;
+      const r = relation(c, u);
+      if (!r.shared) counts.only_here += 1;
+      if (r.inconsistent) counts.inconsistent += 1;
     }
     return { ...c.summary, counts, dirty: c.dirty };
   };
@@ -297,23 +395,60 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       catalogs = null;
     },
     listCatalogs: async () => (catalogs ?? []).map(summary),
-    listUnits: async (path, filter: UnitFilter, offset, limit) => {
-      const c = find(path);
-      refresh(c);
+    listRows: async (path, filter: UnitFilter) => {
+      const scope = path === null ? (catalogs ?? []) : [find(path)];
       const needle = filter.search?.trim().toLowerCase() ?? "";
-      const all = c.units.filter(
-        (u) =>
-          (filter.statuses.length === 0 || filter.statuses.includes(u.status)) &&
-          (!filter.errors_only || u.issues.some((i) => i.severity === "error")) &&
-          (needle === "" ||
-            [u.source, u.id, ...u.target, ...(u.existing ?? []), u.context.group ?? ""].some((t) =>
+      return scope.flatMap((c) => {
+        refresh(c);
+        const pivot = c.summary.pivot !== null;
+        return c.units.flatMap((u): UnitRow[] => {
+          const v = view(u, pivot);
+          const r = relation(c, u);
+          const error = u.issues.some((i) => i.severity === "error");
+          const warning = u.issues.some((i) => i.severity === "warning");
+          const shown = {
+            everything: true,
+            problems: error,
+            warnings: warning,
+            inconsistent: r.inconsistent,
+            shared: r.shared,
+          }[filter.show];
+          const matches =
+            needle === "" ||
+            [u.source, u.id, ...v.target, ...(u.existing ?? []), u.context.group ?? ""].some((t) =>
               t.toLowerCase().includes(needle),
-            )),
-      );
-      return {
-        units: all.slice(offset, offset + limit).map((u) => view(u, c.summary.pivot !== null)),
-        matching: all.length,
-      };
+            );
+          if (
+            !shown ||
+            !matches ||
+            (filter.statuses.length > 0 && !filter.statuses.includes(u.status))
+          ) {
+            return [];
+          }
+          return [
+            {
+              path: c.summary.path,
+              file: c.summary.name,
+              id: u.id,
+              source: u.source,
+              existing: u.existing?.[0] ?? null,
+              target: v.target[0] ?? "",
+              status: u.status,
+              group: u.context.group ?? null,
+              error,
+              warning,
+              ...r,
+            },
+          ];
+        });
+      });
+    },
+    getUnit: async (path, id) => {
+      const c = find(path);
+      const u = c.units.find((x) => x.id === id);
+      if (!u) throw new MockError("unknown-unit", id);
+      refresh(c);
+      return view(u, c.summary.pivot !== null);
     },
     setTranslation: async (path, id, forms, done) => {
       const c = find(path);
@@ -370,6 +505,14 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       { term: "Blob", keep: true, translation: null, note: "Technical term" },
     ],
     planSize: async (scope) => inScope(scope).length,
+    getCheckSettings: async (locale) => checksFor(locale),
+    setCheckSettings: async (locale, next) => {
+      if (!(next.length_ratio > 0)) {
+        throw new MockError("invalid-input", "the length ratio must be a positive number");
+      }
+      checks.set(locale, next);
+      return next;
+    },
     getModelSettings: async () => settings,
     setModelSettings: async (next) => {
       settings = next;

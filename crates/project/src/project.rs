@@ -690,6 +690,12 @@ impl Project {
                         Item::Value(Value::Float(toml_edit::Formatted::new(f64::from(ratio)))),
                     );
                 }
+                if let Some(min) = config.length_warn_min_chars {
+                    locale_table.insert(
+                        "length_warn_min_chars",
+                        Item::Value(Value::Integer(toml_edit::Formatted::new(i64::from(min)))),
+                    );
+                }
             }
         }
 

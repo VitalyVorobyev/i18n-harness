@@ -51,7 +51,8 @@ quantization, and keep **Context size** empty unless you need it.
 (red) and were not written; the file keeps its previous text for them.
 Nothing is lost: the translations are still in the app.
 
-1. Turn on **Problems only** (it shows the number of problems).
+1. Choose **Problems** in the list next to the search (it shows the number
+   of problems).
 2. Fix each string as the message says — usually a placeholder, tag or
    protected term that went missing — or click **Translate again**.
 3. Save again.

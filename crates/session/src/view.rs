@@ -56,6 +56,14 @@ pub struct StatusCounts {
     pub done: usize,
     /// Strings with at least one [`IssueSeverity::Error`].
     pub errors: usize,
+    /// Strings with at least one [`IssueSeverity::Warning`].
+    pub warnings: usize,
+    /// Strings translated differently in another file of the same language
+    /// (same id and original).
+    pub inconsistent: usize,
+    /// Strings whose id and original occur in no other file of the same
+    /// language.
+    pub only_here: usize,
 }
 
 /// One open catalog file.
@@ -122,19 +130,76 @@ pub struct UnitView {
     pub editable: bool,
 }
 
+/// Which strings to list beyond their status.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Show {
+    /// Every string.
+    #[default]
+    Everything,
+    /// Strings with an [`IssueSeverity::Error`].
+    Problems,
+    /// Strings with an [`IssueSeverity::Warning`].
+    Warnings,
+    /// Strings translated differently in another file of the same language.
+    Inconsistent,
+    /// Strings that also occur in another file of the same language.
+    Shared,
+}
+
 /// Which strings to list.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitFilter {
     /// Only these statuses (all when empty).
     #[serde(default)]
     pub statuses: Vec<UnitStatus>,
-    /// Only strings with an [`IssueSeverity::Error`].
+    /// Only strings of this kind.
     #[serde(default)]
-    pub errors_only: bool,
+    pub show: Show,
     /// Case-insensitive text search over source, existing text, translation,
     /// context and id.
     #[serde(default)]
     pub search: Option<String>,
+}
+
+/// One line of a string list: enough to show and filter it. The full
+/// [`UnitView`] of the selected string comes from `Session::unit`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitRow {
+    /// Catalog path (the key for per-catalog calls).
+    pub path: String,
+    /// Catalog file name, for a list over several files.
+    pub file: String,
+    /// Stable id within the catalog.
+    pub id: String,
+    /// Original text, first form.
+    pub source: String,
+    /// The text the catalog held when opened, first form.
+    pub existing: Option<String>,
+    /// Current translation, first form (empty: none yet).
+    pub target: String,
+    /// Translator status.
+    pub status: UnitStatus,
+    /// Context group (Qt context, gettext msgctxt).
+    pub group: Option<String>,
+    /// The translation has an [`IssueSeverity::Error`].
+    pub error: bool,
+    /// The translation has an [`IssueSeverity::Warning`].
+    pub warning: bool,
+    /// The string also occurs in another file of the same language.
+    pub shared: bool,
+    /// Another file of the same language translates it differently.
+    pub inconsistent: bool,
+}
+
+/// The settings of the checks that a project can tune, per target language.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CheckSettings {
+    /// Warn when a translation is more than this many times as long as its
+    /// original.
+    pub length_ratio: f32,
+    /// Originals shorter than this many characters are not length-checked.
+    pub length_min_chars: u32,
 }
 
 /// A page of [`UnitView`]s.

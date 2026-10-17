@@ -72,6 +72,7 @@ fn update_locale_preserves_comments_and_root_forward_compat_table() {
                     register: Some(RegisterOverride::Neutral),
                     variant: None,
                     length_warn_ratio: None,
+                    length_warn_min_chars: None,
                 },
             )
             .expect("update_locale");
@@ -317,6 +318,7 @@ fn manifest_view_reflects_changes_immediately_without_save() {
                 register: Some(RegisterOverride::Neutral),
                 variant: None,
                 length_warn_ratio: None,
+                length_warn_min_chars: None,
             },
         )
         .expect("update_locale");

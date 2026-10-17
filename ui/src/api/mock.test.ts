@@ -4,7 +4,7 @@ import type { TranslationEvent } from "./types";
 import { createMockApi } from "./mock";
 
 const QT = "/demo/translations/App_sk_SK.ts";
-const filter = { statuses: [], errors_only: false, search: null };
+const filter = { statuses: [], show: "everything" as const, search: null };
 
 // The mock stands in for the session in dev mode and e2e, so it must follow
 // the same rules the UI relies on.
@@ -12,8 +12,8 @@ describe("mock backend", () => {
   it("treats untouched pivot text as input, not as a translation", async () => {
     const api = createMockApi();
     await api.openFolder("/demo");
-    const page = await api.listUnits(QT, filter, 0, 100);
-    const unit = page.units.find((u) => u.source === "Filter Size");
+    const row = (await api.listRows(QT, filter)).find((r) => r.source === "Filter Size");
+    const unit = await api.getUnit(QT, row?.id ?? "");
     expect(unit?.existing).toEqual(["Filtergröße"]);
     expect(unit?.target).toEqual([""]);
     expect(unit?.status).toBe("to-do");
@@ -56,11 +56,37 @@ describe("mock backend", () => {
   it("flags a translation that loses a placeholder", async () => {
     const api = createMockApi();
     await api.openFolder("/demo");
-    const unit = (await api.listUnits(QT, filter, 0, 100)).units.find((u) =>
-      u.source.includes("%1"),
-    );
+    const unit = (await api.listRows(QT, filter)).find((r) => r.source.includes("%1"));
     const edited = await api.setTranslation(QT, unit?.id ?? "", ["bez zástupného symbolu"], false);
     expect(edited.issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("strings across files", () => {
+  it("lists every file's strings and marks shared and inconsistent ones", async () => {
+    const api = createMockApi();
+    await api.openFolder("/demo");
+    const all = await api.listRows(null, filter);
+    expect(new Set(all.map((r) => r.file)).size).toBe(4);
+    const inconsistent = await api.listRows(null, { ...filter, show: "inconsistent" });
+    expect(inconsistent.map((r) => [r.file, r.target])).toEqual([
+      ["Viewer_sk_SK.ts", "Priblížiť"],
+      ["Report_sk_SK.ts", "Zväčšiť"],
+    ]);
+    const viewer = (await api.listCatalogs()).find((c) => c.name === "Viewer_sk_SK.ts");
+    expect(viewer?.counts.inconsistent).toBe(1);
+    // Filter Size is shared with App_sk_SK.ts; Zoom in with Report_sk_SK.ts.
+    expect(viewer?.counts.only_here).toBe(2);
+  });
+
+  it("warns about long translations as the check settings say", async () => {
+    const api = createMockApi();
+    await api.openFolder("/demo");
+    const viewer = "/demo/translations/Viewer_sk_SK.ts";
+    const warned = () => api.listRows(viewer, { ...filter, show: "warnings" });
+    expect((await warned()).map((r) => r.source)).toEqual(["Fit the image to the window"]);
+    await api.setCheckSettings("sk_SK", { length_ratio: 3, length_min_chars: 8 });
+    expect(await warned()).toEqual([]);
   });
 });
 

@@ -318,9 +318,9 @@ fn length_warn_check(
     }
     // At very short lengths a single extra character swings the ratio by
     // 25–50%, producing false positives for trivially correct translations
-    // (e.g. "Red" → "Rojo" = 1.33×, "Test" → "Probar" = 1.5×). Ratio
-    // noise dominates meaning below 8 source characters, so skip the check.
-    if source_chars < 8 {
+    // (e.g. "Red" → "Rojo" = 1.33×, "Test" → "Probar" = 1.5×), so short
+    // originals are skipped (8 characters unless the project says otherwise).
+    if source_chars < locale.length_warn_min_chars {
         return;
     }
     // Each plural form stands alone in the interface; compare the longest

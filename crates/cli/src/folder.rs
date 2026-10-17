@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use i18n_harness_session::{
     CancelToken, InputText, IssueSeverity, ModelSettings, Progress, Promotion, ServerKind, Session,
-    TranslateScope, UnitFilter, UnitStatus,
+    Show, TranslateScope, UnitFilter, UnitStatus,
 };
 
 #[derive(Parser, Debug)]
@@ -186,7 +186,7 @@ pub(crate) fn translate_folder(args: TranslateFolderArgs) -> Result<()> {
 fn print_problems(session: &Session) -> Result<()> {
     let filter = UnitFilter {
         statuses: vec![UnitStatus::Check, UnitStatus::Done],
-        errors_only: true,
+        show: Show::Problems,
         search: None,
     };
     let mut any = false;

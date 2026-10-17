@@ -1,6 +1,6 @@
 import { Badge, Button, Callout, Empty, Field, Kbd, Textarea } from "@vitavision/ui";
 import { Check, Languages, Undo2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CatalogSummary, UnitView } from "../api";
 import { STATUS_LABEL } from "../lib/format";
@@ -14,11 +14,24 @@ export function Editor(props: {
   unit: UnitView | null;
   canTranslate: boolean;
   busy: boolean;
+  /** Take keyboard focus when shown (the string was chosen from the keyboard). */
+  autoFocus: boolean;
   onSave: (forms: string[], done: boolean) => void;
   onTranslate: () => void;
+  /** Esc: back to the list. */
+  onLeave: () => void;
+  /** Alt+↑ / Alt+↓: the previous or next string. */
+  onStep: (step: 1 | -1) => void;
 }) {
   const { unit } = props;
   const [draft, setDraft] = useState<string[]>(() => unit?.target ?? []);
+  const first = useRef<HTMLTextAreaElement>(null);
+  const shown = unit !== null;
+  const { autoFocus } = props;
+
+  useEffect(() => {
+    if (shown && autoFocus) first.current?.focus();
+  }, [shown, autoFocus]);
 
   if (unit === null) {
     return (
@@ -37,6 +50,12 @@ export function Editor(props: {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && complete) {
       e.preventDefault();
       done();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      props.onLeave();
+    } else if (e.altKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      props.onStep(e.key === "ArrowDown" ? 1 : -1);
     }
   };
 
@@ -103,9 +122,11 @@ export function Editor(props: {
               return (
                 <Field key={slot?.category ?? `form-${String(i)}`} label={label}>
                   <Textarea
-                    className="font-sans text-base"
+                    ref={i === 0 ? first : undefined}
+                    className="text-base"
                     value={text}
-                    rows={plural ? 2 : 3}
+                    minRows={plural ? 1 : 2}
+                    maxRows={10}
                     disabled={!unit.editable || props.busy}
                     onChange={(e) => {
                       const next = [...draft];
