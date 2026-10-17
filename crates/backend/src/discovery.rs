@@ -195,7 +195,7 @@ mod ollama_server {
             Self {
                 host: host.into(),
                 api_key: None,
-                timeout: Duration::from_secs(10),
+                timeout: Duration::from_secs(30),
             }
         }
 
@@ -206,8 +206,8 @@ mod ollama_server {
             self
         }
 
-        /// Request timeout (default 10 s; discovery calls are local and
-        /// small).
+        /// Request timeout (default 30 s: discovery calls are small, but a
+        /// server busy loading a large model answers slowly).
         #[must_use]
         pub fn with_timeout(mut self, timeout: Duration) -> Self {
             self.timeout = timeout;
@@ -343,7 +343,7 @@ mod openai_server {
             Self {
                 base_url: base_url.into(),
                 api_key: None,
-                timeout: Duration::from_secs(10),
+                timeout: Duration::from_secs(30),
             }
         }
 
@@ -354,7 +354,7 @@ mod openai_server {
             self
         }
 
-        /// Request timeout (default 10 s).
+        /// Request timeout (default 30 s).
         #[must_use]
         pub fn with_timeout(mut self, timeout: Duration) -> Self {
             self.timeout = timeout;

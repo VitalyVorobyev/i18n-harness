@@ -100,6 +100,7 @@ impl ModelBackend {
             .as_deref()
             .map(|s| self.profile.render(s, request));
         let stop = self.profile.stop_for(text);
+        let max_tokens = output_token_limit(text);
         let o = &self.profile.options;
         let key = self.api_key.as_deref();
         let backend = self.name();
@@ -123,6 +124,7 @@ impl ModelBackend {
                 if let Some(n) = self.num_ctx {
                     opts.insert("num_ctx".into(), n.into());
                 }
+                opts.insert("num_predict".into(), max_tokens.into());
                 if !stop.is_empty() {
                     opts.insert("stop".into(), json!(stop));
                 }
@@ -173,6 +175,7 @@ impl ModelBackend {
                     }
                 };
                 body["temperature"] = json!(o.temperature);
+                body["max_tokens"] = json!(max_tokens);
                 if let Some(seed) = o.seed {
                     body["seed"] = json!(seed);
                 }
@@ -198,6 +201,14 @@ impl ModelBackend {
             }
         }
     }
+}
+
+/// Most tokens a translation of `text` may take. A model that loops would
+/// otherwise generate until the request times out; a UI translation is never
+/// many times longer than its original.
+fn output_token_limit(text: &str) -> u32 {
+    let chars = u32::try_from(text.chars().count()).unwrap_or(u32::MAX);
+    chars.saturating_mul(2).saturating_add(64)
 }
 
 fn protocol(backend: &str, message: &str) -> BackendError {

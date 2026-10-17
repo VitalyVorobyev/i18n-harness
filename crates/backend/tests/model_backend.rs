@@ -62,6 +62,8 @@ fn completion_profile_sends_the_raw_prompt_to_generate() {
     assert_eq!(body["options"]["temperature"], 0.0);
     assert_eq!(body["options"]["top_k"], 1);
     assert_eq!(body["options"]["stop"], serde_json::json!(["\n"]));
+    // "Filtergröße" is 11 characters: 2 × 11 + 64.
+    assert_eq!(body["options"]["num_predict"], 86);
 }
 
 #[test]

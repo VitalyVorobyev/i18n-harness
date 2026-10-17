@@ -313,100 +313,20 @@ fn bench(args: &BenchArgs) -> Result<()> {
     let mut outputs: Vec<Output> = Vec::new();
     let mut summaries = Vec::new();
     for spec in &args.configs {
-        let (model, input) = parse_config(spec)?;
-        let config = format!(
-            "{}@{}",
-            short_model(&model),
-            if input == InputText::Auto {
-                "auto"
-            } else {
-                "source"
+        match run_config(args, spec, &work, &items) {
+            Ok((mine, summary)) => {
+                summaries.push(summary);
+                outputs.extend(mine);
             }
-        );
-        let mut session = open_work(&work, args.pivot.as_deref())?;
-        let settings = ModelSettings {
-            server: ServerKind::Ollama,
-            host: args.host.clone(),
-            model: Some(model.clone()),
-            num_ctx: None,
-        };
-        let backend = i18n_harness_session::backend(&settings)?;
-        // Load the model before timing anything.
-        if let Some(first) = items.first() {
-            let task = session.prepare(
-                Path::new(&first.catalog),
-                &UnitId::from(first.id.as_str()),
-                input,
-            )?;
-            i18n_harness_session::translate_task(backend.as_ref(), &task)?;
+            Err(error) => eprintln!("{spec}: skipped: {error:#}"),
         }
-        let mut mine = Vec::new();
-        for item in &items {
-            let path = PathBuf::from(&item.catalog);
-            let task = session.prepare(&path, &UnitId::from(item.id.as_str()), input)?;
-            let started = Instant::now();
-            let outcome = i18n_harness_session::translate_task(backend.as_ref(), &task)?;
-            let seconds = started.elapsed().as_secs_f64();
-            let applied = session.apply(&task, outcome, Promotion::Review)?;
-            let pick = |sev: IssueSeverity| {
-                applied
-                    .unit
-                    .issues
-                    .iter()
-                    .filter(|i| i.severity == sev)
-                    .map(|i| i.message.clone())
-                    .collect::<Vec<_>>()
-            };
-            mine.push(Output {
-                config: config.clone(),
-                row: item.row,
-                input_locale: task.input_locale.clone(),
-                output: if applied.translated {
-                    applied.unit.target.clone()
-                } else {
-                    Vec::new()
-                },
-                errors: pick(IssueSeverity::Error),
-                warnings: pick(IssueSeverity::Warning),
-                failure: applied.failure,
-                seconds,
-            });
-        }
-        let mut times: Vec<f64> = mine.iter().map(|o| o.seconds).collect();
-        times.sort_by(f64::total_cmp);
-        let summary = ConfigSummary {
-            config: config.clone(),
-            model: model.clone(),
-            input: if input == InputText::Auto {
-                "auto".into()
-            } else {
-                "source".into()
-            },
-            strings: mine.len(),
-            translated: mine.iter().filter(|o| o.failure.is_none()).count(),
-            failed: mine.iter().filter(|o| o.failure.is_some()).count(),
-            with_errors: mine.iter().filter(|o| !o.errors.is_empty()).count(),
-            with_warnings: mine.iter().filter(|o| !o.warnings.is_empty()).count(),
-            median_seconds: times.get(times.len() / 2).copied().unwrap_or(0.0),
-            total_seconds: times.iter().sum(),
-        };
-        eprintln!(
-            "{config}: {}/{} translated, {} with errors, {} with warnings, median {:.2}s",
-            summary.translated,
-            summary.strings,
-            summary.with_errors,
-            summary.with_warnings,
-            summary.median_seconds
-        );
-        summaries.push(summary);
-        outputs.extend(mine);
+        // Keep what is finished even if a later configuration fails.
+        write_jsonl(&args.out.join("outputs.jsonl"), &outputs)?;
+        std::fs::write(
+            args.out.join("summary.json"),
+            serde_json::to_string_pretty(&summaries)?,
+        )?;
     }
-
-    write_jsonl(&args.out.join("outputs.jsonl"), &outputs)?;
-    std::fs::write(
-        args.out.join("summary.json"),
-        serde_json::to_string_pretty(&summaries)?,
-    )?;
     write_judging(&args.out, &items, &outputs, &summaries, args.seed)?;
     std::fs::write(
         args.out.join("report.html"),
@@ -415,6 +335,101 @@ fn bench(args: &BenchArgs) -> Result<()> {
     std::fs::remove_dir_all(&work).ok();
     eprintln!("wrote {}", args.out.display());
     Ok(())
+}
+
+/// Translate the sample with one configuration on a fresh session.
+fn run_config(
+    args: &BenchArgs,
+    spec: &str,
+    work: &Path,
+    items: &[Item],
+) -> Result<(Vec<Output>, ConfigSummary)> {
+    let (model, input) = parse_config(spec)?;
+    let config = format!(
+        "{}@{}",
+        short_model(&model),
+        if input == InputText::Auto {
+            "auto"
+        } else {
+            "source"
+        }
+    );
+    let mut session = open_work(work, args.pivot.as_deref())?;
+    let settings = ModelSettings {
+        server: ServerKind::Ollama,
+        host: args.host.clone(),
+        model: Some(model.clone()),
+        num_ctx: None,
+    };
+    let backend = i18n_harness_session::backend(&settings)?;
+    // Load the model before timing anything.
+    if let Some(first) = items.first() {
+        let task = session.prepare(
+            Path::new(&first.catalog),
+            &UnitId::from(first.id.as_str()),
+            input,
+        )?;
+        i18n_harness_session::translate_task(backend.as_ref(), &task)?;
+    }
+    let mut mine = Vec::new();
+    for item in items {
+        let path = PathBuf::from(&item.catalog);
+        let task = session.prepare(&path, &UnitId::from(item.id.as_str()), input)?;
+        let started = Instant::now();
+        let outcome = i18n_harness_session::translate_task(backend.as_ref(), &task)?;
+        let seconds = started.elapsed().as_secs_f64();
+        let applied = session.apply(&task, outcome, Promotion::Review)?;
+        let pick = |sev: IssueSeverity| {
+            applied
+                .unit
+                .issues
+                .iter()
+                .filter(|i| i.severity == sev)
+                .map(|i| i.message.clone())
+                .collect::<Vec<_>>()
+        };
+        mine.push(Output {
+            config: config.clone(),
+            row: item.row,
+            input_locale: task.input_locale.clone(),
+            output: if applied.translated {
+                applied.unit.target.clone()
+            } else {
+                Vec::new()
+            },
+            errors: pick(IssueSeverity::Error),
+            warnings: pick(IssueSeverity::Warning),
+            failure: applied.failure,
+            seconds,
+        });
+    }
+    let mut times: Vec<f64> = mine.iter().map(|o| o.seconds).collect();
+    times.sort_by(f64::total_cmp);
+    let summary = ConfigSummary {
+        config: config.clone(),
+        model: model.clone(),
+        input: if input == InputText::Auto {
+            "auto".into()
+        } else {
+            "source".into()
+        },
+        strings: mine.len(),
+        translated: mine.iter().filter(|o| o.failure.is_none()).count(),
+        failed: mine.iter().filter(|o| o.failure.is_some()).count(),
+        with_errors: mine.iter().filter(|o| !o.errors.is_empty()).count(),
+        with_warnings: mine.iter().filter(|o| !o.warnings.is_empty()).count(),
+        median_seconds: times.get(times.len() / 2).copied().unwrap_or(0.0),
+        total_seconds: times.iter().sum(),
+    };
+    eprintln!(
+        "{config}: {}/{} translated, {} with errors, {} with warnings, median {:.2}s",
+        summary.translated,
+        summary.strings,
+        summary.with_errors,
+        summary.with_warnings,
+        summary.median_seconds
+    );
+    Ok((mine, summary))
 }
 
 fn write_jsonl<T: Serialize>(path: &Path, rows: &[T]) -> Result<()> {
