@@ -9,7 +9,7 @@ import {
   Tabs,
   toast,
 } from "@vitavision/ui";
-import { Plus, Trash2 } from "lucide-react";
+import { FileUp, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { GlossaryEntry, ModelSettings, ServerKind } from "../api";
@@ -41,6 +41,40 @@ export function SettingsDialog(props: {
   const [settings, setSettings] = useState<ModelSettings>(props.settings);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Imported rows go into the draft; Save writes them like any edit.
+  const importTable = async () => {
+    try {
+      const path = await api.pickTable();
+      if (path === null) return;
+      const imported = await api.readGlossaryTable(path);
+      let added = 0;
+      let updated = 0;
+      const next = [...entries];
+      for (const entry of imported) {
+        const i = next.findIndex((e) => e.term === entry.term);
+        if (i >= 0) {
+          next[i] = { ...entry, rowId: next[i]!.rowId };
+          updated += 1;
+        } else {
+          next.push(withId(entry));
+          added += 1;
+        }
+      }
+      setEntries(next);
+      toast({
+        tone: "success",
+        title: `${plural(added, "term", "terms")} added, ${updated} updated`,
+        description: "Save the settings to keep them.",
+      });
+    } catch (error) {
+      toast({
+        tone: "error",
+        title: "Could not import the terms",
+        description: errorMessage(error),
+      });
+    }
+  };
 
   const update = (rowId: number, patch: Partial<GlossaryEntry>) =>
     setEntries(entries.map((e) => (e.rowId === rowId ? { ...e, ...patch } : e)));
@@ -172,18 +206,31 @@ export function SettingsDialog(props: {
             </table>
             {entries.length === 0 && <p className="p-3 text-sm text-fg-subtle">No terms yet.</p>}
           </div>
-          <Button
-            variant="secondary"
-            icon={<Plus aria-hidden size={16} />}
-            onClick={() =>
-              setEntries([
-                ...entries,
-                withId({ term: "", keep: true, translation: null, note: null }),
-              ])
-            }
-          >
-            Add term
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              icon={<Plus aria-hidden size={16} />}
+              onClick={() =>
+                setEntries([
+                  ...entries,
+                  withId({ term: "", keep: true, translation: null, note: null }),
+                ])
+              }
+            >
+              Add term
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<FileUp aria-hidden size={16} />}
+              onClick={() => void importTable()}
+            >
+              Import from a spreadsheet…
+            </Button>
+            <span className="text-xs text-fg-subtle">
+              CSV or tab-separated: term, {props.language} translation, note. No translation keeps
+              the term unchanged.
+            </span>
+          </div>
         </div>
       )}
 

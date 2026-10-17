@@ -63,6 +63,10 @@ pub enum SessionError {
     #[error("cancelled")]
     Cancelled,
 
+    /// Input the user supplied cannot be used (a malformed term table).
+    #[error("{0}")]
+    InvalidInput(String),
+
     /// Any other file-system failure.
     #[error("{context}: {source}")]
     Io {
@@ -88,6 +92,7 @@ impl SessionError {
             Self::NeedsModel => "needs-model",
             Self::Backend(_) => "backend",
             Self::Cancelled => "cancelled",
+            Self::InvalidInput(_) => "invalid-input",
             Self::Io { .. } => "io",
         }
     }

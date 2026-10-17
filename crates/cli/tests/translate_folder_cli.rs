@@ -110,3 +110,29 @@ fn translates_a_pivot_folder_and_delivers_finished_files() {
     assert!(written.contains("<location filename=\"../src/settings.cpp\" line=\"+29\"/>"));
     assert!(dir.path().join("i18n-harness.toml").is_file());
 }
+
+#[test]
+fn import_glossary_writes_the_folders_glossary_from_a_spreadsheet_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/qt/sk_SK_pivot.ts");
+    std::fs::copy(fixture, dir.path().join("App_sk_SK.ts")).unwrap();
+    let table = dir.path().join("terms.csv");
+    std::fs::write(
+        &table,
+        "Term;Translation;Note\nThreshold;Prahová hodnota;\nBlob;;keep\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_harness"))
+        .args(["import-glossary", "--language", "sk_SK"])
+        .arg(dir.path())
+        .arg(&table)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(stderr.contains("2 term(s) added, 0 updated"), "{stderr}");
+    let glossary = std::fs::read_to_string(dir.path().join("glossary.toml")).unwrap();
+    assert!(glossary.contains("Prahová hodnota"), "{glossary}");
+    assert!(glossary.contains("source = \"Blob\""), "{glossary}");
+}

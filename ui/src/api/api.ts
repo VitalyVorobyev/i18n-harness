@@ -32,6 +32,12 @@ export interface Api {
   setPivot(path: string, pivot: string | null): Promise<CatalogSummary>;
   getGlossary(locale: string): Promise<GlossaryEntry[]>;
   setGlossary(locale: string, entries: GlossaryEntry[]): Promise<GlossaryEntry[]>;
+  /** Ask the user for a term table (CSV or tab separated); `null` when they cancel. */
+  pickTable(): Promise<string | null>;
+  /** The terms of a table file, for the glossary editor to merge. */
+  readGlossaryTable(path: string): Promise<GlossaryEntry[]>;
+  /** How many strings a run over `scope` would cover. */
+  planSize(scope: TranslateScope): Promise<number>;
   getModelSettings(): Promise<ModelSettings>;
   setModelSettings(settings: ModelSettings): Promise<ModelSettings>;
   listModels(settings: ModelSettings): Promise<ModelChoice[]>;

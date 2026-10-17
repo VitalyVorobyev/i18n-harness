@@ -10,6 +10,15 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Result, SessionError};
 use crate::session::Session;
 
+/// What [`Session::import_glossary`] changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct GlossaryImport {
+    /// Terms the glossary did not have.
+    pub added: usize,
+    /// Terms it had, now replaced by the imported row.
+    pub updated: usize,
+}
+
 /// Default file name of a glossary the harness creates.
 const GLOSSARY_FILE: &str = "glossary.toml";
 
@@ -117,5 +126,157 @@ impl Session {
         let (project, _) = Project::open(self.root())?;
         self.project = project;
         Ok(())
+    }
+}
+
+impl Session {
+    /// Merge a term table into the glossary for `locale`: rows of
+    /// `term, translation, note`, as a spreadsheet saves them (comma,
+    /// semicolon or tab separated, quotes allowed; a header row starting
+    /// `term`, `source` or `original` is skipped). A row without a
+    /// translation, or with the term itself as translation, keeps the term
+    /// unchanged. Imported rows replace existing terms of the same text.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::InvalidInput`] for a malformed table; failures
+    /// writing the glossary.
+    pub fn import_glossary(&mut self, locale: &str, table: &str) -> Result<GlossaryImport> {
+        let mut entries = self.glossary(locale);
+        let mut summary = GlossaryImport::default();
+        for entry in glossary_table_entries(table)? {
+            match entries.iter_mut().find(|e| e.term == entry.term) {
+                Some(existing) => {
+                    *existing = entry;
+                    summary.updated += 1;
+                }
+                None => {
+                    entries.push(entry);
+                    summary.added += 1;
+                }
+            }
+        }
+        self.set_glossary(locale, entries)?;
+        Ok(summary)
+    }
+}
+
+/// The glossary entries of a term table, in the shape
+/// [`Session::import_glossary`] reads, without touching any glossary.
+///
+/// # Errors
+///
+/// [`SessionError::InvalidInput`] for a malformed table.
+pub fn glossary_table_entries(table: &str) -> Result<Vec<GlossaryEntry>> {
+    let rows = parse_table(table).map_err(SessionError::InvalidInput)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let mut cells = row.into_iter().map(|c| c.trim().to_owned());
+            let term = cells.next().filter(|t| !t.is_empty())?;
+            let translation = cells.next().filter(|t| !t.is_empty() && *t != term);
+            let note = cells.next().filter(|n| !n.is_empty());
+            Some(GlossaryEntry {
+                keep: translation.is_none(),
+                term,
+                translation,
+                note,
+            })
+        })
+        .collect())
+}
+
+/// Rows of a delimited table. The delimiter is whichever of tab, semicolon
+/// and comma occurs most in the first lines (a first row may have a single
+/// column).
+fn parse_table(text: &str) -> std::result::Result<Vec<Vec<String>>, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let head: String = text.lines().take(20).collect();
+    let delimiter = ['\t', ';', ',']
+        .into_iter()
+        .max_by_key(|d| head.matches(*d).count())
+        .filter(|d| head.contains(*d))
+        .unwrap_or(',');
+
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut cell = String::new();
+    let mut quoted = false;
+    let mut chars = text.chars().peekable();
+    let mut line = 1;
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                chars.next();
+                cell.push('"');
+            }
+            '"' if quoted => quoted = false,
+            '"' if cell.trim().is_empty() => {
+                cell.clear();
+                quoted = true;
+            }
+            '\n' if !quoted => {
+                row.push(std::mem::take(&mut cell).trim_end_matches('\r').to_owned());
+                rows.push(std::mem::take(&mut row));
+                line += 1;
+            }
+            c if c == delimiter && !quoted => row.push(std::mem::take(&mut cell)),
+            c => {
+                if c == '\n' {
+                    line += 1;
+                }
+                cell.push(c);
+            }
+        }
+    }
+    if quoted {
+        return Err(format!("line {line}: a quoted cell is not closed"));
+    }
+    if !cell.is_empty() || !row.is_empty() {
+        row.push(cell);
+        rows.push(row);
+    }
+    rows.retain(|r| r.iter().any(|c| !c.trim().is_empty()));
+    let header = rows.first().and_then(|r| r.first()).is_some_and(|c| {
+        matches!(
+            c.trim().to_lowercase().as_str(),
+            "term" | "source" | "original"
+        )
+    });
+    if header {
+        rows.remove(0);
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_table;
+
+    #[test]
+    fn reads_what_spreadsheets_save() {
+        let rows = parse_table(
+            "Term;Translation;Note\r\nThreshold;Prahová hodnota;\r\n\"Blob\";;keep\r\n\"Open, then close\";\"Otvoriť, potom \"\"zavrieť\"\"\";\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            rows,
+            [
+                vec!["Threshold", "Prahová hodnota", ""],
+                vec!["Blob", "", "keep"],
+                vec!["Open, then close", "Otvoriť, potom \"zavrieť\"", ""],
+            ]
+        );
+    }
+
+    #[test]
+    fn tab_separated_without_header() {
+        let rows = parse_table("ADS\nThreshold\tPrahová hodnota").unwrap();
+        assert_eq!(rows, [vec!["ADS"], vec!["Threshold", "Prahová hodnota"]]);
+    }
+
+    #[test]
+    fn an_unclosed_quote_is_an_error() {
+        assert!(parse_table("\"Threshold;x\n").is_err());
     }
 }

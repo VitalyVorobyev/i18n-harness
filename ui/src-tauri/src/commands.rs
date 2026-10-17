@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use i18n_harness_locales::Locale;
 use i18n_harness_session::{
-    CatalogSummary, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session, UnitFilter,
-    UnitPage, UnitView,
+    CatalogSummary, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session, SessionError,
+    TranslateScope, UnitFilter, UnitPage, UnitView,
 };
 use serde::Serialize;
 
@@ -156,6 +156,26 @@ pub(crate) fn set_glossary(
         s.set_glossary(&locale, entries)?;
         Ok(s.glossary(&locale))
     })
+}
+
+/// The terms of a table file (CSV or tab separated), for the glossary
+/// editor to merge into its draft.
+#[tauri::command]
+pub(crate) fn read_glossary_table(path: PathBuf) -> CommandResult<Vec<GlossaryEntry>> {
+    let table = std::fs::read_to_string(&path).map_err(|source| SessionError::Io {
+        context: format!("cannot read {}", path.display()),
+        source,
+    })?;
+    Ok(i18n_harness_session::glossary_table_entries(&table)?)
+}
+
+/// How many strings a translation run over `scope` would cover.
+#[tauri::command]
+pub(crate) fn plan_size(
+    scope: TranslateScope,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<usize> {
+    state.with(|s| Ok(s.plan(&scope)?.len()))
 }
 
 #[tauri::command]

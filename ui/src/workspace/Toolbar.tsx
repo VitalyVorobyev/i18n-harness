@@ -13,10 +13,13 @@ export function Toolbar(props: {
   onModelChange: (id: string) => void;
   toDoInFile: number;
   toDoInFolder: number;
+  /** Translated strings that break the glossary. */
+  glossaryIssues: number;
   running: boolean;
   dirty: boolean;
   onTranslateFile: () => void;
   onTranslateFolder: () => void;
+  onApplyGlossary: () => void;
   onSave: () => void;
   onSettings: () => void;
   onClose: () => void;
@@ -81,6 +84,11 @@ export function Toolbar(props: {
         >
           <MenuItem disabled={props.toDoInFolder === 0} onSelect={props.onTranslateFolder}>
             Translate all files ({props.toDoInFolder.toLocaleString()} to do)
+          </MenuItem>
+          <MenuItem disabled={props.glossaryIssues === 0} onSelect={props.onApplyGlossary}>
+            {props.glossaryIssues > 0
+              ? `Apply the glossary (${plural(props.glossaryIssues, "string breaks", "strings break")} it)`
+              : "Every translation follows the glossary"}
           </MenuItem>
         </DropdownMenu>
       </div>

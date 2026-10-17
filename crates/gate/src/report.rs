@@ -158,6 +158,8 @@ pub enum FindingDetail {
     /// A "keep unchanged" glossary term from the source is missing from (or
     /// repeated in) the target.
     ProtectedTermMismatch(ProtectedTermMismatchDetail),
+    /// See [`Flag::TermTranslationMissing`].
+    TermTranslationMissing(TermTranslationMissingDetail),
 
     /// The translation backend returned a response the strict parser
     /// could not validate (unknown flag kind, confidence out of range,
@@ -275,6 +277,17 @@ pub struct ProtectedTermMismatchDetail {
     pub source_count: u32,
     /// Occurrences in the target slot.
     pub target_count: u32,
+}
+
+/// Detail for [`Flag::TermTranslationMissing`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermTranslationMissingDetail {
+    /// Which target slot lacks the required translation.
+    pub slot: u32,
+    /// The glossary term found in the source.
+    pub term: String,
+    /// The translation the glossary requires for the target language.
+    pub expected: String,
 }
 
 /// Detail for [`Flag::MarkupTagMismatch`].

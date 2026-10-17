@@ -31,6 +31,7 @@ use crate::report::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
     IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
     PlaceholderMismatchDetail, PluralArityMismatchDetail, ProtectedTermMismatchDetail,
+    TermTranslationMissingDetail,
 };
 
 /// Entry point used by [`crate::validate`].
@@ -66,6 +67,7 @@ pub(crate) fn run(unit: &Unit, ctx: &GateContext<'_>) -> GateReport {
     placeholder_agreement_check(locale, &target_slots, &mut findings);
     markup_tag_check(unit, &target_slots, &mut findings);
     protected_term_check(unit, ctx, &target_slots, &mut findings);
+    term_translation_check(unit, ctx, &target_slots, &mut findings);
 
     GateReport::from_findings(unit.id.clone(), findings)
 }
@@ -583,6 +585,72 @@ fn protected_term_check(
             }
         }
     }
+}
+
+/// Every glossary term with a required translation into the target language
+/// that occurs in the source must have that translation in each target slot.
+/// Case-insensitive, and each word of the required translation may take an
+/// inflected ending (`súbor` matches `súboru`), so inflecting languages do
+/// not warn on correct text.
+fn term_translation_check(
+    unit: &Unit,
+    ctx: &GateContext<'_>,
+    slots: &[TargetSlot<'_>],
+    findings: &mut Vec<Finding>,
+) {
+    let Some(glossary) = ctx.glossary else {
+        return;
+    };
+    let source = unit.source.to_lowercase();
+    for (term, entry) in glossary.terms() {
+        if entry.do_not_translate {
+            continue;
+        }
+        let Some(expected) = entry
+            .translations
+            .get(ctx.locale.id)
+            .or_else(|| entry.translations.get(ctx.locale.language))
+        else {
+            continue;
+        };
+        if expected.trim().is_empty() || count_word(&source, &term.to_lowercase()) == 0 {
+            continue;
+        }
+        for slot in slots {
+            if !contains_inflected(slot.text, expected) {
+                findings.push(Finding {
+                    flag: Flag::TermTranslationMissing,
+                    detail: FindingDetail::TermTranslationMissing(TermTranslationMissingDetail {
+                        slot: slot.slot,
+                        term: term.to_owned(),
+                        expected: expected.clone(),
+                    }),
+                });
+            }
+        }
+    }
+}
+
+/// Whether `text` contains `phrase` word by word, each word allowed a
+/// different ending of up to two letters when it is longer than four.
+fn contains_inflected(text: &str, phrase: &str) -> bool {
+    let words: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    phrase
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .all(|word| {
+            let word = word.to_lowercase();
+            let chars = word.chars().count();
+            let stem: String = word
+                .chars()
+                .take(chars - chars.saturating_sub(4).min(2))
+                .collect();
+            words.iter().any(|w| w.starts_with(&stem))
+        })
 }
 
 /// Occurrences of `word` in `text` not glued to other letters or digits.

@@ -23,7 +23,10 @@ describe("mock backend", () => {
     const api = createMockApi();
     await api.openFolder("/demo");
     await expect(
-      api.startTranslation({ catalogs: [QT], statuses: [], ids: null }, "auto"),
+      api.startTranslation(
+        { catalogs: [QT], statuses: [], ids: null, glossary_issues: false },
+        "auto",
+      ),
     ).rejects.toMatchObject({ kind: "needs-model" });
   });
 
@@ -39,7 +42,10 @@ describe("mock backend", () => {
         if (e.progress.event === "finished") resolve();
       });
     });
-    const total = await api.startTranslation({ catalogs: [QT], statuses: [], ids: null }, "auto");
+    const total = await api.startTranslation(
+      { catalogs: [QT], statuses: [], ids: null, glossary_issues: false },
+      "auto",
+    );
     await finished;
     expect(events[0]?.progress).toEqual({ event: "started", total });
     const [summary] = (await api.listCatalogs()).filter((c) => c.path === QT);
@@ -55,5 +61,40 @@ describe("mock backend", () => {
     );
     const edited = await api.setTranslation(QT, unit?.id ?? "", ["bez zástupného symbolu"], false);
     expect(edited.issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("glossary added later", () => {
+  it("counts the translations that break it and applies it to them", async () => {
+    const api = createMockApi({ delayMs: 0 });
+    await api.openFolder("/demo");
+    const settings = await api.getModelSettings();
+    await api.setModelSettings({ ...settings, model: "milmmt-46-4b:q8" });
+    const run = async (glossary_issues: boolean) => {
+      const finished = new Promise<void>((resolve) => {
+        void api.onTranslation((e) => {
+          if (e.progress.event === "finished") resolve();
+        });
+      });
+      const total = await api.startTranslation(
+        { catalogs: [], statuses: [], ids: null, glossary_issues },
+        "source",
+      );
+      await finished;
+      return total;
+    };
+    await run(false);
+    const scope = { catalogs: [], statuses: [], ids: null, glossary_issues: true };
+    expect(await api.planSize(scope)).toBe(0);
+
+    const terms = await api.readGlossaryTable("/demo/terms.csv");
+    await api.setGlossary("sk_SK", [
+      ...(await api.getGlossary("sk_SK")),
+      { term: "Filter Size", keep: false, translation: "Veľkosť filtra", note: null },
+      ...terms,
+    ]);
+    expect(await api.planSize(scope)).toBe(1);
+    expect(await run(true)).toBe(1);
+    expect(await api.planSize(scope)).toBe(0);
   });
 });

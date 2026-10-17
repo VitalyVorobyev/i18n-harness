@@ -58,6 +58,10 @@ pub enum Flag {
     /// CJK full-width punctuation is present in a place where the source
     /// used ASCII punctuation; tolerated by the gate but flagged for review.
     CjkPunctuationTolerated,
+    /// A glossary term with a required translation occurs in the source,
+    /// but the translation does not use it. A warning, not an error:
+    /// inflection can hide a correct use from a text match.
+    TermTranslationMissing,
     /// A placeholder substitutes for a noun whose case/gender cannot be
     /// resolved at translation time (German `den`/`dem`/`der`, Spanish
     /// `el`/`la`). Cannot be checked, but worth a human glance.
@@ -126,6 +130,7 @@ impl Flag {
             Self::AccelMismatch
             | Self::LengthWarn
             | Self::CjkPunctuationTolerated
+            | Self::TermTranslationMissing
             | Self::PlaceholderAgreementRisk => FlagSeverity::Soft,
             Self::AmbiguousSource
             | Self::Idiom
@@ -216,6 +221,7 @@ mod tests {
             Flag::AccelMismatch,
             Flag::LengthWarn,
             Flag::CjkPunctuationTolerated,
+            Flag::TermTranslationMissing,
             Flag::PlaceholderAgreementRisk,
             Flag::MarkupTagMismatch,
             Flag::BackendMalformedResponse,

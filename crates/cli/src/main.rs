@@ -13,6 +13,7 @@
 //!   result through the manual backend.
 
 mod folder;
+mod glossary_import;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -113,6 +114,11 @@ enum Command {
     /// Translate every string still to do in a folder of catalogs with a
     /// model, through the same session the desktop app uses.
     TranslateFolder(folder::TranslateFolderArgs),
+
+    /// Merge a term table (`term, translation, note` rows, as a spreadsheet
+    /// saves them) into a folder's glossary. Rows without a translation keep
+    /// the term unchanged.
+    ImportGlossary(glossary_import::ImportGlossaryArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -367,6 +373,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::SplitRemainder(args) => split_remainder(args),
         Command::Merge(args) => merge(args),
         Command::TranslateFolder(args) => folder::translate_folder(args),
+        Command::ImportGlossary(args) => glossary_import::import_glossary_table(args),
     }
 }
 
@@ -566,6 +573,10 @@ fn render_detail(f: &Finding) -> String {
             "slot {}: keep-unchanged term {:?} appears {} time(s) in source, {} in target",
             d.slot, d.term, d.source_count, d.target_count
         ),
+        FindingDetail::TermTranslationMissing(d) => format!(
+            "slot {}: term {:?} should be translated as {:?}",
+            d.slot, d.term, d.expected
+        ),
     }
 }
 
@@ -581,6 +592,7 @@ fn flag_name(flag: Flag) -> &'static str {
         Flag::AccelMismatch => "accel-mismatch",
         Flag::LengthWarn => "length-warn",
         Flag::CjkPunctuationTolerated => "cjk-punctuation-tolerated",
+        Flag::TermTranslationMissing => "term-translation-missing",
         Flag::PlaceholderAgreementRisk => "placeholder-agreement-risk",
         Flag::AmbiguousSource => "ambiguous-source",
         Flag::Idiom => "idiom",

@@ -106,6 +106,8 @@ export interface TranslateScope {
   catalogs: string[];
   statuses: UnitStatus[];
   ids: string[] | null;
+  /** Only translations that break the glossary, whatever their status. */
+  glossary_issues: boolean;
 }
 
 export type Progress =

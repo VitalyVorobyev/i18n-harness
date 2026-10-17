@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use i18n_harness_backend::{TranslatedText, TranslationBackend, TranslationOutcome};
-use i18n_harness_core::{Batch, BatchKey, FlagSet, ReviewStatus, Target, Unit, UnitId, UnitState};
+use i18n_harness_core::{
+    Batch, BatchKey, Flag, FlagSet, ReviewStatus, Target, Unit, UnitId, UnitState,
+};
+use i18n_harness_gate::GateReport;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
 use serde::{Deserialize, Serialize};
@@ -32,6 +35,12 @@ pub struct TranslateScope {
     /// Only these string ids (every matching string when `None`).
     #[serde(default)]
     pub ids: Option<Vec<String>>,
+    /// Only translations that break the glossary: a "keep unchanged" term
+    /// changed, or a required term translation not used. Covers every
+    /// status unless [`Self::statuses`] narrows it; for applying a
+    /// glossary to strings translated before it existed.
+    #[serde(default)]
+    pub glossary_issues: bool,
 }
 
 /// What text the model translates from.
@@ -323,11 +332,12 @@ impl Session {
     ///
     /// [`SessionError::UnknownCatalog`] for a catalog not open.
     pub fn plan(&self, scope: &TranslateScope) -> Result<Vec<(PathBuf, UnitId)>> {
-        let statuses = if scope.statuses.is_empty() {
-            vec![UnitStatus::ToDo]
-        } else {
-            scope.statuses.clone()
+        let statuses = match (scope.statuses.is_empty(), scope.glossary_issues) {
+            (false, _) => scope.statuses.clone(),
+            (true, false) => vec![UnitStatus::ToDo],
+            (true, true) => vec![UnitStatus::ToDo, UnitStatus::Check, UnitStatus::Done],
         };
+        let glossary = self.project().glossary();
         for path in &scope.catalogs {
             self.catalog(path)?;
         }
@@ -342,6 +352,12 @@ impl Session {
                 }
                 if let Some(ids) = &scope.ids
                     && !ids.contains(&unit.id.0)
+                {
+                    continue;
+                }
+                if scope.glossary_issues
+                    && !(catalog.is_translation(unit)
+                        && breaks_glossary(&catalog.gate(unit, glossary)))
                 {
                     continue;
                 }
@@ -596,6 +612,12 @@ impl Session {
         });
         Ok(())
     }
+}
+
+/// Whether a check found the glossary broken.
+fn breaks_glossary(report: &GateReport) -> bool {
+    report.flags.contains(Flag::ProtectedTermMismatch)
+        || report.flags.contains(Flag::TermTranslationMissing)
 }
 
 /// The placeholder that carries a plural message's count, in ICU form:
