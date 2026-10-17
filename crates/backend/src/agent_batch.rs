@@ -594,7 +594,7 @@ mod tests {
         let mut f = fs::File::create(&targets_path).unwrap();
         for unit in &batch.units {
             let line = if unit.plural_arity.is_some() {
-                let arity = locale.plural_arity() as usize;
+                let arity = locale.plural_slot_count() as usize;
                 let texts: Vec<String> = (0..arity).map(|_| unit.source.clone()).collect();
                 let texts_json = serde_json::to_string(&texts).unwrap();
                 format!(

@@ -1550,6 +1550,10 @@ dependencies = [
 [[package]]
 name = "i18n-harness-locales"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml 0.9.12+spec-1.1.0",
+]
 
 [[package]]
 name = "i18n-harness-project"
@@ -5171,6 +5175,14 @@ dependencies = [
  "libc",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
 ]
 
 [[package]]

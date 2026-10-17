@@ -311,11 +311,14 @@ impl OllamaBackend {
         locale: &Locale,
         ctx: &PromptContext<'_>,
     ) -> Result<TranslationOutcome, BackendError> {
-        let mut forms: Vec<String> = Vec::with_capacity(locale.cldr_plural.len());
+        let mut forms: Vec<String> = Vec::with_capacity(locale.integer_plural_forms.len());
         let mut merged_flags: Vec<Flag> = Vec::new();
         let mut merged_notes: BTreeMap<Flag, String> = BTreeMap::new();
         let mut min_confidence: Option<f32> = None;
-        for category in locale.cldr_plural {
+        // One form per slot of the per-language plural table the catalog
+        // uses (Qt, gettext), not per CLDR category: `many` for fractions
+        // (Slovak) or for 1,000,000 (Spanish) has no slot there.
+        for (category, _) in locale.integer_plural_forms {
             // Re-render the prompt for each form so the template's
             // `{plural_category_line_or_empty}` token resolves to the
             // current CLDR category. The rest of the context is constant

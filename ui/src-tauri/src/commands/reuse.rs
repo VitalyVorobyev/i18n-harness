@@ -25,7 +25,7 @@ use crate::error;
 use crate::services::reuse as svc;
 use crate::state::{AppState, OpenCatalogEntry};
 
-/// Resolve the base catalog's locale (a `&'static Locale`) and an owned glossary
+/// Resolve the base catalog's effective locale and an owned glossary
 /// clone for a reuse pass (plus the catalog's format), holding the project lock only briefly.
 ///
 /// Mirrors the locale-merge in `resolve_project_translate_context` but without
@@ -34,7 +34,7 @@ use crate::state::{AppState, OpenCatalogEntry};
 fn resolve_reuse_context(
     state: &tauri::State<'_, AppState>,
     abs: &std::path::Path,
-) -> Result<(&'static Locale, Option<Glossary>, FormatId), String> {
+) -> Result<(Locale, Option<Glossary>, FormatId), String> {
     let project_guard = state
         .project
         .lock()
@@ -49,8 +49,8 @@ fn resolve_reuse_context(
 
     let locale = project
         .locale(&locale_id)
-        .map(|r| r.workspace_locale())
-        .or_else(|| Locale::by_id(&locale_id))
+        .map(|r| r.effective_locale())
+        .or_else(|| Locale::by_id(&locale_id).copied())
         .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
 
     let glossary = project.glossary().cloned();
@@ -124,7 +124,7 @@ pub(crate) fn reuse_references_in_project(
         ));
     }
 
-    reuse_and_persist(&state, &abs, &reference_abs, locale, glossary.as_ref())
+    reuse_and_persist(&state, &abs, &reference_abs, &locale, glossary.as_ref())
 }
 
 /// Run the reuse pass for one catalog, refresh its in-memory entry, and persist
@@ -139,7 +139,7 @@ fn reuse_and_persist(
     state: &tauri::State<'_, AppState>,
     abs: &std::path::Path,
     reference_abs: &[PathBuf],
-    locale: &'static Locale,
+    locale: &Locale,
     glossary: Option<&Glossary>,
 ) -> Result<ReuseReportDto, String> {
     // 3. Run the reuse pass + write-back with NO locks held.
@@ -281,7 +281,7 @@ pub(crate) fn reuse_all_references(
             skipped.push(manifest_path);
             continue;
         }
-        let report = reuse_and_persist(&state, &abs, &reference_abs, locale, glossary.as_ref())?;
+        let report = reuse_and_persist(&state, &abs, &reference_abs, &locale, glossary.as_ref())?;
         applied.push(report);
     }
 

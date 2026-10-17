@@ -28,9 +28,10 @@ use i18n_harness_core::{
 use i18n_harness_formats::{FormatDoc, FormatRegistry};
 use i18n_harness_gate::metrics::{FileSink, MetricsWriter};
 use i18n_harness_gate::{
-    AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
-    IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail, PlaceholderAgreementDetail,
-    PlaceholderMismatchDetail, PluralArityMismatchDetail, validate_batch,
+    AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateContext,
+    GateReport, IcuParseDetail, LengthWarnDetail, MarkupTagMismatchDetail,
+    PlaceholderAgreementDetail, PlaceholderMismatchDetail, PluralArityMismatchDetail,
+    validate_batch_with,
 };
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
@@ -419,7 +420,14 @@ fn gate(args: GateArgs) -> Result<()> {
     let catalog =
         open_catalog(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
     let units = catalog.units();
-    let reports = validate_batch(units, locale, None);
+    let reports = validate_batch_with(
+        units,
+        &GateContext {
+            locale,
+            glossary: None,
+            plural_forms: catalog.plural_forms(),
+        },
+    );
 
     let writer = args
         .metrics
@@ -645,7 +653,14 @@ fn translate(args: TranslateArgs) -> Result<()> {
         // Gate validates everything we attempted (even Skipped / Failed
         // outcomes which kept the unit untranslated — those should not
         // produce gate findings since target is None/empty per its state).
-        let reports = validate_batch(&merged, locale, glossary.as_ref());
+        let reports = validate_batch_with(
+            &merged,
+            &GateContext {
+                locale,
+                glossary: glossary.as_ref(),
+                plural_forms: catalog.plural_forms(),
+            },
+        );
 
         for (unit, report) in merged.into_iter().zip(reports) {
             if let Some(w) = writer.as_ref()
@@ -1185,7 +1200,14 @@ fn import_batch_single(
         .map(|(unit, outcome)| merge_outcome(unit, outcome, &mut summary))
         .collect();
 
-    let reports = validate_batch(&merged, locale, None);
+    let reports = validate_batch_with(
+        &merged,
+        &GateContext {
+            locale,
+            glossary: None,
+            plural_forms: catalog.plural_forms(),
+        },
+    );
 
     let mut translated_units: Vec<Unit> = Vec::with_capacity(merged.len());
     for (unit, report) in merged.into_iter().zip(reports) {
@@ -1417,7 +1439,14 @@ fn import_batch_project(
             .map(|(unit, outcome)| merge_outcome(unit, outcome, &mut summary))
             .collect();
 
-        let reports = validate_batch(&merged, locale, None);
+        let reports = validate_batch_with(
+            &merged,
+            &GateContext {
+                locale,
+                glossary: None,
+                plural_forms: catalog.plural_forms(),
+            },
+        );
 
         let mut translated_units: Vec<Unit> = Vec::with_capacity(merged.len());
         for (unit, report) in merged.into_iter().zip(reports) {

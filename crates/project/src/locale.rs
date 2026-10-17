@@ -144,6 +144,17 @@ impl ResolvedLocale {
         self.effective_length_warn_ratio
     }
 
+    /// The locale record with this project's overrides (register, variant,
+    /// length ratio) applied — what the gate and the prompt should use.
+    pub fn effective_locale(&self) -> Locale {
+        Locale {
+            register: self.effective_register,
+            variant: self.effective_variant,
+            length_warn_ratio: self.effective_length_warn_ratio,
+            ..*self.workspace
+        }
+    }
+
     /// Borrow the underlying workspace [`Locale`] for callers that accept
     /// `&Locale` (the gate today takes `&Locale`).
     ///

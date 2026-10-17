@@ -23,9 +23,9 @@
 //! the parse error.
 
 use i18n_harness_core::{Flag, Target, Unit, UnitState};
-use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::{Locale, Register, Script};
 
+use crate::GateContext;
 use crate::icu::{Message, parse, placeholder_multiset};
 use crate::report::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
@@ -34,7 +34,8 @@ use crate::report::{
 };
 
 /// Entry point used by [`crate::validate`].
-pub(crate) fn run(unit: &Unit, locale: &Locale, _glossary: Option<&Glossary>) -> GateReport {
+pub(crate) fn run(unit: &Unit, ctx: &GateContext<'_>) -> GateReport {
+    let locale = ctx.locale;
     let mut findings: Vec<Finding> = Vec::new();
 
     // Source ICU parse: best-effort. The source is the reference; if the
@@ -45,7 +46,7 @@ pub(crate) fn run(unit: &Unit, locale: &Locale, _glossary: Option<&Glossary>) ->
 
     let target_slots = collect_target_slots(unit);
 
-    arity_check(unit, locale, &mut findings);
+    arity_check(unit, ctx, &mut findings);
     let parsed_targets = parse_targets(&target_slots, &mut findings);
 
     if let Some(source) = source_msg.as_ref() {
@@ -117,11 +118,15 @@ fn parse_targets(slots: &[TargetSlot<'_>], findings: &mut Vec<Finding>) -> Vec<P
 
 // ── Hard checks ───────────────────────────────────────────────────────────
 
-fn arity_check(unit: &Unit, locale: &Locale, findings: &mut Vec<Finding>) {
+fn arity_check(unit: &Unit, ctx: &GateContext<'_>, findings: &mut Vec<Finding>) {
     if unit.plural_arity.is_none() {
         return;
     }
-    let expected = locale.plural_arity();
+    // Plural targets live in per-file form tables (Qt, gettext), which can
+    // hold fewer forms than the locale has CLDR categories.
+    let expected = ctx
+        .plural_forms
+        .unwrap_or_else(|| ctx.locale.plural_slot_count());
     match &unit.target {
         Target::Plural { forms } => {
             let found = forms.len() as u32;
