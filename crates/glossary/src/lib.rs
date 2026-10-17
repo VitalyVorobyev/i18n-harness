@@ -177,6 +177,17 @@ impl Glossary {
         schema::serialize(self).map_err(|e| GlossaryError::Serialize(e.to_string()))
     }
 
+    /// Add a term, or replace the term with the same source. Returns the
+    /// replaced term.
+    pub fn insert_term(&mut self, source: impl Into<String>, term: Term) -> Option<Term> {
+        self.terms.insert(source.into(), term)
+    }
+
+    /// Remove the term with this source. Returns it if it existed.
+    pub fn remove_term(&mut self, source: &str) -> Option<Term> {
+        self.terms.remove(source)
+    }
+
     /// Look up a term by its source. Returns `None` if not present.
     pub fn term(&self, source: &str) -> Option<&Term> {
         self.terms.get(source)
@@ -333,5 +344,45 @@ variant = "es_419"
         assert_eq!(g.register_for("es_ES"), None);
         assert_eq!(g.variant_for("es_ES"), Some("es_419"));
         assert_eq!(g.variant_for("fr_FR"), None);
+    }
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+
+    #[test]
+    fn inserted_terms_round_trip_through_toml() {
+        let mut g = Glossary::empty();
+        g.insert_term(
+            "ParamsManager",
+            Term {
+                do_not_translate: true,
+                notes: None,
+                translations: Default::default(),
+            },
+        );
+        let mut translations = std::collections::BTreeMap::new();
+        translations.insert("sk_SK".to_owned(), "Uložiť".to_owned());
+        g.insert_term(
+            "Save",
+            Term {
+                do_not_translate: false,
+                notes: Some("verb".into()),
+                translations,
+            },
+        );
+        let (back, _) = Glossary::from_toml(&g.to_toml().unwrap()).unwrap();
+        assert_eq!(
+            back.do_not_translate().collect::<Vec<_>>(),
+            ["ParamsManager"]
+        );
+        assert_eq!(
+            back.terms_for("sk_SK").collect::<Vec<_>>(),
+            [("Save", "Uložiť")]
+        );
+        let mut back = back;
+        assert!(back.remove_term("Save").is_some());
+        assert_eq!(back.len(), 1);
     }
 }

@@ -345,3 +345,51 @@ fn done_survives_a_restart_through_the_review_store() {
     let reopened = Session::open_folder(session.root()).unwrap();
     assert!(ids_with(&reopened, &path, UnitStatus::Done).contains(&id));
 }
+
+#[test]
+fn glossary_edits_create_the_file_and_reach_the_model() {
+    let (dir, mut session, path) = open();
+    assert!(session.glossary("sk_SK").is_empty());
+    session
+        .set_glossary(
+            "sk_SK",
+            vec![
+                i18n_harness_session::GlossaryEntry {
+                    term: "ParamsManager".into(),
+                    keep: true,
+                    translation: None,
+                    note: Some("class name".into()),
+                },
+                i18n_harness_session::GlossaryEntry {
+                    term: "Filter".into(),
+                    keep: false,
+                    translation: Some("Filter".into()),
+                    note: None,
+                },
+            ],
+        )
+        .unwrap();
+    assert!(dir.path().join("glossary.toml").is_file());
+    let entries = session.glossary("sk_SK");
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().any(|e| e.term == "ParamsManager" && e.keep));
+
+    // The model sees the glossary.
+    let seen = Mutex::new(Vec::new());
+    let backend = ManualBackend::new(|ctx: &PromptContext<'_>| {
+        let dnt: Vec<String> = ctx
+            .glossary
+            .map(|g| g.do_not_translate().map(str::to_owned).collect())
+            .unwrap_or_default();
+        seen.lock().unwrap().push(dnt);
+        ManualResponse::Skip
+    });
+    let plan = session.plan(&TranslateScope::default()).unwrap();
+    let task = session.prepare(&path, &plan[0].1, InputText::Auto).unwrap();
+    i18n_harness_session::translate_task(&backend, &task).unwrap();
+    assert_eq!(seen.lock().unwrap()[0], ["ParamsManager"]);
+
+    // Removing a term from the list removes it from the file.
+    session.set_glossary("sk_SK", Vec::new()).unwrap();
+    assert!(session.glossary("sk_SK").is_empty());
+}
