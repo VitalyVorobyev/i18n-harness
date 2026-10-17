@@ -44,6 +44,9 @@ pub enum Flag {
     /// required target slot is `None`. The harness must not ship a
     /// "finished" unit with missing text.
     EmptyTargetWhenFinished,
+    /// A glossary term marked "keep unchanged" that occurs in the source
+    /// does not occur as often in the target.
+    ProtectedTermMismatch,
 
     // ── Soft (gate) ────────────────────────────────────────────────────────
     /// The accelerator marker (`&`) is present in the source but not in the
@@ -59,10 +62,10 @@ pub enum Flag {
     /// resolved at translation time (German `den`/`dem`/`der`, Spanish
     /// `el`/`la`). Cannot be checked, but worth a human glance.
     PlaceholderAgreementRisk,
-    /// HTML/markup tags present in the source were dropped, reordered,
-    /// added, or differently-named in the target. The gate compares
-    /// `<tag>` / `</tag>` multisets, treating tag NAMES as opaque and
-    /// ignoring attribute differences.
+    /// HTML/markup tags present in the source were dropped, added, or
+    /// changed in the target. The gate compares the multisets of tags,
+    /// names and attributes. Hard: markup the application renders must
+    /// survive translation unchanged.
     MarkupTagMismatch,
     /// The translation backend returned a response we could not parse
     /// against the strict v2 contract (unknown flag kind, confidence out
@@ -117,12 +120,13 @@ impl Flag {
             | Self::PluralArityMismatch
             | Self::IcuParseError
             | Self::EmptyTargetWhenFinished
+            | Self::ProtectedTermMismatch
+            | Self::MarkupTagMismatch
             | Self::BackendMalformedResponse => FlagSeverity::Hard,
             Self::AccelMismatch
             | Self::LengthWarn
             | Self::CjkPunctuationTolerated
-            | Self::PlaceholderAgreementRisk
-            | Self::MarkupTagMismatch => FlagSeverity::Soft,
+            | Self::PlaceholderAgreementRisk => FlagSeverity::Soft,
             Self::AmbiguousSource
             | Self::Idiom
             | Self::InsufficientContext
@@ -208,6 +212,7 @@ mod tests {
             Flag::PluralArityMismatch,
             Flag::IcuParseError,
             Flag::EmptyTargetWhenFinished,
+            Flag::ProtectedTermMismatch,
             Flag::AccelMismatch,
             Flag::LengthWarn,
             Flag::CjkPunctuationTolerated,

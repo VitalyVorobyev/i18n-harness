@@ -266,6 +266,7 @@ fn flag_rule_name(flag: Flag) -> &'static str {
         Flag::PluralArityMismatch => "plural-arity-mismatch",
         Flag::IcuParseError => "icu-parse-error",
         Flag::EmptyTargetWhenFinished => "empty-target-when-finished",
+        Flag::ProtectedTermMismatch => "protected-term-mismatch",
         Flag::AccelMismatch => "accel-mismatch",
         Flag::LengthWarn => "length-warn",
         Flag::CjkPunctuationTolerated => "cjk-punctuation-tolerated",

@@ -555,6 +555,10 @@ fn render_detail(f: &Finding) -> String {
         FindingDetail::BackendMalformedResponse(detail) => {
             format!("backend response could not be parsed: {}", detail.reason)
         }
+        FindingDetail::ProtectedTermMismatch(d) => format!(
+            "slot {}: keep-unchanged term {:?} appears {} time(s) in source, {} in target",
+            d.slot, d.term, d.source_count, d.target_count
+        ),
     }
 }
 
@@ -566,6 +570,7 @@ fn flag_name(flag: Flag) -> &'static str {
         Flag::PluralArityMismatch => "plural-arity-mismatch",
         Flag::IcuParseError => "icu-parse-error",
         Flag::EmptyTargetWhenFinished => "empty-target-when-finished",
+        Flag::ProtectedTermMismatch => "protected-term-mismatch",
         Flag::AccelMismatch => "accel-mismatch",
         Flag::LengthWarn => "length-warn",
         Flag::CjkPunctuationTolerated => "cjk-punctuation-tolerated",
