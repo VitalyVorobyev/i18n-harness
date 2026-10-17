@@ -1,0 +1,22 @@
+{
+  "Hello, {name}!": {
+    "message": "Hello, {name}!",
+    "translation": "Hallo, {name}!",
+    "origin": [["src/App.tsx", 12]]
+  },
+  "inbox.count": {
+    "message": "{count, plural, one {You have # message} other {You have # messages}}",
+    "translation": "{count, plural, one {Sie haben # Nachricht} other {Sie haben # Nachrichten}}",
+    "comments": ["Unread messages in the header"],
+    "origin": [["src/Inbox.tsx", 30]]
+  },
+  "Uploaded {percent}%": {
+    "message": "Uploaded {percent}%",
+    "translation": "",
+    "origin": [["src/Upload.tsx", 8]]
+  },
+  "header.title": {
+    "translation": "Willkommen",
+    "origin": [["src/Header.tsx", 5]]
+  }
+}

@@ -32,7 +32,7 @@ use crate::catalog::Catalog;
 use crate::error::{CatalogError, PlaceholderError};
 use crate::format::{CatalogFormat, FormatDoc, SniffHit};
 
-mod parse;
+pub(crate) mod parse;
 pub(crate) mod placeholder;
 mod sniff;
 pub(crate) mod write;
@@ -100,6 +100,46 @@ impl IcuJsonFormat {
         out: &Path,
     ) -> Result<(), CatalogError> {
         catalog.write(units, out)
+    }
+}
+
+/// Lingui's JSON catalog format (`lingui.config` `format: "json"` with the
+/// default `style: "lingui"`): an object of entries `{"message", "translation",
+/// "origin", …}`. Only `translation` values are written. Lingui's "minimal"
+/// JSON style is a flat id → translation map and reads as [`IcuJsonFormat`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LinguiJsonFormat;
+
+/// The shared instance [`FormatDoc::format`] hands out for Lingui JSON documents.
+pub(crate) static LINGUI_JSON_FORMAT: LinguiJsonFormat = LinguiJsonFormat;
+
+impl CatalogFormat for LinguiJsonFormat {
+    fn id(&self) -> &'static str {
+        "lingui-json"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Lingui (JSON)"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["json"]
+    }
+
+    fn sniff(&self, _path: &Path, head: &[u8]) -> Option<SniffHit> {
+        sniff::sniff_lingui(head)
+    }
+
+    fn open(&self, path: &Path) -> Result<Box<dyn FormatDoc>, CatalogError> {
+        Ok(Box::new(parse::extract_lingui(path)?))
+    }
+
+    fn placeholders_to_icu(&self, native: &str) -> Result<String, PlaceholderError> {
+        placeholder::to_icu(native)
+    }
+
+    fn placeholders_from_icu(&self, icu: &str) -> Result<String, PlaceholderError> {
+        placeholder::from_icu(icu)
     }
 }
 

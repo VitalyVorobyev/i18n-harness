@@ -60,6 +60,9 @@ use crate::error::CatalogError;
 pub(crate) struct ExtractStateIcuJson {
     /// In-order per-unit edit records, parallel to `Catalog::units`.
     pub(crate) units: Vec<UnitEditState>,
+    /// Lingui's JSON catalog shape (`{id: {message, translation, …}}`)
+    /// rather than a flat key → message map.
+    pub(crate) lingui: bool,
 }
 
 /// One leaf string's byte layout in the source file.
@@ -179,7 +182,99 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
         language: None,
         source_bytes: bytes,
         units,
-        extract_state: ExtractState::IcuJson(ExtractStateIcuJson { units: edit_states }),
+        extract_state: ExtractState::IcuJson(ExtractStateIcuJson {
+            units: edit_states,
+            lingui: false,
+        }),
+    })
+}
+
+/// Read a Lingui JSON catalog (`{"<id>": {"message": "…", "translation":
+/// "…", "origin": […]}}`): one unit per entry, its source the `message` (the
+/// id itself when there is none), its target the `translation`, which is the
+/// only value ever rewritten.
+pub(crate) fn extract_lingui(path: &Path) -> Result<Catalog, CatalogError> {
+    let bytes = fs::read(path).map_err(|source| CatalogError::Io {
+        op: "read",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| CatalogError::Parse {
+        path: path.to_path_buf(),
+        reason: format!("file is not valid UTF-8: {e}"),
+    })?;
+    let leaves = Parser::new(text)
+        .run()
+        .map_err(|reason| CatalogError::Parse {
+            path: path.to_path_buf(),
+            reason,
+        })?;
+
+    // Leaves arrive in document order as `<id>.message`, `<id>.translation`,
+    // `<id>.comments.0`, … Ids may themselves contain dots, so split on the
+    // last one.
+    let mut messages: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for leaf in &leaves {
+        if let Some(id) = leaf.path.strip_suffix(".message") {
+            messages.insert(id.to_owned(), leaf.value.clone());
+        }
+    }
+    let mut units = Vec::new();
+    let mut edit_states = Vec::new();
+    for leaf in leaves {
+        let Some(id) = leaf.path.strip_suffix(".translation") else {
+            continue;
+        };
+        let source = messages.get(id).cloned().unwrap_or_else(|| id.to_owned());
+        let source_icu = to_icu(&source).map_err(CatalogError::PlaceholderConversion)?;
+        let target_icu = to_icu(&leaf.value).map_err(CatalogError::PlaceholderConversion)?;
+        let state = if target_icu.is_empty() {
+            UnitState::Untranslated
+        } else {
+            UnitState::Finished
+        };
+        let unit = Unit {
+            id: UnitId::from(id.to_owned()),
+            source_hash: Some(compute_source_hash(&source_icu, "", "", false)),
+            source: source_icu,
+            target: Target::Singular {
+                text: (!target_icu.is_empty()).then_some(target_icu),
+            },
+            placeholders: Vec::new(),
+            plural_arity: None,
+            flags: Default::default(),
+            provenance: Provenance {
+                file: path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_owned(),
+                line: Some(leaf.line),
+                byte_offset: Some(leaf.value_range.0 as u32),
+            },
+            context: Default::default(),
+            state,
+            review_status: None,
+            source_changed_since_review: false,
+            confidence: None,
+            flag_notes: Default::default(),
+        };
+        edit_states.push(UnitEditState {
+            value_range: leaf.value_range,
+            original_value: leaf.value,
+        });
+        units.push(unit);
+    }
+
+    Ok(Catalog {
+        source_path: path.to_path_buf(),
+        language: None,
+        source_bytes: bytes,
+        units,
+        extract_state: ExtractState::IcuJson(ExtractStateIcuJson {
+            units: edit_states,
+            lingui: true,
+        }),
     })
 }
 

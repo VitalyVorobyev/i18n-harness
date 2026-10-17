@@ -135,6 +135,7 @@ impl FormatDoc for Catalog {
                 crate::po::PoDialect::Gettext => &crate::po::PO_FORMAT,
                 crate::po::PoDialect::Lingui => &crate::po::LINGUI_PO_FORMAT,
             },
+            ExtractState::IcuJson(state) if state.lingui => &crate::icu_json::LINGUI_JSON_FORMAT,
             ExtractState::IcuJson(_) => &crate::icu_json::ICU_JSON_FORMAT,
         }
     }
