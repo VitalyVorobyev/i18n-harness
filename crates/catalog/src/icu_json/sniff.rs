@@ -77,6 +77,22 @@ pub(crate) fn sniff(head: &[u8]) -> Option<SniffHit> {
     })
 }
 
+/// Recognize Lingui's JSON catalog: an object whose entries are objects with
+/// a `translation` (and usually `message` / `origin`) key.
+pub(crate) fn sniff_lingui(head: &[u8]) -> Option<SniffHit> {
+    let text = utf8_prefix(strip_bom(head));
+    let entries = top_level_entries(text)?;
+    let lingui = entries
+        .iter()
+        .filter(|(_, v)| v.as_object().is_some_and(|o| o.contains_key("translation")))
+        .count();
+    (lingui > 0 && lingui * 2 >= entries.len()).then(|| SniffHit {
+        confidence: Confidence::High,
+        language: None,
+        reason: "JSON entries with `message` / `translation` — Lingui JSON catalog".to_owned(),
+    })
+}
+
 /// The complete top-level `(key, value)` entries at the start of a JSON
 /// object. `None` when `text` does not start with an object.
 fn top_level_entries(text: &str) -> Option<Vec<(String, Value)>> {

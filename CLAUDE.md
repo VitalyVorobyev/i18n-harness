@@ -9,7 +9,7 @@ discovery is in, the translation transport is next), and the two-phase
 agent CLI (`harness export-batch` /
 `harness import-batch` plus the `translate-i18n-batch` skill) delegates
 to an external Claude Code / Copilot / Codex session on the user's
-machine. Catalogs: Qt `.ts`, gettext PO, ICU-JSON. The full design
+machine. Catalogs: Qt `.ts`, gettext PO, Lingui PO/JSON, ICU-JSON. The full design
 lives in [`docs/initial_design.md`](docs/initial_design.md); the
 translator-facing milestones in
 [`docs/roadmap-product.md`](docs/roadmap-product.md); the maintainer-facing

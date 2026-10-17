@@ -18,6 +18,7 @@
 
 use i18n_harness_core::{Target, Unit, UnitState};
 
+use super::PoDialect;
 use super::parse::MsgstrBlock;
 use super::placeholder::{PoPlaceholder, from_icu_with_table};
 use crate::catalog::{Catalog, ExtractState};
@@ -76,7 +77,12 @@ pub(crate) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
                     path: catalog.source_path.clone(),
                     reason: "no msgstr block in catalog state".to_owned(),
                 })?;
-            let rendered = format_blocks(&new_targets, block, &edit_state.source_placeholders)?;
+            let rendered = format_blocks(
+                &new_targets,
+                block,
+                &edit_state.source_placeholders,
+                edit.dialect,
+            )?;
             let (first_start, _) = edit_state.msgstr_blocks.first().unwrap().range;
             let (_, last_end) = edit_state.msgstr_blocks.last().unwrap().range;
             edits.push((first_start, last_end, rendered));
@@ -93,7 +99,12 @@ pub(crate) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
             if same_target(&original, new) {
                 continue;
             }
-            let rendered = format_block(block, new.as_deref(), &edit_state.source_placeholders)?;
+            let rendered = format_block(
+                block,
+                new.as_deref(),
+                &edit_state.source_placeholders,
+                edit.dialect,
+            )?;
             edits.push((block.range.0, block.range.1, rendered));
         }
     }
@@ -135,17 +146,29 @@ fn same_target(original: &Option<String>, new: &Option<String>) -> bool {
     }
 }
 
+/// ICU text in the dialect's native placeholder syntax.
+fn native(
+    icu: &str,
+    placeholders: &[PoPlaceholder],
+    dialect: PoDialect,
+) -> Result<String, CatalogError> {
+    if icu.is_empty() {
+        return Ok(String::new());
+    }
+    match dialect {
+        PoDialect::Gettext => from_icu_with_table(icu, placeholders),
+        PoDialect::Lingui => crate::icu_json::placeholder::from_icu(icu),
+    }
+    .map_err(CatalogError::PlaceholderConversion)
+}
+
 fn format_block(
     block: &MsgstrBlock,
     new_target: Option<&str>,
     placeholders: &[PoPlaceholder],
+    dialect: PoDialect,
 ) -> Result<String, CatalogError> {
-    let icu = new_target.unwrap_or("");
-    let native = if icu.is_empty() {
-        String::new()
-    } else {
-        from_icu_with_table(icu, placeholders).map_err(CatalogError::PlaceholderConversion)?
-    };
+    let native = native(new_target.unwrap_or(""), placeholders, dialect)?;
     let escaped = escape(&native);
     let mut out = String::with_capacity(block.prefix.len() + escaped.len() + 3);
     out.push_str(&block.prefix);
@@ -160,15 +183,11 @@ fn format_blocks(
     new_targets: &[Option<String>],
     template: &MsgstrBlock,
     placeholders: &[PoPlaceholder],
+    dialect: PoDialect,
 ) -> Result<String, CatalogError> {
     let mut out = String::new();
     for (i, new) in new_targets.iter().enumerate() {
-        let icu = new.as_deref().unwrap_or("");
-        let native = if icu.is_empty() {
-            String::new()
-        } else {
-            from_icu_with_table(icu, placeholders).map_err(CatalogError::PlaceholderConversion)?
-        };
+        let native = native(new.as_deref().unwrap_or(""), placeholders, dialect)?;
         let escaped = escape(&native);
         if i > 0 {
             out.push('\n');

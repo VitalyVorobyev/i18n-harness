@@ -57,8 +57,8 @@ translator-facing milestone log and
 
 ## Scope
 
-**Catalog formats:** Qt Linguist `.ts`, gettext PO, ICU-JSON for
-react-intl / i18next. Each is a `CatalogFormat` plugin listed in one
+**Catalog formats:** Qt Linguist `.ts`, gettext PO, Lingui (PO and JSON
+catalogs), ICU-JSON for react-intl / i18next. Each is a `CatalogFormat` plugin listed in one
 registry (`crates/formats`) — new formats land as plugins, not parser
 rewrites, and nothing outside the plugin names them.
 

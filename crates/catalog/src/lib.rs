@@ -38,16 +38,21 @@ pub mod po;
 pub use catalog::Catalog;
 pub use error::{CatalogError, PlaceholderError};
 pub use format::{CatalogFormat, Confidence, FormatDoc, SniffHit, strip_bom, utf8_prefix};
-pub use icu_json::IcuJsonFormat;
-pub use po::{PoFormat, reconcile_plural_arity};
+pub use icu_json::{IcuJsonFormat, LinguiJsonFormat};
+pub use po::{LinguiPoFormat, PoFormat, reconcile_plural_arity};
 
 /// The formats this crate implements, in registry order.
 ///
 /// Qt `.ts` is not here: it lives in `adapter-qt`, which implements the same
 /// traits. The full registry (every built-in format) is assembled by the
 /// `i18n-harness-formats` crate.
-pub fn builtin_formats() -> [&'static dyn CatalogFormat; 2] {
-    [&po::PO_FORMAT, &icu_json::ICU_JSON_FORMAT]
+pub fn builtin_formats() -> [&'static dyn CatalogFormat; 4] {
+    [
+        &po::LINGUI_PO_FORMAT,
+        &po::PO_FORMAT,
+        &icu_json::LINGUI_JSON_FORMAT,
+        &icu_json::ICU_JSON_FORMAT,
+    ]
 }
 
 /// Look up one of this crate's formats by its manifest id.
@@ -73,6 +78,8 @@ pub fn format_by_id(format: &str) -> Result<&'static dyn CatalogFormat, CatalogE
 pub fn open_catalog_by_format(path: &Path, format: &str) -> Result<Catalog, CatalogError> {
     match format_by_id(format)?.id() {
         "gettext-po" => PoFormat.extract(path),
+        "lingui-po" => po::parse::extract(path, po::PoDialect::Lingui),
+        "lingui-json" => icu_json::parse::extract_lingui(path),
         _ => IcuJsonFormat.extract(path),
     }
 }

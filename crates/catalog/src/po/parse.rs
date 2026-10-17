@@ -39,6 +39,26 @@ use i18n_harness_core::{
 };
 
 use super::placeholder::{PoPlaceholder, parse_placeholders, to_icu};
+use crate::error::PlaceholderError;
+
+/// Which placeholder syntax a PO file's messages use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PoDialect {
+    /// gettext printf-style: `%s`, `%d`, `%1$s`, `%(name)s`.
+    Gettext,
+    /// Lingui: ICU MessageFormat inside msgid/msgstr (`{name}`,
+    /// `{count, plural, …}`); `%` is a literal character.
+    Lingui,
+}
+
+impl PoDialect {
+    fn to_icu(self, text: &str) -> Result<String, PlaceholderError> {
+        match self {
+            Self::Gettext => to_icu(text),
+            Self::Lingui => crate::icu_json::placeholder::to_icu(text),
+        }
+    }
+}
 use crate::catalog::{Catalog, ExtractState};
 use crate::error::CatalogError;
 
@@ -50,6 +70,8 @@ pub(crate) struct ExtractStatePo {
     pub(crate) units: Vec<UnitEditState>,
     /// `nplurals` parsed from the header's `Plural-Forms:` declaration, if any.
     pub(crate) header_nplurals: Option<u32>,
+    /// Placeholder syntax of the messages.
+    pub(crate) dialect: PoDialect,
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +107,7 @@ pub(crate) struct MsgstrBlock {
 }
 
 /// Read a `.po` file into a [`Catalog`].
-pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
+pub(crate) fn extract(path: &Path, dialect: PoDialect) -> Result<Catalog, CatalogError> {
     let bytes = fs::read(path).map_err(|source| CatalogError::Io {
         op: "read",
         path: path.to_path_buf(),
@@ -129,9 +151,15 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
         }
 
         let id = build_unit_id(entry.msgctxt.as_deref(), &entry.msgid);
-        let source_icu = to_icu(&entry.msgid).map_err(CatalogError::PlaceholderConversion)?;
-        let source_placeholders =
-            parse_placeholders(&entry.msgid).map_err(CatalogError::PlaceholderConversion)?;
+        let source_icu = dialect
+            .to_icu(&entry.msgid)
+            .map_err(CatalogError::PlaceholderConversion)?;
+        let source_placeholders = match dialect {
+            PoDialect::Gettext => {
+                parse_placeholders(&entry.msgid).map_err(CatalogError::PlaceholderConversion)?
+            }
+            PoDialect::Lingui => Vec::new(),
+        };
         let placeholders = synthesize_placeholders(&source_placeholders);
 
         let plural_arity = entry.msgid_plural.as_ref().map(|_| {
@@ -147,7 +175,11 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
                 let icu = if block.unescaped.is_empty() {
                     None
                 } else {
-                    Some(to_icu(&block.unescaped).map_err(CatalogError::PlaceholderConversion)?)
+                    Some(
+                        dialect
+                            .to_icu(&block.unescaped)
+                            .map_err(CatalogError::PlaceholderConversion)?,
+                    )
                 };
                 originals.push(icu.clone());
                 forms.push(icu);
@@ -165,9 +197,11 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
             // Codex P1 on PR #38.
             let block = entry.msgstr_blocks.first();
             let icu = match block {
-                Some(b) if !b.unescaped.is_empty() => {
-                    Some(to_icu(&b.unescaped).map_err(CatalogError::PlaceholderConversion)?)
-                }
+                Some(b) if !b.unescaped.is_empty() => Some(
+                    dialect
+                        .to_icu(&b.unescaped)
+                        .map_err(CatalogError::PlaceholderConversion)?,
+                ),
                 _ => None,
             };
             (Target::Singular { text: icu.clone() }, vec![icu])
@@ -243,6 +277,7 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
         extract_state: ExtractState::Po(ExtractStatePo {
             units: edit_states,
             header_nplurals,
+            dialect,
         }),
     })
 }
