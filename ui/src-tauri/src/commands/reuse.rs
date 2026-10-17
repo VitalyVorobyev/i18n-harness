@@ -19,7 +19,8 @@ use i18n_harness_project::{CatalogFormat, ReferenceEntry, ReferenceRef};
 
 use crate::backing::BackingCatalog;
 use crate::dto::{
-    BatchSplitReportDto, MergeReportDto, ProjectOpenResponse, ReuseReportDto, SplitReportDto,
+    BatchReuseReportDto, BatchSplitReportDto, MergeReportDto, ProjectOpenResponse, ReuseReportDto,
+    SplitReportDto,
 };
 use crate::error;
 use crate::services::reuse as svc;
@@ -123,8 +124,26 @@ pub(crate) fn reuse_references_in_project(
         ));
     }
 
+    reuse_and_persist(&state, &abs, &reference_abs, locale, glossary.as_ref())
+}
+
+/// Run the reuse pass for one catalog, refresh its in-memory entry, and persist
+/// the resulting review-status events — steps 3–5 of `reuse_references_in_project`.
+///
+/// Extracted so the single-catalog command and the project-wide
+/// `reuse_all_references` share one write-back + persistence path. Holds **no**
+/// locks during the file work; takes brief, never-nested locks (project, then
+/// catalog, then project) to fold review state, refresh the cache, and append
+/// the review.jsonl events.
+fn reuse_and_persist(
+    state: &tauri::State<'_, AppState>,
+    abs: &std::path::Path,
+    reference_abs: &[PathBuf],
+    locale: &'static Locale,
+    glossary: Option<&Glossary>,
+) -> Result<ReuseReportDto, String> {
     // 3. Run the reuse pass + write-back with NO locks held.
-    let result = svc::reuse_into_catalog(&abs, &reference_abs, locale, glossary.as_ref())?;
+    let result = svc::reuse_into_catalog(abs, reference_abs, locale, glossary)?;
     let mut catalog = result.catalog;
 
     // 4. Fold current review state onto the re-extracted units (a brief project
@@ -138,7 +157,7 @@ pub(crate) fn reuse_references_in_project(
             .lock()
             .map_err(error::lock_poisoned("project"))?;
         if let Some(project) = project_guard.as_ref() {
-            project.apply_review_state(&abs, catalog.units_mut());
+            project.apply_review_state(abs, catalog.units_mut());
         }
     }
 
@@ -165,7 +184,7 @@ pub(crate) fn reuse_references_in_project(
             .collect();
 
         store.insert(
-            abs.clone(),
+            abs.to_path_buf(),
             OpenCatalogEntry {
                 catalog: BackingCatalog::Qt(catalog),
                 dirty: false,
@@ -201,7 +220,7 @@ pub(crate) fn reuse_references_in_project(
             for (unit_id, write) in &durable_writes {
                 project
                     .set_review_status(
-                        &abs,
+                        abs,
                         unit_id,
                         Some(write.status),
                         write.source_hash.clone(),
@@ -213,6 +232,61 @@ pub(crate) fn reuse_references_in_project(
     }
 
     Ok(result.report)
+}
+
+/// Reuse references into **every** non-reference Qt catalog in the project that
+/// has at least one Qt reference for its locale.
+///
+/// Mirrors `split_all_remainders`: snapshot the catalog list under a brief lock,
+/// then run each catalog through the same `reuse_and_persist` path the
+/// single-catalog command uses. Catalogs with no references for their locale are
+/// skipped and reported (by manifest-relative path) rather than erroring, so a
+/// mixed project still applies where it can. Per-catalog totals are summed into
+/// the response for a one-line summary.
+///
+/// Available regardless of the `ollama` feature — reuse is local and
+/// deterministic.
+#[tauri::command]
+pub(crate) fn reuse_all_references(
+    state: tauri::State<'_, AppState>,
+) -> Result<BatchReuseReportDto, String> {
+    // Snapshot non-reference Qt catalogs (absolute + manifest path) under a
+    // brief lock, then drop it before any file work.
+    let catalogs: Vec<(PathBuf, String)> = {
+        let guard = state
+            .project
+            .lock()
+            .map_err(error::lock_poisoned("project"))?;
+        let project = guard.as_ref().ok_or_else(error::no_project)?;
+        let reference_paths: HashSet<String> = project
+            .references()
+            .iter()
+            .map(|r| r.absolute_path.clone())
+            .collect();
+        project
+            .catalogs()
+            .iter()
+            .filter(|c| c.format == CatalogFormat::QtTs)
+            .filter(|c| !reference_paths.contains(&c.absolute_path))
+            .map(|c| (PathBuf::from(&c.absolute_path), c.manifest_path.clone()))
+            .collect()
+    };
+
+    let mut applied = Vec::new();
+    let mut skipped = Vec::new();
+
+    for (abs, manifest_path) in catalogs {
+        let (locale, glossary) = resolve_reuse_context(&state, &abs)?;
+        let reference_abs = references_for_locale(&state, locale.id)?;
+        if reference_abs.is_empty() {
+            skipped.push(manifest_path);
+            continue;
+        }
+        let report = reuse_and_persist(&state, &abs, &reference_abs, locale, glossary.as_ref())?;
+        applied.push(report);
+    }
+
+    Ok(BatchReuseReportDto::from_reports(applied, skipped))
 }
 
 /// A resolved review-status write: the status, the reviewer note, and the

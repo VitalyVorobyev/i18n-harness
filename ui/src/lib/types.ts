@@ -461,7 +461,12 @@ export interface CatalogStateCounts {
   proposed: number;
   untranslated: number;
   vanished_obsolete: number;
+  /** Deduped "items to review" headline. */
   needs_review: number;
+  /** Units whose review status is `conflict` (breakdown — may overlap). */
+  conflicts: number;
+  /** Units with at least one hard (un-shippable) flag (breakdown — may overlap). */
+  hard_flagged: number;
 }
 
 // ReviewQueueResponse mirrors the Rust struct of the same name.
@@ -637,6 +642,19 @@ export interface ReuseReport {
   remaining_ids: string[];
   /** Full per-unit conflict detail. */
   conflicts: ReferenceConflict[];
+}
+
+// BatchReuseReportDto mirrors ui/src-tauri/src/dto/reuse.rs — one batch run
+// over every non-reference Qt catalog in the project.
+export interface BatchReuseReport {
+  /** One entry per catalog the reuse pass ran on. */
+  applied: ReuseReport[];
+  /** Manifest-relative paths of catalogs skipped (no reference for the locale). */
+  skipped: string[];
+  total_copied_finished: number;
+  total_copied_needs_review: number;
+  total_conflict_count: number;
+  total_remaining_count: number;
 }
 
 // SplitReportDto mirrors ui/src-tauri/src/dto/reuse.rs.

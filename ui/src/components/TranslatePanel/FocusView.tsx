@@ -47,6 +47,8 @@ interface Props {
    *  Multi-select set over the three UI-editable UnitStates. Empty set means
    *  "show everything". */
   statusFilter: StatusFilterState;
+  /** Narrow to a single catalog file (absolute path), or null for all files. */
+  fileFilter: string | null;
   onStatusFilterChange?: (next: StatusFilterState) => void;
   onEnsureCatalogLoaded: (absPath: string) => Promise<void>;
   onTranslateUnit: (catalogPath: string, unit: Unit) => void;
@@ -54,6 +56,12 @@ interface Props {
   onAcceptUnit: (catalogPath: string, unit: Unit) => void;
   /** Open the "Translate untranslated" modal scoped to this locale. */
   onOpenTranslateModal: () => void;
+  /** Add the selected unit's source/target to the project glossary. */
+  onAddToGlossary?: (
+    source: string,
+    locale: string,
+    translation: string | null,
+  ) => void;
 }
 
 // ── Inspector collapse persistence ────────────────────────────────────────
@@ -137,10 +145,12 @@ function buildFocusEntries(
   summary: ProjectSummary,
   openCatalogs: Map<string, CatalogResponse>,
   locale: string,
+  fileFilter: string | null,
 ): FocusEntry[] {
   const entries: FocusEntry[] = [];
   for (const ref of summary.catalogs) {
     if (ref.locale !== locale) continue;
+    if (fileFilter && ref.absolute_path !== fileFilter) continue;
     const cached = openCatalogs.get(ref.absolute_path);
     if (!cached) continue;
     for (const unit of cached.units) {
@@ -162,12 +172,14 @@ export function FocusView({
   busyIds,
   batchActive,
   statusFilter,
+  fileFilter,
   onStatusFilterChange,
   onEnsureCatalogLoaded,
   onTranslateUnit,
   onEditUnit,
   onAcceptUnit,
   onOpenTranslateModal,
+  onAddToGlossary,
 }: Props) {
   // Auto-load catalogs for the focused locale.
   useEffect(() => {
@@ -209,8 +221,8 @@ export function FocusView({
   );
 
   const allEntries = useMemo(
-    () => buildFocusEntries(summary, openCatalogs, focusLocale),
-    [summary, openCatalogs, focusLocale],
+    () => buildFocusEntries(summary, openCatalogs, focusLocale, fileFilter),
+    [summary, openCatalogs, focusLocale, fileFilter],
   );
 
   // ── Local view state ────────────────────────────────────────────────────
@@ -657,6 +669,8 @@ export function FocusView({
           onAccept={onInspectorAccept}
           peerLocales={peerLocales}
           onJumpToLocale={(locale) => setFocusLocale(locale)}
+          locale={focusLocale}
+          onAddToGlossary={onAddToGlossary}
           width={260}
           collapsed={inspectorCollapsed}
           onToggleCollapsed={toggleInspector}

@@ -22,11 +22,13 @@ import type {
 import type { UnitEditorHandle } from "./components/TranslatePanel/UnitEditor/UnitEditor";
 import type { CommitNowFn, CommitRegistry } from "./lib/pending-commits";
 import { PendingCommitsContext } from "./lib/pending-commits";
-import { basenameOf } from "./lib/reuse";
+import { basenameOf, buildConflictReportMarkdown } from "./lib/reuse";
 import {
   acceptUnitInProject,
+  addGlossaryTerm,
   cancelTranslation,
   closeProject,
+  createProjectGlossary,
   currentProjectSummary,
   discardChangesInProject,
   gateCatalogInProject,
@@ -34,15 +36,20 @@ import {
   openCatalogInProject,
   pickReferenceFiles,
   pickRemainderFile,
+  pickRemainderOutputFolder,
+  pickReviewSaveLocation,
   pickTsSaveLocation,
+  reuseAllReferences,
   reuseReferencesInProject,
   saveAllDirty,
   saveCatalogInProject,
   scanProjectReviewState,
+  splitAllRemainders,
   splitRemainder,
   translateBatchInProject,
   translateUnitInProject,
   updateUnitTargetInProject,
+  writeTextFile,
 } from "./lib/tauri";
 import { listenBatchProgress } from "./lib/tauri-events";
 import { useTheme } from "./lib/theme";
@@ -133,6 +140,11 @@ export function App() {
   // Absolute paths with a reuse/split/merge IPC call in flight (drives the
   // per-catalog actions-menu spinner).
   const [reuseBusyPaths, setReuseBusyPaths] = useState<Set<string>>(new Set());
+  // True while a project-wide batch reuse / export (Overview actions) is running.
+  const [batchReuseBusy, setBatchReuseBusy] = useState(false);
+  // Incremented when a deep-link (Overview conflict affordance) wants the Review
+  // queue to open with the conflicts-only filter pre-applied.
+  const [reviewFocusConflictsNonce, setReviewFocusConflictsNonce] = useState(0);
 
   // ── Review queue ──────────────────────────────────────────────────────────
   // null = not yet scanned; populated eagerly when a project is open and
@@ -1513,6 +1525,124 @@ export function App() {
     [markReuseBusy, flashInfo, flashError],
   );
 
+  // ── Overview batch actions: apply references to all + export all remainders ─
+
+  const onApplyAllReferences = useCallback(async () => {
+    setBatchReuseBusy(true);
+    try {
+      const report = await reuseAllReferences();
+      // The backend refreshed each applied catalog in place but does not return
+      // units; re-pull the ones already cached so the matrix/focus views reflect
+      // the copied translations, then rescan to surface conflicts in Review.
+      const refreshed = new Map(openCatalogs);
+      for (const r of report.applied) {
+        if (refreshed.has(r.catalog_path)) {
+          try {
+            refreshed.set(
+              r.catalog_path,
+              await openCatalogInProject(r.catalog_path),
+            );
+          } catch {
+            // Non-fatal: a rescan still corrects the stats.
+          }
+        }
+      }
+      setOpenCatalogs(refreshed);
+      scheduleRescan();
+
+      const parts: string[] = [
+        `${report.applied.length} catalog(s)`,
+        `${report.total_copied_finished} auto-finished`,
+        `${report.total_copied_needs_review} proposed`,
+      ];
+      if (report.total_conflict_count > 0)
+        parts.push(
+          `${report.total_conflict_count} conflict(s) — resolve in Review`,
+        );
+      if (report.total_remaining_count > 0)
+        parts.push(`${report.total_remaining_count} remaining`);
+      if (report.skipped.length > 0)
+        parts.push(`${report.skipped.length} skipped (no reference)`);
+      flashInfo(`Applied references to all: ${parts.join("; ")}.`);
+    } catch (e) {
+      flashError(`Apply references to all failed: ${formatError(e)}`);
+    } finally {
+      setBatchReuseBusy(false);
+    }
+  }, [openCatalogs, scheduleRescan, flashInfo, flashError]);
+
+  const onExportAllRemainders = useCallback(async () => {
+    const outDir = await pickRemainderOutputFolder();
+    if (!outDir) return;
+    setBatchReuseBusy(true);
+    try {
+      const report = await splitAllRemainders(outDir);
+      flashInfo(
+        `Wrote ${report.written.length} remainder file(s); skipped ${report.skipped.length} fully-translated.`,
+      );
+    } catch (e) {
+      flashError(`Export all remainders failed: ${formatError(e)}`);
+    } finally {
+      setBatchReuseBusy(false);
+    }
+  }, [flashInfo, flashError]);
+
+  // Deep-link from the Overview conflict affordance into the Review queue with
+  // the conflicts-only filter pre-applied (bump the nonce each time).
+  const openConflictsInReview = useCallback(() => {
+    setProjectView("review");
+    setReviewFocusConflictsNonce((n) => n + 1);
+  }, []);
+
+  // Export every reference-reuse conflict as a human-readable Markdown report.
+  const onExportConflicts = useCallback(async () => {
+    if (!reviewQueue) return;
+    const projectName = mode.kind === "project" ? mode.summary.name : "project";
+    const outPath = await pickReviewSaveLocation(`${projectName}-conflicts`);
+    if (!outPath) return;
+    try {
+      const md = buildConflictReportMarkdown(reviewQueue.items, projectName);
+      await writeTextFile(outPath, md);
+      flashInfo(`Conflict report written to ${shortenPath(outPath)}.`);
+    } catch (e) {
+      flashError(`Export conflict report failed: ${formatError(e)}`);
+    }
+  }, [reviewQueue, mode, flashInfo, flashError]);
+
+  // ── Glossary: create from UI + add a term from the Translate context ───────
+
+  const handleCreateGlossary = useCallback(async () => {
+    try {
+      handleProjectMutation(await createProjectGlossary());
+      flashInfo(
+        "Glossary created (glossary.toml) and registered in the manifest.",
+      );
+    } catch (e) {
+      flashError(`Create glossary failed: ${formatError(e)}`);
+    }
+  }, [handleProjectMutation, flashInfo, flashError]);
+
+  const onAddToGlossary = useCallback(
+    async (source: string, locale: string, translation: string | null) => {
+      try {
+        // Create the glossary on first use so "Add to glossary" works even
+        // before one is declared.
+        const hasGlossary =
+          mode.kind === "project" && mode.summary.glossary_path != null;
+        if (!hasGlossary) {
+          handleProjectMutation(await createProjectGlossary());
+        }
+        handleProjectMutation(
+          await addGlossaryTerm({ source, locale, translation }),
+        );
+        flashInfo(`Added “${source}” to the glossary (${locale}).`);
+      } catch (e) {
+        flashError(`Add to glossary failed: ${formatError(e)}`);
+      }
+    },
+    [mode, handleProjectMutation, flashInfo, flashError],
+  );
+
   // ── Conflict resolution: "Use this" applies a candidate via the edit path ──
   //
   // Picking a candidate is normal editing: write the candidate text into the
@@ -1652,6 +1782,11 @@ export function App() {
                 focusLocale={focusLocale}
                 setFocusLocale={setFocusLocale}
                 setProjectView={setProjectView}
+                hasReferences={summary.references.length > 0}
+                batchReuseBusy={batchReuseBusy}
+                onApplyAllReferences={() => void onApplyAllReferences()}
+                onExportAllRemainders={() => void onExportAllRemainders()}
+                onOpenConflicts={openConflictsInReview}
               />
             )}
 
@@ -1694,6 +1829,9 @@ export function App() {
                 onAcceptUnitFor={onAcceptUnitFor}
                 onTranslateAll={onTranslateAll}
                 startBatchForPair={startBatchForPair}
+                onAddToGlossary={(source, locale, translation) =>
+                  void onAddToGlossary(source, locale, translation)
+                }
               />
             </div>
 
@@ -1711,13 +1849,24 @@ export function App() {
                   projectPath={summary.root}
                 />
               ) : (
-                <div className="flex-1 flex items-center justify-center text-sm text-fg-tertiary p-8 text-center">
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 text-sm text-fg-tertiary p-8 text-center">
                   <p>
-                    This project has no glossary. Add a{" "}
-                    <code className="font-mono text-xs bg-bg-surface px-1 py-0.5 rounded border border-border-subtle">
+                    This project has no glossary yet. Create one to capture
+                    do-not-translate terms and per-locale translations.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCreateGlossary()}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium text-accent-fg bg-accent hover:bg-accent-hover active:bg-accent-active"
+                  >
+                    Create glossary
+                  </button>
+                  <p className="text-xs text-fg-tertiary">
+                    Writes{" "}
+                    <code className="font-mono bg-bg-surface px-1 py-0.5 rounded border border-border-subtle">
                       glossary.toml
                     </code>{" "}
-                    and update the manifest in Settings.
+                    and registers it in the manifest.
                   </p>
                 </div>
               )}
@@ -1765,6 +1914,8 @@ export function App() {
                   void onUseConflictCandidate(catalogPath, unitId, forms)
                 }
                 onOpenItem={onOpenReviewQueueItem}
+                onExportConflicts={() => void onExportConflicts()}
+                focusConflictsNonce={reviewFocusConflictsNonce}
                 onNavigateToUnit={async (catalogPath, unitId, locale) => {
                   await handleCatalogSelect(catalogPath);
                   setSelectedId(unitId);

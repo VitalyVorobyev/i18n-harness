@@ -6,7 +6,7 @@
 // reuse pass persists them there), so the conflict view survives a reopen
 // without any session-local state.
 
-import type { ReferenceConflictCandidate } from "./types";
+import type { ReferenceConflictCandidate, ReviewQueueItem } from "./types";
 
 /** Unit separator used to join plural forms inside a candidate's `text`. */
 export const UNIT_SEPARATOR = "\u{1F}";
@@ -63,4 +63,65 @@ export function shortenReusePath(p: string, segments = 2): string {
 export function basenameOf(p: string): string {
   const parts = p.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] ?? p;
+}
+
+// CLDR plural categories in canonical order — matches the form ordering used by
+// the editors and the reuse engine.
+const CLDR_FORM_LABELS = ["Zero", "One", "Two", "Few", "Many", "Other"];
+
+/**
+ * Build a human-readable Markdown report of every reference-reuse conflict in
+ * `items`, for offline manual resolution. Each conflict lists its unit id,
+ * catalog/locale, source, and every candidate translation with the reference(s)
+ * that proposed it. Conflict candidates are read from each item's
+ * `reviewer_note` (the JSON the reuse pass persisted there).
+ *
+ * Items whose review status is not `conflict` are ignored, so callers may pass
+ * the full review queue.
+ */
+export function buildConflictReportMarkdown(
+  items: ReviewQueueItem[],
+  projectName: string,
+): string {
+  const conflicts = items.filter((it) => it.review_status === "conflict");
+  const lines: string[] = [];
+  lines.push(`# Reference-translation conflicts — ${projectName}`);
+  lines.push("");
+  lines.push(
+    `${conflicts.length} conflict${conflicts.length === 1 ? "" : "s"} need manual resolution. Each lists the candidate translations from the reference catalogs that disagreed; the base unit was left untranslated.`,
+  );
+  lines.push("");
+
+  for (const it of conflicts) {
+    lines.push(`## \`${it.unit_id}\``);
+    lines.push("");
+    lines.push(`- **Catalog:** ${it.catalog_manifest_path} (${it.locale})`);
+    lines.push(`- **Source:** ${it.source_preview}`);
+    lines.push("");
+
+    const candidates = parseConflictCandidates(it.reviewer_note);
+    if (candidates.length === 0) {
+      lines.push("_No candidate detail recorded._");
+      lines.push("");
+      continue;
+    }
+
+    candidates.forEach((candidate, idx) => {
+      const refs = [candidate.reference, ...candidate.also_from];
+      lines.push(`### Candidate ${idx + 1}`);
+      const forms = candidateForms(candidate);
+      if (candidate.is_plural) {
+        forms.forEach((form, fi) => {
+          const label = CLDR_FORM_LABELS[fi] ?? `Form ${fi}`;
+          lines.push(`- **${label}:** ${form}`);
+        });
+      } else {
+        lines.push(`- ${forms[0] ?? ""}`);
+      }
+      lines.push(`- _From:_ ${refs.join(", ")}`);
+      lines.push("");
+    });
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
 }

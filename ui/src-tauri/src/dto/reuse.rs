@@ -75,6 +75,47 @@ pub struct ReuseReportDto {
     pub conflicts: Vec<ReferenceConflictDto>,
 }
 
+/// Wire response from `reuse_all_references` — one batch run over every
+/// non-reference Qt catalog in the project.
+///
+/// `applied` holds the per-catalog report (so the UI can drill in); the `total_*`
+/// fields are the summed counts for a one-line toast. `skipped` lists catalogs
+/// with no Qt reference for their locale (by manifest-relative path).
+#[derive(Debug, Serialize)]
+pub struct BatchReuseReportDto {
+    /// One entry per catalog the reuse pass ran on.
+    pub applied: Vec<ReuseReportDto>,
+    /// Manifest-relative paths of catalogs skipped (no reference for the locale).
+    pub skipped: Vec<String>,
+    /// Sum of `copied_finished` across `applied`.
+    pub total_copied_finished: usize,
+    /// Sum of `copied_needs_review` across `applied`.
+    pub total_copied_needs_review: usize,
+    /// Sum of `conflict_count` across `applied`.
+    pub total_conflict_count: usize,
+    /// Sum of `remaining_count` across `applied`.
+    pub total_remaining_count: usize,
+}
+
+impl BatchReuseReportDto {
+    /// Build the aggregate from the per-catalog reports + skip list, summing the
+    /// totals once at construction so the wire shape carries them directly.
+    pub fn from_reports(applied: Vec<ReuseReportDto>, skipped: Vec<String>) -> Self {
+        let total_copied_finished = applied.iter().map(|r| r.copied_finished).sum();
+        let total_copied_needs_review = applied.iter().map(|r| r.copied_needs_review).sum();
+        let total_conflict_count = applied.iter().map(|r| r.conflict_count).sum();
+        let total_remaining_count = applied.iter().map(|r| r.remaining_count).sum();
+        Self {
+            applied,
+            skipped,
+            total_copied_finished,
+            total_copied_needs_review,
+            total_conflict_count,
+            total_remaining_count,
+        }
+    }
+}
+
 /// Wire response from `split_remainder`.
 #[derive(Debug, Serialize)]
 pub struct SplitReportDto {
@@ -115,4 +156,50 @@ pub struct MergeReportDto {
     pub merged: usize,
     /// Of `merged`, how many carried a complete (finished-ready) target.
     pub merged_complete: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn report(
+        finished: usize,
+        needs_review: usize,
+        conflicts: usize,
+        remaining: usize,
+    ) -> ReuseReportDto {
+        ReuseReportDto {
+            catalog_path: "/p/de.ts".into(),
+            references: vec![],
+            copied_finished: finished,
+            copied_needs_review: needs_review,
+            conflict_count: conflicts,
+            remaining_count: remaining,
+            remaining_ids: vec![],
+            conflicts: vec![],
+        }
+    }
+
+    #[test]
+    fn batch_totals_sum_per_catalog_counts() {
+        let batch = BatchReuseReportDto::from_reports(
+            vec![report(2, 1, 3, 4), report(5, 0, 1, 2)],
+            vec!["fr.ts".into()],
+        );
+        assert_eq!(batch.applied.len(), 2);
+        assert_eq!(batch.skipped, vec!["fr.ts".to_string()]);
+        assert_eq!(batch.total_copied_finished, 7);
+        assert_eq!(batch.total_copied_needs_review, 1);
+        assert_eq!(batch.total_conflict_count, 4);
+        assert_eq!(batch.total_remaining_count, 6);
+    }
+
+    #[test]
+    fn batch_totals_are_zero_when_nothing_applied() {
+        let batch = BatchReuseReportDto::from_reports(vec![], vec!["a.ts".into(), "b.ts".into()]);
+        assert_eq!(batch.applied.len(), 0);
+        assert_eq!(batch.skipped.len(), 2);
+        assert_eq!(batch.total_copied_finished, 0);
+        assert_eq!(batch.total_conflict_count, 0);
+    }
 }

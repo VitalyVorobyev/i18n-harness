@@ -28,6 +28,7 @@ import type {
   Unit,
   UnitId,
 } from "./types";
+import { severityOf } from "./types";
 
 // ── Fixture data loaded at module init ───────────────────────────────────────
 
@@ -399,6 +400,94 @@ function cmdCancelTranslation(_args: { jobId: string }): boolean {
   return true;
 }
 
+// Synthesize a representative reuse outcome for one catalog: copy a finished
+// candidate into the first untranslated singular unit, mark the second as a
+// conflict (two disagreeing candidates). Shared by the single-catalog and
+// batch (`reuse_all_references`) mock handlers. Mutates mock catalog state.
+function mockReuseInProject(
+  catalogPath: string,
+  referencePaths: string[] | null,
+) {
+  const catalog = state.catalogs.get(catalogPath);
+  const refs = referencePaths ?? ["/sample-project/refs/expert_de.ts"];
+
+  const untranslated = (catalog?.units ?? []).filter(
+    (u) => u.state === "untranslated" && u.target.kind === "singular",
+  );
+  const conflicts: Array<{
+    unit_id: string;
+    candidates: Array<{
+      reference: string;
+      also_from: string[];
+      is_plural: boolean;
+      text: string;
+    }>;
+  }> = [];
+
+  let copiedFinished = 0;
+  const first = untranslated[0];
+  if (first && catalog) {
+    const unit = catalog.units.find((u) => u.id === first.id);
+    if (unit) {
+      unit.target = { kind: "singular", text: `[ref] ${unit.source}` };
+      unit.state = "finished";
+      unit.review_status = "reviewed";
+      copiedFinished = 1;
+    }
+  }
+
+  const second = untranslated[1];
+  if (second && catalog) {
+    const unit = catalog.units.find((u) => u.id === second.id);
+    if (unit) {
+      unit.review_status = "conflict";
+    }
+    const candidates = [
+      {
+        reference: refs[0] ?? "/sample-project/refs/expert_de.ts",
+        also_from: [],
+        is_plural: false,
+        text: `[ref-A] ${second.source}`,
+      },
+      {
+        reference: refs[1] ?? "/sample-project/refs/legacy_de.ts",
+        also_from: [],
+        is_plural: false,
+        text: `[ref-B] ${second.source}`,
+      },
+    ];
+    // Persist the candidate JSON as the review note, mirroring the real
+    // backend — the scan surfaces it on the queue item's reviewer_note.
+    state.reviewNotes.set(
+      `${catalogPath}\u{1F}${second.id}`,
+      JSON.stringify(candidates),
+    );
+    conflicts.push({ unit_id: second.id, candidates });
+  }
+
+  if (catalog) state.dirtyCatalogs.delete(catalogPath);
+
+  // Everything untranslated except the copied-finished first unit and the
+  // conflicted second unit is the remaining set (conflicts excluded, matching
+  // the real reuse contract).
+  const consumedIds = new Set(
+    [first?.id, second?.id].filter((id): id is string => id != null),
+  );
+  const remainingIds = untranslated
+    .filter((u) => !consumedIds.has(u.id))
+    .map((u) => u.id);
+  return {
+    catalog_path: catalogPath,
+    references: refs,
+    copied_finished: copiedFinished,
+    copied_needs_review: 0,
+    conflict_count: conflicts.length,
+    remaining_count: remainingIds.length,
+    remaining_ids: remainingIds,
+    conflicts,
+  };
+}
+
 function cmdScanProjectReviewState(): ReviewQueueResponse {
   const items: ReviewQueueResponse["items"] = [];
   const byCatalog: Record<string, number> = {};
@@ -417,6 +506,8 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
       untranslated: 0,
       vanished_obsolete: 0,
       needs_review: 0,
+      conflicts: 0,
+      hard_flagged: 0,
     };
     for (const unit of catalog.units) {
       counts.total++;
@@ -424,10 +515,16 @@ function cmdScanProjectReviewState(): ReviewQueueResponse {
       else if (unit.state === "proposed") counts.proposed++;
       else if (unit.state === "untranslated") counts.untranslated++;
       else counts.vanished_obsolete++;
+      // Mirror `review_signals` in services/review_scan.rs.
+      const isConflict = unit.review_status === "conflict";
+      const hasHard = unit.flags.some((f) => severityOf(f) === "hard");
+      if (isConflict) counts.conflicts++;
+      if (hasHard) counts.hard_flagged++;
       const needsReview =
         unit.review_status === "needs-review" ||
-        unit.review_status === "conflict" ||
-        unit.flags.length > 0;
+        isConflict ||
+        hasHard ||
+        unit.state === "proposed";
       if (!needsReview) continue;
       count++;
       counts.needs_review++;
@@ -482,6 +579,53 @@ function cmdSaveGlossary(args: {
   return { path: args.path, warnings: [] };
 }
 
+function cmdCreateProjectGlossary(): ProjectOpenResponse {
+  if (!state.openProject) throw new Error("no project open");
+  if (state.openProject.glossary_path) {
+    throw new Error("project already has a glossary");
+  }
+  const path = `${state.openProject.root}/glossary.toml`;
+  state.glossaryPath = path;
+  state.glossaryPayload = {
+    schema_version: 1,
+    terms: [],
+    locale_overrides: [],
+  };
+  state.openProject = { ...state.openProject, glossary_path: path };
+  return { summary: state.openProject, warnings: [] };
+}
+
+function cmdAddGlossaryTerm(args: {
+  source: string;
+  locale: string;
+  translation: string | null;
+  doNotTranslate: boolean;
+  notes: string | null;
+}): ProjectOpenResponse {
+  if (!state.openProject) throw new Error("no project open");
+  if (!state.glossaryPayload) {
+    throw new Error("project has no glossary; create one first");
+  }
+  const payload = state.glossaryPayload;
+  const existing = payload.terms.find((t) => t.source === args.source);
+  if (existing) {
+    existing.do_not_translate = args.doNotTranslate;
+    if (args.notes != null) existing.notes = args.notes;
+    if (args.translation != null)
+      existing.translations[args.locale] = args.translation;
+  } else {
+    payload.terms.push({
+      source: args.source,
+      do_not_translate: args.doNotTranslate,
+      notes: args.notes ?? undefined,
+      translations:
+        args.translation != null ? { [args.locale]: args.translation } : {},
+    });
+  }
+  payload.terms.sort((a, b) => a.source.localeCompare(b.source));
+  return { summary: state.openProject, warnings: [] };
+}
+
 function cmdListLocales() {
   return [
     { id: "de_DE", register: "neutral", script: "Latn", plural_arity: 2 },
@@ -530,6 +674,17 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   load_glossary: (a) => cmdLoadGlossary(a as { path: string }),
   save_glossary: (a) =>
     cmdSaveGlossary(a as { path: string; payload: GlossaryPayload }),
+  create_project_glossary: () => cmdCreateProjectGlossary(),
+  add_glossary_term: (a) =>
+    cmdAddGlossaryTerm(
+      a as {
+        source: string;
+        locale: string;
+        translation: string | null;
+        doNotTranslate: boolean;
+        notes: string | null;
+      },
+    ),
   list_locales: () => cmdListLocales(),
   // Stubs for commands not exercised by current tests.
   list_catalogs: () => [],
@@ -583,86 +738,36 @@ const COMMANDS: Record<string, (args: Args) => unknown> = {
   // local file IO in the Rust library; not exercised by browser-only tests).
   reuse_references_in_project: (a) => {
     const args = a as { catalogPath: string; referencePaths: string[] | null };
-    const catalog = state.catalogs.get(args.catalogPath);
-    const refs = args.referencePaths ?? ["/sample-project/refs/expert_de.ts"];
-
-    // Synthesize a representative outcome: copy a finished candidate into the
-    // first untranslated singular unit, mark the second as a conflict (two
-    // disagreeing candidates). This exercises the conflict view end-to-end.
-    const untranslated = (catalog?.units ?? []).filter(
-      (u) => u.state === "untranslated" && u.target.kind === "singular",
+    return mockReuseInProject(args.catalogPath, args.referencePaths);
+  },
+  reuse_all_references: () => {
+    const project = state.openProject;
+    const referencePaths = new Set(
+      (project?.references ?? []).map((r) => r.absolute_path),
     );
-    const conflicts: Array<{
-      unit_id: string;
-      candidates: Array<{
-        reference: string;
-        also_from: string[];
-        is_plural: boolean;
-        text: string;
-      }>;
-    }> = [];
-
-    let copiedFinished = 0;
-    const first = untranslated[0];
-    if (first && catalog) {
-      const unit = catalog.units.find((u) => u.id === first.id);
-      if (unit) {
-        unit.target = { kind: "singular", text: `[ref] ${unit.source}` };
-        unit.state = "finished";
-        unit.review_status = "reviewed";
-        copiedFinished = 1;
-      }
-    }
-
-    const second = untranslated[1];
-    if (second && catalog) {
-      const unit = catalog.units.find((u) => u.id === second.id);
-      if (unit) {
-        unit.review_status = "conflict";
-      }
-      const candidates = [
-        {
-          reference: refs[0] ?? "/sample-project/refs/expert_de.ts",
-          also_from: [],
-          is_plural: false,
-          text: `[ref-A] ${second.source}`,
-        },
-        {
-          reference: refs[1] ?? "/sample-project/refs/legacy_de.ts",
-          also_from: [],
-          is_plural: false,
-          text: `[ref-B] ${second.source}`,
-        },
-      ];
-      // Persist the candidate JSON as the review note, mirroring the real
-      // backend — the scan surfaces it on the queue item's reviewer_note.
-      state.reviewNotes.set(
-        `${args.catalogPath}\u{1F}${second.id}`,
-        JSON.stringify(candidates),
+    const applied: ReturnType<typeof mockReuseInProject>[] = [];
+    const skipped: string[] = [];
+    for (const c of project?.catalogs ?? []) {
+      if (c.format !== "qt-ts" || referencePaths.has(c.absolute_path)) continue;
+      const refsForLocale = (project?.references ?? []).filter(
+        (r) => r.locale === c.locale,
       );
-      conflicts.push({ unit_id: second.id, candidates });
+      if (refsForLocale.length === 0) {
+        skipped.push(c.manifest_path);
+        continue;
+      }
+      applied.push(mockReuseInProject(c.absolute_path, null));
     }
-
-    if (catalog) state.dirtyCatalogs.delete(args.catalogPath);
-
-    // Everything untranslated except the copied-finished first unit and the
-    // conflicted second unit is the remaining set (conflicts excluded, matching
-    // the real reuse contract).
-    const consumedIds = new Set(
-      [first?.id, second?.id].filter((id): id is string => id != null),
-    );
-    const remainingIds = untranslated
-      .filter((u) => !consumedIds.has(u.id))
-      .map((u) => u.id);
     return {
-      catalog_path: args.catalogPath,
-      references: refs,
-      copied_finished: copiedFinished,
-      copied_needs_review: 0,
-      conflict_count: conflicts.length,
-      remaining_count: remainingIds.length,
-      remaining_ids: remainingIds,
-      conflicts,
+      applied,
+      skipped,
+      total_copied_finished: applied.reduce((n, r) => n + r.copied_finished, 0),
+      total_copied_needs_review: applied.reduce(
+        (n, r) => n + r.copied_needs_review,
+        0,
+      ),
+      total_conflict_count: applied.reduce((n, r) => n + r.conflict_count, 0),
+      total_remaining_count: applied.reduce((n, r) => n + r.remaining_count, 0),
     };
   },
   split_remainder: (a) => {

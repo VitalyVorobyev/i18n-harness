@@ -176,11 +176,16 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 })
                 .collect();
 
-            let needs_review = matches!(
-                unit.review_status,
-                Some(ReviewStatus::NeedsReview | ReviewStatus::Conflict)
-            ) || !flags.is_empty();
-            if !needs_review {
+            // Breakdown signals + the deduped headline, computed from the live
+            // status/`FlagSet` (see `review_signals`).
+            let signals = review_signals(unit);
+            if signals.is_conflict {
+                counts.conflicts += 1;
+            }
+            if signals.has_hard {
+                counts.hard_flagged += 1;
+            }
+            if !signals.needs_review {
                 continue;
             }
             counts.needs_review += 1;
@@ -245,6 +250,42 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     })
 }
 
+/// The review signals derived from a single unit's status and flags.
+struct ReviewSignals {
+    /// Deduped headline: this unit genuinely needs human attention.
+    needs_review: bool,
+    /// The unit's review status is `Conflict`.
+    is_conflict: bool,
+    /// The unit carries at least one hard (un-shippable) flag.
+    has_hard: bool,
+}
+
+/// Classify a unit for the review-queue scan.
+///
+/// A unit `needs_review` when it has an explicit `NeedsReview`/`Conflict`
+/// review status, carries a hard (un-shippable) flag, or is still `Proposed`
+/// (machine output not yet confirmed). A `Finished`/`Untranslated` unit whose
+/// only flags are soft/semantic is *not* surfaced — counting those inflated the
+/// headline past the point where it could reconcile with the state tally.
+///
+/// The hard/soft split uses the canonical `Flag::severity()` mapping via
+/// `FlagSet::has_hard()` (`crates/core/src/flag.rs`); severity is never
+/// re-derived in this crate.
+fn review_signals(unit: &i18n_harness_core::Unit) -> ReviewSignals {
+    let is_conflict = matches!(unit.review_status, Some(ReviewStatus::Conflict));
+    let has_hard = unit.flags.has_hard();
+    let needs_review = matches!(
+        unit.review_status,
+        Some(ReviewStatus::NeedsReview | ReviewStatus::Conflict)
+    ) || has_hard
+        || matches!(unit.state, UnitState::Proposed);
+    ReviewSignals {
+        needs_review,
+        is_conflict,
+        has_hard,
+    }
+}
+
 /// Truncate `s` to at most `max_chars` characters, preferring a word boundary.
 ///
 /// `cutoff` and `search_start` are byte indices derived from `char_indices`,
@@ -290,6 +331,73 @@ pub(crate) fn extract_target_text(target: &i18n_harness_core::Target, max_chars:
                 .unwrap_or_default()
         }
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod review_signals_tests {
+    use super::review_signals;
+    use i18n_harness_core::{Flag, ReviewStatus, Unit, UnitState};
+
+    fn unit() -> Unit {
+        Unit::untranslated_singular("ctx::Key", "Source")
+    }
+
+    #[test]
+    fn finished_with_only_soft_flag_is_not_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::LengthWarn);
+        let s = review_signals(&u);
+        assert!(!s.needs_review, "finished + soft flag must not need review");
+        assert!(!s.has_hard);
+        assert!(!s.is_conflict);
+    }
+
+    #[test]
+    fn finished_with_semantic_flag_is_not_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::LowConfidence);
+        assert!(!review_signals(&u).needs_review);
+    }
+
+    #[test]
+    fn proposed_needs_review_even_without_flags() {
+        let mut u = unit();
+        u.state = UnitState::Proposed;
+        assert!(review_signals(&u).needs_review);
+    }
+
+    #[test]
+    fn hard_flag_needs_review_in_any_state() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::PlaceholderMismatch);
+        let s = review_signals(&u);
+        assert!(s.needs_review);
+        assert!(s.has_hard);
+    }
+
+    #[test]
+    fn explicit_status_needs_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.review_status = Some(ReviewStatus::NeedsReview);
+        assert!(review_signals(&u).needs_review);
+
+        let mut c = unit();
+        c.state = UnitState::Finished;
+        c.review_status = Some(ReviewStatus::Conflict);
+        let s = review_signals(&c);
+        assert!(s.needs_review);
+        assert!(s.is_conflict);
+    }
+
+    #[test]
+    fn untranslated_without_flags_is_not_review() {
+        let u = unit();
+        assert!(!review_signals(&u).needs_review);
     }
 }
 

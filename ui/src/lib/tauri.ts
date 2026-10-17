@@ -8,6 +8,7 @@ import {
 } from "@tauri-apps/plugin-dialog";
 import type {
   BackendConfig,
+  BatchReuseReport,
   BatchScope,
   BatchSplitReport,
   CatalogEntry,
@@ -108,6 +109,33 @@ export async function saveGlossary(
   return await invoke<GlossarySaveResponse>("save_glossary", {
     path,
     payload,
+  });
+}
+
+/// Create a `glossary.toml` at the project root and register it in the
+/// manifest. Rejects if the project already declares a glossary. Returns a
+/// fresh project response (the new summary carries `glossary_path`).
+export async function createProjectGlossary(): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("create_project_glossary");
+}
+
+/// Insert or merge a single term into the project glossary (e.g. from the unit
+/// editor's "Add to glossary"). Sets `translations[locale] = translation` for an
+/// existing source or appends a new term, preserving other locales. Rejects if
+/// the project has no glossary yet.
+export async function addGlossaryTerm(args: {
+  source: string;
+  locale: string;
+  translation?: string | null;
+  doNotTranslate?: boolean;
+  notes?: string | null;
+}): Promise<ProjectOpenResponse> {
+  return await invoke<ProjectOpenResponse>("add_glossary_term", {
+    source: args.source,
+    locale: args.locale,
+    translation: args.translation ?? null,
+    doNotTranslate: args.doNotTranslate ?? false,
+    notes: args.notes ?? null,
   });
 }
 
@@ -585,6 +613,15 @@ export async function reuseReferencesInProject(
     catalogPath,
     referencePaths: referencePaths ?? null,
   });
+}
+
+/// Reuse references into every non-reference Qt catalog in the project that has
+/// a Qt reference for its locale. Runs synchronously and locally (no model, no
+/// network). Catalogs with no reference for their locale are skipped and
+/// reported. The in-memory catalog entries are refreshed server-side; re-open /
+/// re-list (or rescan) to pull the copied translations.
+export async function reuseAllReferences(): Promise<BatchReuseReport> {
+  return await invoke<BatchReuseReport>("reuse_all_references");
 }
 
 /// Carve a remainder subset of `catalogPath` into `outPath`, keeping only the

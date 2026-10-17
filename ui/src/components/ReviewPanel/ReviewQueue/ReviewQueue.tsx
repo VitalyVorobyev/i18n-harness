@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "../../../lib/cn";
 import {
   candidateForms,
@@ -23,22 +23,43 @@ interface Props {
   ) => void;
   /** Called when the user clicks "Open" on a queue item. */
   onOpenItem: (catalogPath: string, unitId: UnitId) => void;
+  /** Export a Markdown conflict report (App owns the save dialog + write). */
+  onExportConflicts?: () => void;
+  /** Bumped when another view (Overview) deep-links into the conflicts list;
+   *  each new value forces the conflicts-only filter on. */
+  focusConflictsNonce?: number;
 }
 
 export function ReviewQueue({
   reviewQueue,
   onUseConflictCandidate,
   onOpenItem,
+  onExportConflicts,
+  focusConflictsNonce,
 }: Props) {
   const { by_catalog, items } = reviewQueue;
 
   // Optional: filter by catalog path (clicking a catalog column value).
   const [catalogFilter, setCatalogFilter] = useState<string | null>(null);
 
+  // Show only reference-reuse conflicts.
+  const [conflictsOnly, setConflictsOnly] = useState(false);
+
+  // A deep-link from Overview bumps the nonce; turn the filter on in response.
+  useEffect(() => {
+    if (focusConflictsNonce !== undefined && focusConflictsNonce > 0) {
+      setConflictsOnly(true);
+    }
+  }, [focusConflictsNonce]);
+
   // Expanded conflict row (catalogPath+unitId). At most one open at a time.
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const totalCount = items.length;
+  const conflictCount = useMemo(
+    () => items.filter((it) => it.review_status === "conflict").length,
+    [items],
+  );
   const catalogCount = useMemo(() => {
     const paths = new Set(Object.keys(by_catalog));
     for (const it of items) paths.add(it.catalog_path);
@@ -46,9 +67,12 @@ export function ReviewQueue({
   }, [by_catalog, items]);
 
   const visible = useMemo(() => {
-    if (!catalogFilter) return items;
-    return items.filter((it) => it.catalog_path === catalogFilter);
-  }, [items, catalogFilter]);
+    return items.filter((it) => {
+      if (catalogFilter && it.catalog_path !== catalogFilter) return false;
+      if (conflictsOnly && it.review_status !== "conflict") return false;
+      return true;
+    });
+  }, [items, catalogFilter, conflictsOnly]);
 
   if (totalCount === 0) {
     return (
@@ -94,6 +118,24 @@ export function ReviewQueue({
               {catalogCount} {catalogCount === 1 ? "catalog" : "catalogs"}
             </span>
           </span>
+          {conflictCount > 0 && (
+            <button
+              type="button"
+              aria-pressed={conflictsOnly}
+              onClick={() => setConflictsOnly((v) => !v)}
+              className={cn(
+                "inline-flex items-center h-5 px-2 rounded-pill border text-xs font-medium tabular-nums",
+                conflictsOnly
+                  ? "bg-severity-hard-bg border-severity-hard-border text-severity-hard"
+                  : "border-border-subtle bg-transparent text-fg-tertiary hover:border-border-default hover:text-fg-secondary",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+              title="Show only reference-reuse conflicts"
+            >
+              {conflictsOnly ? "✓ " : ""}
+              {conflictCount} conflict{conflictCount === 1 ? "" : "s"}
+            </button>
+          )}
           {catalogFilter && (
             <button
               type="button"
@@ -107,6 +149,22 @@ export function ReviewQueue({
               aria-label="Clear catalog filter"
             >
               Clear filter
+            </button>
+          )}
+          <span className="flex-1" />
+          {conflictCount > 0 && onExportConflicts && (
+            <button
+              type="button"
+              onClick={onExportConflicts}
+              className={cn(
+                "inline-flex items-center h-6 px-2.5 rounded-md border text-xs font-medium",
+                "border-border-default bg-bg-elevated text-fg-primary",
+                "hover:bg-bg-hover hover:border-border-strong",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+              title="Export a Markdown report of all conflicts for manual review"
+            >
+              Export conflict report…
             </button>
           )}
         </div>

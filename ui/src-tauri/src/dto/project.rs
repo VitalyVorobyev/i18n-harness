@@ -19,9 +19,10 @@ pub struct ProjectOpenResponse {
 
 /// One unit that requires human attention in the project-wide review queue.
 ///
-/// A unit qualifies if `review_status == NeedsReview` OR `flags` is non-empty.
-/// Both conditions are surfaced because flags are themselves a "human attention"
-/// signal even before an explicit `NeedsReview` event has been recorded.
+/// A unit qualifies if its review status is `NeedsReview`/`Conflict`, it carries
+/// a **hard** (un-shippable) flag, or it is still `Proposed`. A `Finished` unit
+/// whose only flags are soft/semantic is *done* and is excluded — see
+/// [`CatalogStateCounts`] for the rationale.
 #[derive(Debug, Serialize)]
 pub struct ReviewQueueItem {
     /// Absolute path to the catalog file on disk.
@@ -51,6 +52,20 @@ pub struct ReviewQueueItem {
 /// Per-catalog unit-state tally, computed during the review-queue scan so the
 /// UI can show progress numbers for every catalog (including unopened ones)
 /// without a second extract pass.
+///
+/// `needs_review` is the deduped headline ("items to review"): a unit counts
+/// once if it has an explicit `NeedsReview`/`Conflict` review status, carries a
+/// **hard** (un-shippable) flag, or is still `Proposed` (machine output not yet
+/// confirmed). A `Finished` unit that only carries soft/semantic flags is
+/// *done* and is excluded — that overlap was the source of the count that did
+/// not reconcile with finished/proposed/left.
+///
+/// The `conflicts`, `hard_flagged`, and `proposed` fields are a display
+/// breakdown of *why* units land in the headline. They may overlap (a single
+/// unit can be both a conflict and hard-flagged), so they are not expected to
+/// sum to `needs_review`; they exist so the UI can render
+/// `N to review · C conflicts · F flagged · P proposed` and let the user see
+/// the composition of the headline.
 #[derive(Debug, Default, Serialize)]
 pub struct CatalogStateCounts {
     /// Every unit in the catalog, regardless of state.
@@ -63,8 +78,15 @@ pub struct CatalogStateCounts {
     pub untranslated: usize,
     /// `UnitState::Vanished` + `UnitState::Obsolete` units.
     pub vanished_obsolete: usize,
-    /// Units flagged for human attention (`NeedsReview`/`Conflict` or any flag).
+    /// Deduped headline: units that genuinely need human attention (see the
+    /// type-level doc for the exact predicate).
     pub needs_review: usize,
+    /// Units whose review status is `Conflict` (reference-reuse disagreement).
+    /// Breakdown field — may overlap `needs_review` contributors.
+    pub conflicts: usize,
+    /// Units carrying at least one hard (un-shippable) flag. Breakdown field —
+    /// may overlap `needs_review` contributors.
+    pub hard_flagged: usize,
 }
 
 /// Aggregated result of a project-wide review-queue scan.
