@@ -177,7 +177,7 @@ mod tests {
             .iter()
             .map(|f| f.id())
             .collect();
-        assert_eq!(ids, ["qt-ts", "gettext-po", "icu-json"]);
+        assert_eq!(ids, ["qt-ts", "lingui-po", "gettext-po", "icu-json"]);
     }
 
     #[test]

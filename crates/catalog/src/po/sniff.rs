@@ -8,6 +8,16 @@ use crate::format::{Confidence, SniffHit, strip_bom, utf8_prefix};
 /// is `High` confidence; a header without one, or bare pairs, is `Medium`.
 pub(crate) fn sniff(head: &[u8]) -> Option<SniffHit> {
     let text = utf8_prefix(strip_bom(head));
+    if is_lingui(text) {
+        // A Lingui file is PO, but its messages are ICU: leave it to the
+        // Lingui format.
+        return Some(SniffHit {
+            confidence: Confidence::Medium,
+            language: header_language(text),
+            reason: "PO written by Lingui — read as gettext only if Lingui is not available"
+                .to_owned(),
+        });
+    }
     if !text.contains("msgid") || !text.contains("msgstr") {
         return None;
     }
@@ -39,6 +49,26 @@ pub(crate) fn sniff(head: &[u8]) -> Option<SniffHit> {
         language,
         reason,
     })
+}
+
+/// Recognize a PO catalog written by Lingui (`X-Generator: @lingui/cli`).
+pub(crate) fn sniff_lingui(head: &[u8]) -> Option<SniffHit> {
+    let text = utf8_prefix(strip_bom(head));
+    is_lingui(text).then(|| {
+        let language = header_language(text);
+        SniffHit {
+            confidence: Confidence::High,
+            reason: match &language {
+                Some(lang) => format!("Lingui PO catalog (X-Generator: @lingui/cli) for {lang}"),
+                None => "Lingui PO catalog (X-Generator: @lingui/cli)".to_owned(),
+            },
+            language,
+        }
+    })
+}
+
+fn is_lingui(text: &str) -> bool {
+    text.contains("msgid") && text.contains("X-Generator: @lingui/cli")
 }
 
 /// Value of the header's `Language:` field (`"Language: de_DE\n"` inside the

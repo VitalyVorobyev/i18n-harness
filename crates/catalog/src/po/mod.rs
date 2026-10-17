@@ -37,7 +37,7 @@ pub(crate) mod placeholder;
 mod sniff;
 pub(crate) mod write;
 
-pub(crate) use parse::ExtractStatePo;
+pub(crate) use parse::{ExtractStatePo, PoDialect};
 
 /// The PO format plugin.
 #[derive(Debug, Clone, Copy, Default)]
@@ -84,7 +84,7 @@ impl PoFormat {
     ///
     /// See [`CatalogFormat::open`].
     pub fn extract(&self, path: &Path) -> Result<Catalog, CatalogError> {
-        parse::extract(path)
+        parse::extract(path, PoDialect::Gettext)
     }
 
     /// Render `units` into `catalog`'s bytes and write them atomically to
@@ -100,6 +100,50 @@ impl PoFormat {
         out: &Path,
     ) -> Result<(), CatalogError> {
         catalog.write(units, out)
+    }
+}
+
+/// Lingui's PO catalogs: the gettext PO grammar with ICU MessageFormat
+/// messages (`{name}`, `{count, plural, one {…} other {…}}`) instead of
+/// printf placeholders. Recognized by the `X-Generator: @lingui/cli`
+/// header Lingui writes.
+///
+/// Messages are keyed by their source text (Lingui's default). With
+/// explicit ids (`#. js-lingui-explicit-id`) the msgid is the id, and the
+/// source text lives in the source-locale catalog.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LinguiPoFormat;
+
+/// The shared instance [`FormatDoc::format`] hands out for Lingui PO documents.
+pub(crate) static LINGUI_PO_FORMAT: LinguiPoFormat = LinguiPoFormat;
+
+impl CatalogFormat for LinguiPoFormat {
+    fn id(&self) -> &'static str {
+        "lingui-po"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Lingui (PO)"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["po"]
+    }
+
+    fn sniff(&self, _path: &Path, head: &[u8]) -> Option<SniffHit> {
+        sniff::sniff_lingui(head)
+    }
+
+    fn open(&self, path: &Path) -> Result<Box<dyn FormatDoc>, CatalogError> {
+        Ok(Box::new(parse::extract(path, PoDialect::Lingui)?))
+    }
+
+    fn placeholders_to_icu(&self, native: &str) -> Result<String, PlaceholderError> {
+        crate::icu_json::placeholder::to_icu(native)
+    }
+
+    fn placeholders_from_icu(&self, icu: &str) -> Result<String, PlaceholderError> {
+        crate::icu_json::placeholder::from_icu(icu)
     }
 }
 

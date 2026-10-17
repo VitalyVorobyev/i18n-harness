@@ -131,7 +131,10 @@ pub(crate) enum ExtractState {
 impl FormatDoc for Catalog {
     fn format(&self) -> &'static dyn CatalogFormat {
         match &self.extract_state {
-            ExtractState::Po(_) => &crate::po::PO_FORMAT,
+            ExtractState::Po(state) => match state.dialect {
+                crate::po::PoDialect::Gettext => &crate::po::PO_FORMAT,
+                crate::po::PoDialect::Lingui => &crate::po::LINGUI_PO_FORMAT,
+            },
             ExtractState::IcuJson(_) => &crate::icu_json::ICU_JSON_FORMAT,
         }
     }

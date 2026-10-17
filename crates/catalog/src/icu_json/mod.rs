@@ -33,7 +33,7 @@ use crate::error::{CatalogError, PlaceholderError};
 use crate::format::{CatalogFormat, FormatDoc, SniffHit};
 
 mod parse;
-mod placeholder;
+pub(crate) mod placeholder;
 mod sniff;
 pub(crate) mod write;
 
