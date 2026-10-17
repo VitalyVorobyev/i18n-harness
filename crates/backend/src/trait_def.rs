@@ -76,7 +76,7 @@ use crate::outcome::TranslationOutcome;
 /// - That timeouts are handled — backends with network calls implement
 ///   their own timeout strategy and surface failures via
 ///   [`BackendError::Network`] or [`TranslationOutcome::Failed`].
-pub trait TranslationBackend {
+pub trait TranslationBackend: Send + Sync {
     /// Short, stable, machine-readable identifier for this backend.
     /// Recorded as the `backend` label on metrics events.
     fn name(&self) -> &str;

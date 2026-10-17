@@ -243,6 +243,7 @@ model = "gemma3:27b"
             path: PathBuf::from("translations/app2.ts"),
             format: FormatId::from("qt-ts"),
             locale: "es_ES".to_owned(),
+            pivot: None,
         })
         .expect("add_catalog");
 

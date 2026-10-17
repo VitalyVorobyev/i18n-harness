@@ -1,17 +1,26 @@
-import "@fontsource-variable/inter/wght.css";
-import "@fontsource-variable/jetbrains-mono/wght.css";
-import "./styles/tailwind.css";
+import "./styles.css";
 
-import React from "react";
-import ReactDOM from "react-dom/client";
+import { initTheme, Toaster, TooltipProvider } from "@vitavision/ui";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
 
-import { App } from "./App";
+import { ApiContext, loadApi } from "./api";
+import { App } from "./app/App";
 
-const rootEl = document.getElementById("root");
-if (!rootEl) throw new Error("missing #root");
+initTheme();
 
-ReactDOM.createRoot(rootEl).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+const root = document.getElementById("root");
+if (!root) throw new Error("index.html has no #root");
+
+void loadApi().then((api) => {
+  createRoot(root).render(
+    <StrictMode>
+      <ApiContext value={api}>
+        <TooltipProvider>
+          <App />
+          <Toaster />
+        </TooltipProvider>
+      </ApiContext>
+    </StrictMode>,
+  );
+});

@@ -80,7 +80,7 @@ pub enum ManualResponse {
 /// [`Self::new`] and (optionally) [`Self::named`].
 pub struct ManualBackend<F>
 where
-    F: Fn(&PromptContext<'_>) -> ManualResponse,
+    F: Fn(&PromptContext<'_>) -> ManualResponse + Send + Sync,
 {
     name: String,
     deterministic: bool,
@@ -89,7 +89,7 @@ where
 
 impl<F> ManualBackend<F>
 where
-    F: Fn(&PromptContext<'_>) -> ManualResponse,
+    F: Fn(&PromptContext<'_>) -> ManualResponse + Send + Sync,
 {
     /// Construct a manual backend named `"manual"` and declared
     /// deterministic (the closure is assumed to be pure unless the
@@ -117,7 +117,7 @@ where
 
 impl<F> TranslationBackend for ManualBackend<F>
 where
-    F: Fn(&PromptContext<'_>) -> ManualResponse,
+    F: Fn(&PromptContext<'_>) -> ManualResponse + Send + Sync,
 {
     fn name(&self) -> &str {
         &self.name

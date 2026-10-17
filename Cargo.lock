@@ -1593,31 +1593,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "i18n-harness-ui"
+name = "i18n-harness-session"
 version = "0.1.0"
 dependencies = [
- "i18n-harness-adapter-qt",
  "i18n-harness-backend",
- "i18n-harness-catalog",
  "i18n-harness-core",
  "i18n-harness-formats",
  "i18n-harness-gate",
  "i18n-harness-glossary",
  "i18n-harness-locales",
  "i18n-harness-project",
- "i18n-harness-reuse",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "i18n-harness-ui"
+version = "0.1.0"
+dependencies = [
+ "i18n-harness-backend",
+ "i18n-harness-core",
+ "i18n-harness-locales",
+ "i18n-harness-session",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

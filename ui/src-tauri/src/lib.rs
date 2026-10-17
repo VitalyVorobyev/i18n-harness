@@ -1,28 +1,16 @@
-//! Tauri desktop shell for the i18n-harness.
+//! Desktop shell: Tauri commands over [`i18n_harness_session::Session`].
 //!
-//! `lib.rs` is the entry point and the `AppState` re-export. The
-//! Tauri command surface lives under `commands/` (organized by
-//! feature bucket), the IPC wire types live under `dto/`, and the
-//! Tauri-free business logic lives under `services/`. The shell
-//! itself is a thin wrapper; translation, gate, and adapter logic
-//! remain in the workspace's pure-Rust crates and are testable as
-//! a headless library.
+//! Every command is a thin wrapper; catalog handling, status rules, the
+//! merge of model answers and the save guard all live in the session crate.
 
-mod backing;
-mod cancellation;
-pub mod commands;
-mod dto;
+mod commands;
 mod error;
-mod jobs;
-mod services;
 mod state;
+mod translation;
 
-pub use dto::*;
 pub use state::AppState;
-pub(crate) use state::OpenCatalogEntry;
 
-/// Entry point invoked from `main.rs` (and from the mobile entry point
-/// macro when the crate is built for iOS/Android).
+/// Start the desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -32,13 +20,29 @@ pub fn run() {
         )
         .init();
 
-    let builder = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default());
-
-    let builder = commands::build_handler(builder);
-
-    builder
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::app_info,
+            commands::list_languages,
+            commands::open_folder,
+            commands::close_folder,
+            commands::list_catalogs,
+            commands::list_units,
+            commands::set_translation,
+            commands::set_done,
+            commands::save,
+            commands::set_pivot,
+            commands::get_glossary,
+            commands::set_glossary,
+            commands::get_model_settings,
+            commands::set_model_settings,
+            commands::list_models,
+            translation::translate_one,
+            translation::start_translation,
+            translation::cancel_translation,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

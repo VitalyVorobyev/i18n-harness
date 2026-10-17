@@ -21,17 +21,26 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
-        "transparent": false,
-        "theme": "Dark"
+        "transparent": false
       }
     ],
     "security": {
       "csp": {
         "default-src": "'self'",
         "script-src": "'self'",
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "font-src": ["'self'", "data:"],
-        "img-src": ["'self'", "asset:", "data:"],
+        "style-src": [
+          "'self'",
+          "'unsafe-inline'"
+        ],
+        "font-src": [
+          "'self'",
+          "data:"
+        ],
+        "img-src": [
+          "'self'",
+          "asset:",
+          "data:"
+        ],
         "connect-src": [
           "'self'",
           "ipc:",

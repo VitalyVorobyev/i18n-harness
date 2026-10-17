@@ -1,0 +1,196 @@
+//! Commands that read or change the open session.
+
+use std::path::{Path, PathBuf};
+
+use i18n_harness_locales::Locale;
+use i18n_harness_session::{
+    CatalogSummary, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session, UnitFilter,
+    UnitPage, UnitView,
+};
+use serde::Serialize;
+
+use crate::error::CommandResult;
+use crate::state::AppState;
+
+/// Version information for the About line.
+#[derive(Debug, Serialize)]
+pub(crate) struct AppInfo {
+    version: &'static str,
+    cldr: &'static str,
+}
+
+#[tauri::command]
+pub(crate) fn app_info() -> AppInfo {
+    AppInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        cldr: i18n_harness_locales::CLDR_VERSION,
+    }
+}
+
+/// A language a user can pick.
+#[derive(Debug, Serialize)]
+pub(crate) struct Language {
+    id: &'static str,
+    name: &'static str,
+}
+
+#[tauri::command]
+pub(crate) fn list_languages() -> Vec<Language> {
+    let mut languages: Vec<Language> = Locale::all()
+        .map(|l| Language {
+            id: l.id,
+            name: l.name,
+        })
+        .collect();
+    languages.sort_by(|a, b| a.name.cmp(b.name));
+    languages
+}
+
+/// An opened folder.
+#[derive(Debug, Serialize)]
+pub(crate) struct FolderView {
+    root: String,
+    catalogs: Vec<CatalogSummary>,
+    warnings: Vec<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn open_folder(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<FolderView> {
+    let session =
+        tauri::async_runtime::spawn_blocking(move || Session::open_folder(Path::new(&path)))
+            .await
+            .map_err(|e| crate::error::CommandError::internal(e.to_string()))??;
+    let view = FolderView {
+        root: session.root().display().to_string(),
+        catalogs: session.catalogs(),
+        warnings: session.warnings().to_vec(),
+    };
+    *state.slot() = Some(session);
+    Ok(view)
+}
+
+#[tauri::command]
+pub(crate) fn close_folder(state: tauri::State<'_, AppState>) {
+    state.cancel_job();
+    *state.slot() = None;
+}
+
+#[tauri::command]
+pub(crate) fn list_catalogs(
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<CatalogSummary>> {
+    state.with(|s| Ok(s.catalogs()))
+}
+
+#[tauri::command]
+pub(crate) fn list_units(
+    path: String,
+    filter: UnitFilter,
+    offset: usize,
+    limit: usize,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<UnitPage> {
+    state.with(|s| Ok(s.units(Path::new(&path), &filter, offset, limit)?))
+}
+
+#[tauri::command]
+pub(crate) fn set_translation(
+    path: String,
+    id: String,
+    forms: Vec<String>,
+    done: bool,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<UnitView> {
+    state.with(|s| Ok(s.set_translation(Path::new(&path), &id, forms, done)?))
+}
+
+#[tauri::command]
+pub(crate) fn set_done(
+    path: String,
+    ids: Vec<String>,
+    done: bool,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<UnitView>> {
+    state.with(|s| Ok(s.set_done(Path::new(&path), &ids, done)?))
+}
+
+#[tauri::command]
+pub(crate) fn save(
+    path: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<SaveReport> {
+    state.with(|s| Ok(s.save(path.as_deref().map(Path::new))?))
+}
+
+#[tauri::command]
+pub(crate) fn set_pivot(
+    path: String,
+    pivot: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<CatalogSummary> {
+    let path = PathBuf::from(path);
+    state.with(|s| {
+        s.set_pivot(&path, pivot.as_deref())?;
+        Ok(s.catalog_summary(&path)?)
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_glossary(
+    locale: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<GlossaryEntry>> {
+    state.with(|s| Ok(s.glossary(&locale)))
+}
+
+#[tauri::command]
+pub(crate) fn set_glossary(
+    locale: String,
+    entries: Vec<GlossaryEntry>,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<GlossaryEntry>> {
+    state.with(|s| {
+        s.set_glossary(&locale, entries)?;
+        Ok(s.glossary(&locale))
+    })
+}
+
+#[tauri::command]
+pub(crate) fn get_model_settings(
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<ModelSettings> {
+    state.with(|s| Ok(model_settings(s)))
+}
+
+#[tauri::command]
+pub(crate) fn set_model_settings(
+    settings: ModelSettings,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<ModelSettings> {
+    state.with(|s| {
+        s.project_mut()
+            .set_backend(settings.to_config())
+            .map_err(i18n_harness_session::SessionError::from)?;
+        s.project()
+            .save_manifest()
+            .map_err(i18n_harness_session::SessionError::from)?;
+        Ok(model_settings(s))
+    })
+}
+
+/// Models the server in `settings` offers. Works without an open folder, so
+/// the first screen can show whether a model server is running.
+#[tauri::command]
+pub(crate) async fn list_models(settings: ModelSettings) -> CommandResult<Vec<ModelChoice>> {
+    tauri::async_runtime::spawn_blocking(move || i18n_harness_session::list_models(&settings))
+        .await
+        .map_err(|e| crate::error::CommandError::internal(e.to_string()))?
+        .map_err(Into::into)
+}
+
+pub(crate) fn model_settings(session: &Session) -> ModelSettings {
+    ModelSettings::from_config(session.project().manifest().backends.default.as_ref())
+}

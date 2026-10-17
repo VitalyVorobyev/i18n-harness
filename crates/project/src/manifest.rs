@@ -122,6 +122,11 @@ pub struct CatalogEntry {
     pub format: FormatId,
     /// Locale id this catalog serves (e.g. `"de_DE"`).
     pub locale: String,
+    /// Language of the text currently in the catalog's targets, when it is
+    /// not `locale` (e.g. a Slovak catalog delivered pre-filled with German).
+    /// Such targets are inputs to retranslate, not finished translations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<String>,
 }
 
 /// One entry in the `[[references]]` array — an expert-translated catalog
@@ -214,6 +219,7 @@ pub enum BackendKind {
     /// Ollama local inference server.
     Ollama,
     /// Any OpenAI-compatible HTTP API (OpenAI, LM Studio, …).
+    #[serde(rename = "openai-compatible", alias = "open-ai-compatible")]
     OpenAiCompatible,
     /// Anthropic managed agent / Claude API.
     Agent,
