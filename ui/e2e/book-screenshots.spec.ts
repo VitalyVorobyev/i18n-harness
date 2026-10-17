@@ -111,7 +111,10 @@ test("settings", async ({ page }) => {
 
 test("other files", async ({ page }) => {
   await openFolder(page);
-  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
+    .click();
   await page.getByRole("radio", { name: /All/ }).click();
   await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
   await expect(page.getByRole("region", { name: "Other files" })).toBeVisible();

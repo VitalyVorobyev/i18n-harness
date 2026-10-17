@@ -97,16 +97,18 @@ export function Strings(props: {
           </div>
         ) : (
           <Table
-            // A fresh table when rows come back after an empty list: the
-            // windowed table keeps measuring the scroll area it had before.
-            key={rows.length === 0 ? "empty" : "rows"}
             caption={`${catalog.name}: strings`}
             columns={columnsFor(catalog, props.allFiles)}
             rows={rows}
             rowKey={rowKey}
             className="h-full"
             windowed={{ rowHeight: ROW_HEIGHT }}
-            onRowClick={(row, _index, event) => props.onActivate(row, event.type === "keydown")}
+            // The arrow keys move the selection; Enter or Space also moves
+            // the cursor into the editor.
+            selectionFollowsFocus
+            onRowClick={(row, _index, event) =>
+              props.onActivate(row, "key" in event && (event.key === "Enter" || event.key === " "))
+            }
             isRowActive={(row) => rowKey(row) === props.activeKey}
             empty={emptyMessage(props.tab, props.search, props.show, props.allFiles)}
           />
@@ -120,6 +122,10 @@ export function Strings(props: {
           {props.allFiles ? "in only one file" : "only in this file"}
         </span>
         <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> move
+          </span>
           <span>
             <Kbd>Enter</Kbd> edit
           </span>

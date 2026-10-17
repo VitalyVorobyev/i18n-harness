@@ -59,17 +59,17 @@ Create a folder `pivot-demo` with `app_sk_SK.ts`:
 
 ## Steps
 
-1. Open `pivot-demo` in the app. `app_sk_SK.ts` shows *Slovak · Qt
+1. Open `pivot-demo` in the app. `app` is listed under *Slovak · Qt
    Linguist*, and only the two empty strings count as *to do* — the app
    believes the German texts are Slovak.
-2. In **Files**, click the **⋯** button next to `app_sk_SK.ts` and choose
+2. Hover `app` in the file list, click its **⋯** button and choose
    **Language of the existing text…**.
 
    ![Language of the existing text](../images/pivot-dialog.png)
 
 3. Choose **German** and click **Apply**.
 
-   The file now reads *Slovak · from German · Qt Linguist*, all six
+   The file is now listed under *Slovak · from German · Qt Linguist*, all six
    strings are **To do**, and the table has a **From German** column
    with the existing texts. The Slovak column is empty: the German text
    is not a Slovak translation.

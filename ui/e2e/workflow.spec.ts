@@ -19,8 +19,10 @@ test("open, translate, confirm and save", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
 
   const files = page.getByRole("navigation", { name: "Files" });
-  await expect(files.getByText("App_sk_SK.ts")).toBeVisible();
-  await expect(files.getByText("Slovak · from German · Qt Linguist")).toBeVisible();
+  await expect(files.getByRole("button", { name: /^App_sk_SK\.ts:/ })).toBeVisible();
+  await expect(
+    files.getByRole("heading", { name: "Slovak · from German · Qt Linguist" }),
+  ).toBeVisible();
   // The German texts of a pivot catalog are work to do.
   await expect(page.getByRole("radio", { name: /To do 46/ })).toBeVisible();
 
@@ -73,8 +75,8 @@ test("the language of the existing text can be changed", async ({ page }) => {
   await dialog.getByRole("button", { name: "Apply" }).click();
   await expect(
     page
-      .getByRole("navigation", { name: "Files" })
-      .getByRole("button", { name: /App_sk_SK\.ts Slovak · Qt Linguist/ }),
+      .getByRole("region", { name: "Slovak · Qt Linguist" })
+      .getByRole("button", { name: /^App_sk_SK\.ts:/ }),
   ).toBeVisible();
 });
 
@@ -138,8 +140,8 @@ test("a glossary imported later is applied to finished translations", async ({ p
 test("choosing the file already shown keeps its strings", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
   const files = page.getByRole("navigation", { name: "Files" });
-  await files.getByText("App_sk_SK.ts").click();
-  await files.getByText("App_sk_SK.ts").click();
+  await files.getByRole("button", { name: /^App_sk_SK\.ts:/ }).click();
+  await files.getByRole("button", { name: /^App_sk_SK\.ts:/ }).click();
   await expect(page.getByRole("cell", { name: /Filter Size/ })).toBeVisible();
 });
 
@@ -149,7 +151,11 @@ test("the keyboard moves through the strings and into the editor", async ({ page
   const editor = page.getByRole("complementary", { name: "Translation" });
   await expect(editor.getByText("Filter Size", { exact: true })).toBeVisible();
 
-  // Enter on the row: the cursor goes into its translation.
+  // ↓ selects the next string; Enter moves the cursor into its translation.
+  await page.keyboard.press("ArrowDown");
+  await expect(editor.getByText("pix", { exact: true })).toBeVisible();
+  await page.keyboard.press("ArrowUp");
+  await expect(editor.getByText("Filter Size", { exact: true })).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(editor.getByRole("textbox")).toBeFocused();
 
@@ -174,7 +180,10 @@ test("the keyboard moves through the strings and into the editor", async ({ page
 
 test("warnings can be listed and the length check tuned", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
-  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
+    .click();
   await page.getByRole("radio", { name: /All/ }).click();
   await page.getByRole("combobox", { name: "Which strings" }).click();
   await page.getByRole("option", { name: "Warnings (1)" }).click();
@@ -193,7 +202,10 @@ test("warnings can be listed and the length check tuned", async ({ page }) => {
 
 test("strings translated differently in another file can be listed", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
-  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
+    .click();
   await page.getByRole("radio", { name: /All/ }).click();
   await page.getByRole("combobox", { name: "Which strings" }).click();
   await page.getByRole("option", { name: /Translated differently in other files \(1\)/ }).click();
@@ -214,7 +226,10 @@ test("strings to do are filled from what other files agree on", async ({ page })
 
 test("a translation differing between files is resolved from the editor", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
-  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
+    .click();
   await page.getByRole("radio", { name: /All/ }).click();
   await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
   const editor = page.getByRole("complementary", { name: "Translation" });
@@ -239,7 +254,10 @@ test("a translation differing between files is resolved from the editor", async 
 
 test("all files can be listed together", async ({ page }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
-  await page.getByRole("navigation", { name: "Files" }).getByText("All files").click();
+  await page
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: /^All files:/ })
+    .click();
   await page.getByRole("radio", { name: /All/ }).click();
   await expect(page.getByRole("columnheader", { name: "File" })).toBeVisible();
   // Only the rows in view are drawn; the search brings a later file's string up.

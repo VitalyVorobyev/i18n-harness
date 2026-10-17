@@ -27,8 +27,16 @@ in front of the text. A real model writes real Slovak.
    (up to 8 levels deep, skipping hidden folders and the folders
    `node_modules`, `target`, `dist`, `build` and `__pycache__`).
 
-The workspace opens. On the left, **Files** lists every translation file
-found, with its language, the format and a progress bar:
+The workspace opens. On the left are the translation files found, grouped
+by what they have in common: a heading such as *Slovak · from German · Qt
+Linguist* names the target language, the language of any text already in
+the files, and the format (and the folder, when the files live in
+several). Each file is listed by its short name, `AcfSln` for
+`AcfSln_sk_SK.ts`, with a bar showing how far it is: green for done,
+amber for strings to check, grey for the rest still to do. A red number
+counts problems and a dot marks unsaved changes; hover a file for its
+full name and counts. **All files** at the top shows every file's strings
+together.
 
 ![Workspace](../images/workspace.png)
 
