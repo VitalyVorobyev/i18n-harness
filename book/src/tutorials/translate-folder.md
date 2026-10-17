@@ -65,9 +65,10 @@ translators, a preview build), add `--deliver`:
 harness translate-folder qt-demo --model <model> --save --deliver
 ```
 
-Translations with **no errors and no warnings** become **Done** (in a Qt
-file, `type="unfinished"` is removed). Translations with a warning stay
-under **Check**, and those with an error are still held back.
+Translations **without errors** become **Done** (in a Qt file,
+`type="unfinished"` is removed), including those with a warning; review
+the warnings later in the app if you can. Translations with an error are
+still held back.
 
 ## All options
 
@@ -80,7 +81,7 @@ under **Check**, and those with an error are still held back.
 | `--server ollama\|openai-compatible` | Kind of server. Default `ollama`. |
 | `--host <URL>` | Server address. Default `http://localhost:11434`; for an OpenAI-compatible server give the address up to `/v1`, e.g. `http://localhost:1234/v1`. |
 | `--save` | Write the files at the end. |
-| `--deliver` | Mark clean translations as done. |
+| `--deliver` | Mark translations without errors as done. |
 
 The model server settings stored in the folder's `i18n-harness.toml` (by
 the app) are **not** used by this command; pass `--model`, `--server`

@@ -12,7 +12,10 @@ Releases are built by GitHub Actions from a version tag
    version = "0.2.0"
    ```
 
-   Every crate and the desktop app take their version from here.
+   Every crate and the desktop app take their version from here. Set the
+   same version on the internal crates under `[workspace.dependencies]`
+   and in `ui/package.json`; Cargo matches a pre-release such as
+   `0.2.0-rc.1` only when it is named exactly.
 2. Run the full checks locally ([Building and testing](building.md)),
    commit, and merge to `main`.
 3. Tag the commit and push the tag:
@@ -23,6 +26,8 @@ Releases are built by GitHub Actions from a version tag
    ```
 
    A tag with a suffix, such as `v0.2.0-rc.1`, makes a pre-release.
+   Windows installers need a numeric version, so the workflow builds the
+   MSI of `0.2.0-rc.1` as `0.2.0.1`.
 4. The workflow checks that the tag matches the workspace version, then
    creates a **draft** release with generated notes and attaches:
 

@@ -1444,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-adapter-qt"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-catalog",
  "i18n-harness-core",
@@ -1455,7 +1455,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-backend"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-core",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-catalog"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-core",
  "proptest",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-cli"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1508,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-core"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "proptest",
  "serde",
@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-formats"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-catalog",
@@ -1527,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-gate"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-core",
@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-glossary"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-core",
  "i18n-harness-locales",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-lab"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-locales"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "serde",
  "toml 0.9.12+spec-1.1.0",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-project"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-backend",
@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-reuse"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-adapter-qt",
  "i18n-harness-core",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-session"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-backend",
  "i18n-harness-core",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "i18n-harness-ui"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "i18n-harness-backend",
  "i18n-harness-core",
@@ -5201,7 +5201,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 dependencies = [
  "anyhow",
  "serde_json",

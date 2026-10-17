@@ -69,5 +69,6 @@ file's `[locales.<id>]`:
 See [Keep terms unchanged with a glossary](../tutorials/glossary.md#how-the-glossary-is-used)
 for what is told to the model and what is checked. In short: *keep
 unchanged* terms are both told to chat models and enforced by the
-[protected term check](checks.md#protected-term); fixed translations are
-only told to chat models.
+[protected term check](checks.md#protected-term) (an error); fixed
+translations are told to chat models and checked by the
+[glossary translation check](checks.md#glossary-translation) (a warning).

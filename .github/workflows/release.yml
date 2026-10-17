@@ -27,6 +27,7 @@ jobs:
     outputs:
       id: ${{ steps.create.outputs.id }}
       version: ${{ steps.version.outputs.version }}
+      msi_version: ${{ steps.version.outputs.msi_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check the tag matches the workspace version
@@ -39,6 +40,13 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          # An MSI version is numeric only: 0.2.0-rc.1 is built as 0.2.0.1.
+          case "$version" in
+            *-*)
+              n=$(printf '%s' "${version#*-}" | tr -cd '0-9')
+              echo "msi_version=${version%%-*}.${n:-0}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
       - name: Create the draft release
         id: create
         env:
@@ -84,6 +92,12 @@ jobs:
       - name: Install JS dependencies
         working-directory: ui
         run: bun install --frozen-lockfile
+      - name: Numeric MSI version for a pre-release
+        if: runner.os == 'Windows' && needs.release.outputs.msi_version != ''
+        shell: bash
+        run: |
+          printf '{"bundle":{"windows":{"wix":{"version":"%s"}}}}\n' \
+            "${{ needs.release.outputs.msi_version }}" > ui/src-tauri/tauri.windows.conf.json
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}

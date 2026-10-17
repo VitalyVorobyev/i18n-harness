@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use i18n_harness_adapter_qt::{extract, render, render_subset};
 use i18n_harness_core::UnitId;
@@ -42,13 +43,12 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn ids_of(bytes: &[u8]) -> Vec<UnitId> {
+    // Tests run in parallel and the clock is coarse on some systems.
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!(
         "i18n-subset-ids-{}-{}",
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
+        NEXT.fetch_add(1, Ordering::Relaxed),
     ));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("subset.ts");

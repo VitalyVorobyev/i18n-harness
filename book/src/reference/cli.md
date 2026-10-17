@@ -12,6 +12,7 @@ harness <COMMAND> --help
 | Command | What it does |
 |---|---|
 | [`translate-folder`](#translate-folder) | Translate everything still to do in a folder, as the app does. |
+| [`import-glossary`](#import-glossary) | Merge a term table from a spreadsheet into a folder's glossary. |
 | [`round-trip`](#round-trip) | Prove a file is read and written back byte for byte. |
 | [`gate`](#gate) | Run the checks on a file's translations. |
 | [`init`](#init) | Create `i18n-harness.toml` for a folder. |
@@ -44,13 +45,33 @@ session code as the desktop app.
 | `--input <auto\|source>` | `auto` | `auto`: from the sound pivot text when there is one, else the original. `source`: always the original. |
 | `--server <ollama\|openai-compatible>` | `ollama` | Kind of server. |
 | `--host <URL>` | `http://localhost:11434` | Server address (up to `/v1` for OpenAI-compatible). |
-| `--deliver` | off | Mark translations without errors or warnings as done (finished in the file). Otherwise they await a check. |
+| `--deliver` | off | Mark translations without errors as done (finished in the file), also those with a warning. Otherwise they await a check. |
+| `--fix-glossary` | off | Instead of the strings to do, retranslate every translated string that breaks the glossary, whatever its status. Prints how many still break it afterwards. |
 | `--save` | off | Write the files at the end. Translations with errors keep the file's previous text. |
 
 Environment: `OPENAI_API_KEY` / `OLLAMA_API_KEY` (bearer token).
 Exit status: 0 when the run completed (also with held-back
 translations); non-zero when the folder cannot be opened or the server
 fails. See the [tutorial](../tutorials/translate-folder.md).
+
+## import-glossary
+
+```text
+harness import-glossary --language <LOCALE> <FOLDER> <TABLE>
+```
+
+Merges a term table into the glossary of `<FOLDER>` (creating
+`i18n-harness.toml` and `glossary.toml` when missing). `<TABLE>` is text
+as a spreadsheet saves it — CSV, semicolon-separated or tab-separated —
+with the columns *term*, *translation*, *note*; see
+[the term table](../tutorials/glossary.md#the-term-table). `--language`
+is the language of the translation column (`sk_SK`). A term already in
+the glossary is updated, a new one added; nothing is removed.
+
+```sh
+harness import-glossary --language sk_SK ./catalogs terms.csv
+harness translate-folder ./catalogs --model <model> --fix-glossary --save
+```
 
 ## round-trip
 
