@@ -13,8 +13,7 @@ workspace = true
 
 [dependencies]
 i18n-harness-core.workspace = true
-i18n-harness-locales.workspace = true
-i18n-harness-gate.workspace = true
+i18n-harness-catalog.workspace = true
 quick-xml.workspace = true
 thiserror.workspace = true
 

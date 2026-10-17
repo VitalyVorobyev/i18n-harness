@@ -220,7 +220,7 @@ pub(crate) fn to_icu(native: &str) -> Result<String, PlaceholderError> {
 /// trait-default convention (no per-unit context).
 ///
 /// See module docs for the mapping. Implementations of
-/// [`crate::CatalogFormat::apply`] use the richer
+/// [`crate::FormatDoc::render`] use the richer
 /// [`from_icu_with_table`] path when they have per-unit specifier info.
 pub(crate) fn from_icu(icu: &str) -> Result<String, PlaceholderError> {
     from_icu_inner(icu, None)

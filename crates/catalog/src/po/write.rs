@@ -16,9 +16,6 @@
 //!
 //! Edits are applied right-to-left so earlier offsets stay valid.
 
-use std::fs;
-use std::path::Path;
-
 use i18n_harness_core::{Target, Unit, UnitState};
 
 use super::parse::MsgstrBlock;
@@ -26,7 +23,7 @@ use super::placeholder::{PoPlaceholder, from_icu_with_table};
 use crate::catalog::{Catalog, ExtractState};
 use crate::error::CatalogError;
 
-pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, CatalogError> {
+pub(crate) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, CatalogError> {
     let edit = match &catalog.extract_state {
         ExtractState::Po(s) => s,
         _ => {
@@ -121,38 +118,6 @@ pub(super) fn render(catalog: &Catalog, units: &[Unit]) -> Result<Vec<u8>, Catal
     }
     out.extend_from_slice(&catalog.source_bytes[cursor..]);
     Ok(out)
-}
-
-pub(super) fn apply(catalog: &Catalog, units: &[Unit], out: &Path) -> Result<(), CatalogError> {
-    let bytes = render(catalog, units)?;
-    write_atomically(out, &bytes)
-}
-
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), CatalogError> {
-    let dir = path.parent().ok_or_else(|| CatalogError::Io {
-        op: "write",
-        path: path.to_path_buf(),
-        source: std::io::Error::other("output path has no parent directory"),
-    })?;
-    let tmp = dir.join(format!(
-        ".{}.tmp-i18n-harness",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("catalog")
-    ));
-    fs::write(&tmp, bytes).map_err(|source| CatalogError::Io {
-        op: "write",
-        path: tmp.clone(),
-        source,
-    })?;
-    fs::rename(&tmp, path).map_err(|source| {
-        let _ = fs::remove_file(&tmp);
-        CatalogError::Io {
-            op: "rename",
-            path: path.to_path_buf(),
-            source,
-        }
-    })
 }
 
 fn collect_target_strings(t: &Target) -> Vec<Option<String>> {

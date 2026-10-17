@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use i18n_harness_adapter_qt::ExtractError;
+use i18n_harness_formats::CatalogError;
 use thiserror::Error;
 
 /// Errors that can occur while reusing translations from references, or
@@ -14,8 +14,9 @@ use thiserror::Error;
 pub enum ReuseError {
     /// A catalog (base, reference, or remainder) could not be extracted.
     ///
-    /// Occurs on I/O failure, malformed XML, or a non-`.ts` file. The wrapped
-    /// [`ExtractError`] carries the underlying cause; `path` records which
+    /// Occurs on I/O failure, a malformed file, or a file no registered
+    /// format recognizes. The wrapped [`CatalogError`] carries the underlying
+    /// cause; `path` records which
     /// catalog the harness was reading so the caller can point the user at it.
     /// The caller cannot recover automatically — the catalog must be fixed or
     /// re-pointed.
@@ -23,9 +24,9 @@ pub enum ReuseError {
     Extract {
         /// Path the harness tried to extract.
         path: PathBuf,
-        /// Underlying adapter extract error.
+        /// Underlying format error.
         #[source]
-        source: ExtractError,
+        source: CatalogError,
     },
 
     /// `merge_back` was handed a remainder containing unit ids that do not

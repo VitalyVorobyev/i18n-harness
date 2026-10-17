@@ -36,6 +36,7 @@
 mod batch;
 mod error;
 mod flag;
+pub mod fs;
 mod intermediate;
 mod placeholder;
 mod review;

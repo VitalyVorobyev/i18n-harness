@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use i18n_harness_project::{
-    BackendConfig, BackendKind, CatalogEntry, CatalogFormat, InMemoryFs, LocaleConfig, Project,
+    BackendConfig, BackendKind, CatalogEntry, FormatId, InMemoryFs, LocaleConfig, Project,
     ProjectFs, RegisterOverride,
 };
 
@@ -141,7 +141,7 @@ fn add_catalog_appends_and_preserves_existing() {
     project
         .add_catalog(CatalogEntry {
             path: PathBuf::from("translations/app_zh.json"),
-            format: CatalogFormat::IcuJson,
+            format: FormatId::from("icu-json"),
             locale: "zh_Hans".to_owned(),
         })
         .expect("add_catalog");
@@ -177,7 +177,7 @@ fn add_catalog_appends_and_preserves_existing() {
     // Parse and verify 3 catalogs.
     let (manifest, _) = i18n_harness_project::ProjectManifest::from_toml(&saved).expect("re-parse");
     assert_eq!(manifest.catalogs.len(), 3);
-    assert_eq!(manifest.catalogs[2].format, CatalogFormat::IcuJson);
+    assert_eq!(manifest.catalogs[2].format, FormatId::from("icu-json"));
 }
 
 // ── remove_catalog ────────────────────────────────────────────────────────────

@@ -208,7 +208,10 @@ fn end_to_end_reuse_split_fill_merge_equals_applying_all_translations() {
         vec![id("Main::Save the document")],
     );
     let base_after_reuse = tmp.path().join("base_after_reuse.ts");
-    apply(&reuse.base, &reuse.units, &base_after_reuse).expect("apply reuse");
+    reuse
+        .base
+        .write(&reuse.units, &base_after_reuse)
+        .expect("apply reuse");
 
     // 2) Split: write a subset of just the remaining (untranslated) ids.
     let remaining: HashSet<UnitId> = reuse.report.remaining_ids.iter().cloned().collect();
@@ -242,7 +245,10 @@ fn end_to_end_reuse_split_fill_merge_equals_applying_all_translations() {
     let merge = merge_back(&base_after_reuse, &remainder_filled).unwrap();
     assert_eq!(merge.report.merged, 2);
     let final_path = tmp.path().join("final.ts");
-    apply(&merge.base, &merge.units, &final_path).expect("apply merge");
+    merge
+        .base
+        .write(&merge.units, &final_path)
+        .expect("apply merge");
 
     // 5) Expected: apply ALL translations directly onto the original.
     let original_cat = extract(&original).unwrap();

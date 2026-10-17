@@ -774,10 +774,10 @@ fn import_batch_project_continues_past_hard_findings_in_one_catalog() {
     fs::remove_dir_all(&dir).ok();
 }
 
-// ── export_batch_project_warns_on_non_qt_catalogs ────────────────────────────
+// ── export_batch_project_exports_every_catalog_format ─────────────────────────
 
 #[test]
-fn export_batch_project_warns_on_non_qt_catalogs() {
+fn export_batch_project_exports_every_catalog_format() {
     let dir = tempdir();
     let proj = dir.join("proj");
     fs::create_dir_all(&proj).unwrap();
@@ -799,33 +799,28 @@ fn export_batch_project_warns_on_non_qt_catalogs() {
 
     assert!(
         out.status.success(),
-        "export-batch should succeed (PO just warns): stderr={}",
+        "export-batch should succeed: stderr={}",
         String::from_utf8_lossy(&out.stderr)
-    );
-
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("warning"),
-        "stderr must contain a 'warning' for the PO catalog: {stderr}"
     );
 
     let meta: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(batch.join("meta.json")).unwrap()).unwrap();
     let subfolders = meta["subfolders"].as_array().unwrap();
-    assert_eq!(
-        subfolders.len(),
-        1,
-        "only the Qt catalog should get a subfolder"
-    );
+    assert_eq!(subfolders.len(), 2, "both catalogs get a subfolder");
 
-    let sf = batch.join(subfolders[0].as_str().unwrap());
-    let sub_meta: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(sf.join("meta.json")).unwrap()).unwrap();
-    let source = sub_meta["source_catalog_path"].as_str().unwrap();
-    assert!(
-        source.ends_with("de.ts"),
-        "subfolder must be for de.ts, got {source}"
-    );
+    let mut sources: Vec<String> = subfolders
+        .iter()
+        .map(|sf| {
+            let sub_meta: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(batch.join(sf.as_str().unwrap()).join("meta.json")).unwrap(),
+            )
+            .unwrap();
+            sub_meta["source_catalog_path"].as_str().unwrap().to_owned()
+        })
+        .collect();
+    sources.sort();
+    assert!(sources[0].ends_with("de.po"), "{sources:?}");
+    assert!(sources[1].ends_with("de.ts"), "{sources:?}");
 
     fs::remove_dir_all(&dir).ok();
 }

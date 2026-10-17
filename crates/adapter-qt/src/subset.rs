@@ -41,8 +41,6 @@
 //!   lives in is pruned.
 
 use std::collections::HashSet;
-use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 use i18n_harness_core::UnitId;
@@ -128,29 +126,10 @@ pub fn write_subset(
 /// Atomic write helper, factored out of the subset/apply paths. Writes to a
 /// sibling `.tmp` file, fsyncs it, then renames over `out`.
 pub(crate) fn write_atomic(bytes: &[u8], out: &Path) -> Result<(), ApplyError> {
-    let tmp = match out.extension() {
-        Some(ext) => out.with_extension(format!("{}.tmp", ext.to_string_lossy())),
-        None => out.with_extension("tmp"),
-    };
-    {
-        let mut f = fs::File::create(&tmp).map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-        f.write_all(bytes).map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-        f.sync_all().map_err(|source| ApplyError::Io {
-            path: tmp.clone(),
-            source,
-        })?;
-    }
-    fs::rename(&tmp, out).map_err(|source| ApplyError::Io {
+    i18n_harness_core::fs::write_atomic(out, bytes).map_err(|source| ApplyError::Io {
         path: out.to_path_buf(),
         source,
-    })?;
-    Ok(())
+    })
 }
 
 /// Extend a `(start, end)` block backward over the run of leading horizontal

@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use i18n_harness_adapter_qt::{extract, render};
+use i18n_harness_adapter_qt::{QtTsFormat, extract, render};
+use i18n_harness_catalog::CatalogFormat;
+use i18n_harness_core::{Target, UnitState};
 
 fn fixtures_dir() -> PathBuf {
     let manifest = env!("CARGO_MANIFEST_DIR");
@@ -907,4 +909,90 @@ fn byte_diff_summary(a: &[u8], b: &[u8]) -> String {
         a_snip,
         b_snip,
     )
+}
+
+#[test]
+fn open_through_the_format_trait_then_render_is_byte_identical() {
+    let fmt: &dyn CatalogFormat = &QtTsFormat;
+    for fixture in all_ts_fixtures() {
+        let doc = fmt
+            .open(&fixture)
+            .unwrap_or_else(|e| panic!("open({}): {e}", fixture.display()));
+        assert_eq!(doc.format().id(), "qt-ts");
+        let rendered = doc
+            .render(doc.units())
+            .unwrap_or_else(|e| panic!("render({}): {e}", fixture.display()));
+        assert!(
+            rendered == doc.source_bytes(),
+            "trait round-trip differs for {}",
+            fixture.display()
+        );
+    }
+}
+
+#[test]
+fn plural_forms_come_from_the_file_not_from_cldr() {
+    // CLDR gives Slovak four categories (one, few, many, other); Qt's table,
+    // and therefore the file, has three forms.
+    let doc = QtTsFormat
+        .open(&fixtures_dir().join("sk_SK_pivot.ts"))
+        .expect("open sk fixture");
+    assert_eq!(doc.language(), Some("sk_SK"));
+    assert_eq!(doc.plural_forms(), Some(3));
+}
+
+#[test]
+fn plural_target_with_wrong_form_count_is_refused() {
+    let doc = QtTsFormat
+        .open(&fixtures_dir().join("sk_SK_pivot.ts"))
+        .expect("open sk fixture");
+    let mut unit = doc
+        .units()
+        .iter()
+        .find(|u| matches!(u.target, Target::Plural { .. }))
+        .expect("plural unit")
+        .clone();
+    unit.target = Target::Plural {
+        forms: vec![
+            Some("a".into()),
+            Some("b".into()),
+            Some("c".into()),
+            Some("d".into()),
+        ],
+    };
+    let err = doc
+        .render(&[unit])
+        .expect_err("four forms into three slots");
+    assert!(err.to_string().contains("expects 3"), "{err}");
+}
+
+#[test]
+fn plural_target_with_matching_form_count_fills_every_slot() {
+    let doc = QtTsFormat
+        .open(&fixtures_dir().join("sk_SK_pivot.ts"))
+        .expect("open sk fixture");
+    let mut unit = doc
+        .units()
+        .iter()
+        .find(|u| matches!(u.target, Target::Plural { .. }))
+        .expect("plural unit")
+        .clone();
+    unit.target = Target::Plural {
+        forms: vec![
+            Some("{count} súbor".into()),
+            Some("{count} súbory".into()),
+            Some("{count} súborov".into()),
+        ],
+    };
+    unit.state = UnitState::Finished;
+    let out = String::from_utf8(doc.render(&[unit]).expect("render")).expect("utf8");
+    assert!(out.contains("<numerusform>%n súbor</numerusform>"), "{out}");
+    assert!(
+        out.contains("<numerusform>%n súbory</numerusform>"),
+        "{out}"
+    );
+    assert!(
+        out.contains("<numerusform>%n súborov</numerusform>"),
+        "{out}"
+    );
 }

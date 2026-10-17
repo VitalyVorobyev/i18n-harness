@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use i18n_harness_project::{
-    CatalogFormat, CatalogStatus, InMemoryFs, Project, ProjectError, ProjectFs, ProjectWarning,
+    CatalogStatus, FormatId, InMemoryFs, Project, ProjectError, ProjectFs, ProjectWarning,
     ReferenceEntry,
 };
 
@@ -74,11 +74,11 @@ fn references_returns_resolved_absolute_paths() {
 
     assert_eq!(refs[0].manifest_path, "expert/app_de.ts");
     assert_eq!(refs[0].absolute_path, format!("{ROOT}/expert/app_de.ts"));
-    assert_eq!(refs[0].format, CatalogFormat::QtTs);
+    assert_eq!(refs[0].format, FormatId::from("qt-ts"));
     assert_eq!(refs[0].locale, "de_DE");
     assert_eq!(refs[0].status, CatalogStatus::Ok);
 
-    assert_eq!(refs[1].format, CatalogFormat::GettextPo);
+    assert_eq!(refs[1].format, FormatId::from("gettext-po"));
     assert_eq!(refs[1].locale, "es_ES");
     assert_eq!(refs[1].status, CatalogStatus::Ok);
 
@@ -151,7 +151,7 @@ fn add_reference_then_reopen_yields_entry() {
     project
         .add_reference(ReferenceEntry {
             path: PathBuf::from("expert/app_de.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "de_DE".to_owned(),
         })
         .expect("add_reference");
@@ -164,7 +164,7 @@ fn add_reference_then_reopen_yields_entry() {
     let refs = project2.references();
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].manifest_path, "expert/app_de.ts");
-    assert_eq!(refs[0].format, CatalogFormat::QtTs);
+    assert_eq!(refs[0].format, FormatId::from("qt-ts"));
     assert_eq!(refs[0].locale, "de_DE");
 }
 
@@ -187,7 +187,7 @@ fn add_reference_in_memory_view_updates_immediately() {
     project
         .add_reference(ReferenceEntry {
             path: PathBuf::from("expert/app_de.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "de_DE".to_owned(),
         })
         .expect("add_reference");
@@ -205,7 +205,7 @@ fn add_reference_rejects_duplicate_path() {
     let err = project
         .add_reference(ReferenceEntry {
             path: PathBuf::from("expert/app_de.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "de_DE".to_owned(),
         })
         .unwrap_err();
@@ -225,7 +225,7 @@ fn add_reference_rejects_missing_file() {
     let err = project
         .add_reference(ReferenceEntry {
             path: PathBuf::from("expert/nonexistent.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "de_DE".to_owned(),
         })
         .unwrap_err();
@@ -308,7 +308,7 @@ fn add_reference_preserves_existing_comments() {
     project
         .add_reference(ReferenceEntry {
             path: PathBuf::from("expert/app_de.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "de_DE".to_owned(),
         })
         .expect("add_reference");

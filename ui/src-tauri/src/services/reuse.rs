@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use i18n_harness_adapter_qt::{self as adapter_qt, Catalog};
+use crate::backing::{BackingCatalog, WriteBack, extract_detected};
 use i18n_harness_core::{ReviewStatus, UnitId};
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
@@ -53,7 +53,7 @@ pub(crate) struct ReuseServiceResult {
     /// The re-extracted base catalog after the reuse apply. The command layer
     /// stashes this in the in-memory project-catalog store so the UI sees the
     /// copied translations without re-opening from disk.
-    pub(crate) catalog: Catalog,
+    pub(crate) catalog: BackingCatalog,
     /// The serializable report for the wire.
     pub(crate) report: ReuseReportDto,
     /// Review-status writes the command layer must persist.
@@ -61,7 +61,7 @@ pub(crate) struct ReuseServiceResult {
 }
 
 /// Run reuse from `reference_abs_paths` into the base catalog at `base_abs`,
-/// write the merged units back in place via the Qt adapter, and return the
+/// write the merged units back in place, and return the
 /// post-reuse catalog plus a report and the review-status writes to persist.
 ///
 /// The apply is atomic (temp-then-rename, per the adapter contract). After the
@@ -76,12 +76,11 @@ pub(crate) fn reuse_into_catalog(
     let outcome = reuse_from_references(base_abs, reference_abs_paths, locale, glossary)
         .map_err(reuse_error_to_string)?;
 
-    adapter_qt::apply(&outcome.base, &outcome.units, base_abs)
-        .map_err(|e| format!("apply failed: {e}"))?;
+    outcome.base.apply(&outcome.units, base_abs)?;
 
-    // Re-extract so the in-memory catalog carries the on-disk source bytes the
-    // round-trip contract depends on (apply consumes `outcome.base`'s bytes).
-    let catalog = adapter_qt::extract(base_abs).map_err(|e| format!("re-extract failed: {e}"))?;
+    // Re-open so the in-memory catalog carries the on-disk source bytes the
+    // round-trip contract depends on (the write consumed `outcome.base`'s bytes).
+    let catalog = extract_detected(base_abs).map_err(|e| format!("re-{e}"))?;
 
     let report = &outcome.report;
     let review_writes = build_review_writes(report);
@@ -103,9 +102,12 @@ pub(crate) fn split_remainder(
     keep_ids: &std::collections::HashSet<UnitId>,
     out_abs: &Path,
 ) -> Result<SplitReportDto, String> {
-    let base = adapter_qt::extract(base_abs).map_err(|e| format!("extract failed: {e}"))?;
-    adapter_qt::write_subset(&base, keep_ids, out_abs)
-        .map_err(|e| format!("write_subset failed: {e}"))?;
+    let base = extract_detected(base_abs)?;
+    let bytes = base
+        .render_subset(keep_ids)
+        .map_err(|e| format!("subset failed: {e}"))?;
+    i18n_harness_core::fs::write_atomic(out_abs, &bytes)
+        .map_err(|e| format!("write {} failed: {e}", out_abs.display()))?;
     Ok(SplitReportDto {
         base_path: base_abs.to_string_lossy().into_owned(),
         out_path: out_abs.to_string_lossy().into_owned(),
@@ -119,8 +121,8 @@ pub(crate) fn split_remainder(
 pub(crate) fn standalone_remainder_ids(
     base_abs: &Path,
 ) -> Result<std::collections::HashSet<UnitId>, String> {
-    let base = adapter_qt::extract(base_abs).map_err(|e| format!("extract failed: {e}"))?;
-    Ok(writable_untranslated_ids(&base))
+    let base = extract_detected(base_abs)?;
+    Ok(writable_untranslated_ids(base.as_ref()))
 }
 
 /// Fold the translated remainder at `with_abs` back into the base at `base_abs`,
@@ -138,8 +140,7 @@ pub(crate) fn merge_catalogs(
     out_abs: &Path,
 ) -> Result<MergeReportDto, String> {
     let outcome = merge_back(base_abs, with_abs).map_err(reuse_error_to_string)?;
-    adapter_qt::apply(&outcome.base, &outcome.units, out_abs)
-        .map_err(|e| format!("apply failed: {e}"))?;
+    outcome.base.apply(&outcome.units, out_abs)?;
     Ok(MergeReportDto {
         base_path: base_abs.to_string_lossy().into_owned(),
         with_path: with_abs.to_string_lossy().into_owned(),

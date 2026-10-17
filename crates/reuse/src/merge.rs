@@ -1,7 +1,7 @@
 //! Merge: fold a translated remainder back into its base.
 //!
 //! The split step carves the untranslated leftovers of an original catalog
-//! into a standalone `.ts` remainder (via `adapter_qt::write_subset`). A
+//! into a standalone `.ts` remainder (via `FormatDoc::render_subset`). A
 //! translator fills that remainder; `merge_back` folds the filled units back
 //! into the base half so `base ∪ remainder` reconstructs a fully-translated
 //! original.
@@ -16,7 +16,7 @@
 //!   halves; an overlap means they are not, and the merge aborts with
 //!   [`ReuseError::MergeOverlap`] rather than silently picking a winner.
 //! - On success the returned `units` are the remainder's translated units,
-//!   ready for `adapter_qt::apply(&base, &units, out)`. Only remainder units
+//!   ready for `base.write(&units, out)`. Only remainder units
 //!   that actually carry translation content are returned; fully-empty
 //!   remainder units (a translator skipped them) are omitted so apply does not
 //!   churn no-op edits.
@@ -24,8 +24,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
-use i18n_harness_adapter_qt::{Catalog, extract};
 use i18n_harness_core::{Unit, UnitId, UnitState};
+use i18n_harness_formats::{FormatDoc, FormatRegistry};
 
 use crate::error::ReuseError;
 use crate::report::MergeReport;
@@ -34,14 +34,14 @@ use crate::report::MergeReport;
 ///
 /// `base` is the extracted base catalog; `units` are the remainder's
 /// translated units to apply into it. The caller runs
-/// `adapter_qt::apply(&base, &units, out)` — the validation gate having
+/// `base.write(&units, out)` — the validation gate having
 /// already run on the remainder when it was translated, and apply's own
 /// per-unit checks guarding the write.
 #[derive(Debug)]
 pub struct MergeOutcome {
-    /// The extracted base catalog. Hand it to `adapter_qt::apply` with
+    /// The extracted base catalog. Hand it to `FormatDoc::write` with
     /// [`Self::units`].
-    pub base: Catalog,
+    pub base: Box<dyn FormatDoc>,
     /// The remainder's translated units, keyed by ids present in `base`.
     pub units: Vec<Unit>,
     /// Counts describing the merge.
@@ -64,14 +64,15 @@ pub fn merge_back(
     base_path: &Path,
     translated_remainder_path: &Path,
 ) -> Result<MergeOutcome, ReuseError> {
-    let base = extract(base_path).map_err(|source| ReuseError::Extract {
+    let base = open_catalog(base_path).map_err(|source| ReuseError::Extract {
         path: base_path.to_path_buf(),
         source,
     })?;
-    let remainder = extract(translated_remainder_path).map_err(|source| ReuseError::Extract {
-        path: translated_remainder_path.to_path_buf(),
-        source,
-    })?;
+    let remainder =
+        open_catalog(translated_remainder_path).map_err(|source| ReuseError::Extract {
+            path: translated_remainder_path.to_path_buf(),
+            source,
+        })?;
 
     // Index the base by id once for O(1) subset / overlap checks.
     let base_by_id: HashMap<&UnitId, &Unit> = base.units().iter().map(|u| (&u.id, u)).collect();
@@ -133,4 +134,10 @@ pub fn merge_back(
 /// "this half owns the finished translation of this id".
 fn is_finished_complete(unit: &Unit) -> bool {
     unit.state == UnitState::Finished && unit.target.is_complete()
+}
+
+fn open_catalog(
+    path: &std::path::Path,
+) -> Result<Box<dyn FormatDoc>, i18n_harness_formats::CatalogError> {
+    FormatRegistry::builtin().open(path, None)
 }

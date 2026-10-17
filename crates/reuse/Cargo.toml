@@ -16,8 +16,9 @@ i18n-harness-core.workspace = true
 i18n-harness-locales.workspace = true
 i18n-harness-gate.workspace = true
 i18n-harness-glossary.workspace = true
-i18n-harness-adapter-qt.workspace = true
+i18n-harness-formats.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+i18n-harness-adapter-qt.workspace = true
 tempfile = "3"

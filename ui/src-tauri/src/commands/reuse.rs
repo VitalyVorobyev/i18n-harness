@@ -15,9 +15,8 @@ use std::path::PathBuf;
 use i18n_harness_core::UnitId;
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::Locale;
-use i18n_harness_project::{CatalogFormat, ReferenceEntry, ReferenceRef};
+use i18n_harness_project::{FormatId, ReferenceEntry, ReferenceRef};
 
-use crate::backing::BackingCatalog;
 use crate::dto::{
     BatchReuseReportDto, BatchSplitReportDto, MergeReportDto, ProjectOpenResponse, ReuseReportDto,
     SplitReportDto,
@@ -27,7 +26,7 @@ use crate::services::reuse as svc;
 use crate::state::{AppState, OpenCatalogEntry};
 
 /// Resolve the base catalog's locale (a `&'static Locale`) and an owned glossary
-/// clone for a reuse pass, holding the project lock only briefly.
+/// clone for a reuse pass (plus the catalog's format), holding the project lock only briefly.
 ///
 /// Mirrors the locale-merge in `resolve_project_translate_context` but without
 /// the backend resolution — reuse never calls a model. Available regardless of
@@ -35,7 +34,7 @@ use crate::state::{AppState, OpenCatalogEntry};
 fn resolve_reuse_context(
     state: &tauri::State<'_, AppState>,
     abs: &std::path::Path,
-) -> Result<(&'static Locale, Option<Glossary>), String> {
+) -> Result<(&'static Locale, Option<Glossary>, FormatId), String> {
     let project_guard = state
         .project
         .lock()
@@ -46,6 +45,7 @@ fn resolve_reuse_context(
         .catalog(abs)
         .ok_or_else(|| "catalog not open in project".to_string())?;
     let locale_id = catalog_ref.locale.clone();
+    let format = catalog_ref.format.clone();
 
     let locale = project
         .locale(&locale_id)
@@ -54,21 +54,21 @@ fn resolve_reuse_context(
         .ok_or_else(|| format!("unknown locale `{locale_id}`; add it to crates/locales"))?;
 
     let glossary = project.glossary().cloned();
-    Ok((locale, glossary))
+    Ok((locale, glossary, format))
 }
 
-/// Collect the absolute paths of all Qt references serving `locale_id`, in
-/// manifest declaration order (which is reuse's priority order). Holds the
-/// project lock only briefly. Returns the paths even for references whose
-/// on-disk status is not `Ok`; reuse's own extract surfaces a bad reference as a
-/// clear error.
+/// Collect the absolute paths of the references serving `locale_id` in the
+/// same format as the base catalog, in manifest declaration order (which is
+/// reuse's priority order). Holds the project lock only briefly. Returns the
+/// paths even for references whose on-disk status is not `Ok`; reuse's own
+/// extract surfaces a bad reference as a clear error.
 ///
-/// Non-Qt references (e.g. a `gettext-po` entry for the same locale) are
-/// filtered out: the reuse engine is Qt-only and would abort on a non-Qt file,
-/// so passing only Qt references mirrors the CLI's selection.
+/// References in another format are skipped: unit ids are only comparable
+/// within one format, so they could never match.
 fn references_for_locale(
     state: &tauri::State<'_, AppState>,
     locale_id: &str,
+    format: &FormatId,
 ) -> Result<Vec<PathBuf>, String> {
     let project_guard = state
         .project
@@ -78,7 +78,7 @@ fn references_for_locale(
     Ok(project
         .references()
         .iter()
-        .filter(|r: &&ReferenceRef| r.locale == locale_id && r.format == CatalogFormat::QtTs)
+        .filter(|r: &&ReferenceRef| r.locale == locale_id && r.format == *format)
         .map(|r| PathBuf::from(&r.absolute_path))
         .collect())
 }
@@ -108,13 +108,13 @@ pub(crate) fn reuse_references_in_project(
     let abs = PathBuf::from(&catalog_path);
 
     // 1. Resolve locale + glossary under a brief project lock.
-    let (locale, glossary) = resolve_reuse_context(&state, &abs)?;
+    let (locale, glossary, format) = resolve_reuse_context(&state, &abs)?;
 
     // 2. Resolve reference paths: explicit override, or the manifest's
     //    references for this locale.
     let reference_abs: Vec<PathBuf> = match reference_paths {
         Some(paths) => paths.into_iter().map(PathBuf::from).collect(),
-        None => references_for_locale(&state, locale.id)?,
+        None => references_for_locale(&state, locale.id, &format)?,
     };
     if reference_abs.is_empty() {
         return Err(format!(
@@ -186,7 +186,7 @@ fn reuse_and_persist(
         store.insert(
             abs.to_path_buf(),
             OpenCatalogEntry {
-                catalog: BackingCatalog::Qt(catalog),
+                catalog,
                 dirty: false,
             },
         );
@@ -266,7 +266,6 @@ pub(crate) fn reuse_all_references(
         project
             .catalogs()
             .iter()
-            .filter(|c| c.format == CatalogFormat::QtTs)
             .filter(|c| !reference_paths.contains(&c.absolute_path))
             .map(|c| (PathBuf::from(&c.absolute_path), c.manifest_path.clone()))
             .collect()
@@ -276,8 +275,8 @@ pub(crate) fn reuse_all_references(
     let mut skipped = Vec::new();
 
     for (abs, manifest_path) in catalogs {
-        let (locale, glossary) = resolve_reuse_context(&state, &abs)?;
-        let reference_abs = references_for_locale(&state, locale.id)?;
+        let (locale, glossary, format) = resolve_reuse_context(&state, &abs)?;
+        let reference_abs = references_for_locale(&state, locale.id, &format)?;
         if reference_abs.is_empty() {
             skipped.push(manifest_path);
             continue;
@@ -352,7 +351,6 @@ pub(crate) fn split_all_remainders(
         project
             .catalogs()
             .iter()
-            .filter(|c| c.format == CatalogFormat::QtTs)
             .filter(|c| !reference_paths.contains(&c.absolute_path))
             .map(|c| (PathBuf::from(&c.absolute_path), c.manifest_path.clone()))
             .collect()

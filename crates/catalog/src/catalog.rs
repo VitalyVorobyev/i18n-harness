@@ -1,20 +1,23 @@
 //! [`Catalog`] — the format-neutral output of a
-//! [`crate::CatalogFormat::extract`] call.
+//! [`crate::CatalogFormat::open`] call for PO and ICU-JSON.
 //!
 //! Mirrors the shape of `i18n_harness_adapter_qt::Catalog`: structured
 //! [`Unit`]s plus the original source bytes so that
-//! [`crate::CatalogFormat::apply`] can byte-stably round-trip every fixture.
+//! [`crate::FormatDoc::render`] can byte-stably round-trip every fixture.
 //!
 //! Deliberately **format-agnostic**: the value holds no PO-, JSON-, or
 //! XML-specific state. Per-format edit indices (line offsets for PO msgstr
 //! blocks, byte ranges for ICU-JSON value positions) live in
 //! [`Catalog::extract_state`] as an opaque blob the format owns.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use i18n_harness_core::{Unit, UnitId};
 
-/// The output of [`crate::CatalogFormat::extract`].
+use crate::error::CatalogError;
+use crate::format::{CatalogFormat, FormatDoc};
+
+/// The document [`crate::CatalogFormat::open`] returns for PO and ICU-JSON.
 ///
 /// Format-neutral container. Apply implementations recover their per-unit
 /// edit information from a private format-specific state blob — it is
@@ -123,4 +126,44 @@ pub(crate) enum ExtractState {
     Po(crate::po::ExtractStatePo),
     /// ICU-JSON format edit points. See `crate::icu_json::ExtractStateIcuJson`.
     IcuJson(crate::icu_json::ExtractStateIcuJson),
+}
+
+impl FormatDoc for Catalog {
+    fn format(&self) -> &'static dyn CatalogFormat {
+        match &self.extract_state {
+            ExtractState::Po(_) => &crate::po::PO_FORMAT,
+            ExtractState::IcuJson(_) => &crate::icu_json::ICU_JSON_FORMAT,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        &self.source_path
+    }
+
+    fn language(&self) -> Option<&str> {
+        self.language.as_deref()
+    }
+
+    fn units(&self) -> &[Unit] {
+        &self.units
+    }
+
+    fn units_mut(&mut self) -> &mut [Unit] {
+        &mut self.units
+    }
+
+    fn source_bytes(&self) -> &[u8] {
+        &self.source_bytes
+    }
+
+    fn plural_forms(&self) -> Option<u32> {
+        self.header_plural_arity()
+    }
+
+    fn render(&self, units: &[Unit]) -> Result<Vec<u8>, CatalogError> {
+        match &self.extract_state {
+            ExtractState::Po(_) => crate::po::write::render(self, units),
+            ExtractState::IcuJson(_) => crate::icu_json::write::render(self, units),
+        }
+    }
 }

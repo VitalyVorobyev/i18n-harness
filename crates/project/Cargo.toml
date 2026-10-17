@@ -16,6 +16,7 @@ i18n-harness-core.workspace = true
 i18n-harness-locales.workspace = true
 i18n-harness-glossary.workspace = true
 i18n-harness-backend.workspace = true
+i18n-harness-formats.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

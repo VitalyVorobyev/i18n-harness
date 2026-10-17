@@ -22,9 +22,8 @@ use crate::evaluation::EvaluationStore;
 use crate::fs::{ProjectFs, RealFs};
 use crate::locale::ResolvedLocale;
 use crate::manifest::{
-    BackendConfig, BackendKind, CatalogEntry, CatalogFormat, GlossaryConfig, LocaleConfig,
-    PathsConfig, ProjectManifest, ProjectMeta, PromptsConfig, ReferenceEntry, RegisterOverride,
-    SCHEMA_VERSION,
+    BackendConfig, BackendKind, CatalogEntry, FormatId, GlossaryConfig, LocaleConfig, PathsConfig,
+    ProjectManifest, ProjectMeta, PromptsConfig, ReferenceEntry, RegisterOverride, SCHEMA_VERSION,
 };
 use crate::memory::{
     Correction, CorrectionFilter, CorrectionId, CorrectionStore, CuratedExample, CuratedSet,
@@ -74,7 +73,7 @@ pub struct CatalogRef {
     /// Path as stored in the manifest (project-relative).
     pub manifest_path: String,
     /// Declared format.
-    pub format: CatalogFormat,
+    pub format: FormatId,
     /// Locale id this catalog serves.
     pub locale: String,
     /// Health of the catalog entry as determined at open time.
@@ -108,7 +107,7 @@ pub struct ReferenceRef {
     /// Path as stored in the manifest (project-relative).
     pub manifest_path: String,
     /// Declared format.
-    pub format: CatalogFormat,
+    pub format: FormatId,
     /// Locale id this reference serves.
     pub locale: String,
     /// Health of the reference entry as determined at open time.
@@ -450,7 +449,7 @@ impl Project {
         new_table.insert(
             "format",
             Item::Value(Value::String(toml_edit::Formatted::new(
-                catalog_format_str(entry.format).to_owned(),
+                entry.format.as_str().to_owned(),
             ))),
         );
         new_table.insert(
@@ -544,7 +543,7 @@ impl Project {
         new_table.insert(
             "format",
             Item::Value(Value::String(toml_edit::Formatted::new(
-                catalog_format_str(entry.format).to_owned(),
+                entry.format.as_str().to_owned(),
             ))),
         );
         new_table.insert(
@@ -1188,6 +1187,7 @@ fn build_catalog_refs(
 
     for entry in &manifest.catalogs {
         let abs = paths.catalog(&entry.path);
+        require_known_format(&entry.path, &entry.format)?;
 
         if !fs.exists(&abs) {
             return Err(ProjectError::CatalogNotFound { path: abs });
@@ -1200,11 +1200,11 @@ fn build_catalog_refs(
         })?;
         let prefix = &bytes[..bytes.len().min(64 * 1024)];
 
-        if !confirms_format(prefix, entry.format) {
-            let sniffed = guess_format(prefix);
+        if !confirms_format(&abs, prefix, &entry.format) {
+            let sniffed = guess_format(&abs, prefix);
             return Err(ProjectError::CatalogFormatMismatch {
                 path: abs,
-                declared: entry.format,
+                declared: entry.format.clone(),
                 sniffed,
             });
         }
@@ -1220,7 +1220,7 @@ fn build_catalog_refs(
         refs.push(CatalogRef {
             absolute_path: abs.display().to_string(),
             manifest_path: entry.path.display().to_string(),
-            format: entry.format,
+            format: entry.format.clone(),
             locale: entry.locale.clone(),
             status: CatalogStatus::Ok,
         });
@@ -1230,6 +1230,19 @@ fn build_catalog_refs(
 }
 
 /// Build the catalog index without disk-existence checks (used after mutations).
+fn require_known_format(path: &Path, format: &FormatId) -> Result<(), ProjectError> {
+    let registry = i18n_harness_formats::FormatRegistry::builtin();
+    if registry.get(format.as_str()).is_some() {
+        return Ok(());
+    }
+    let known: Vec<_> = registry.formats().iter().map(|f| f.id()).collect();
+    Err(ProjectError::UnknownCatalogFormat {
+        path: path.to_path_buf(),
+        format: format.clone(),
+        known: known.join(", "),
+    })
+}
+
 fn build_catalog_refs_no_check(
     manifest: &ProjectManifest,
     paths: &ProjectPaths,
@@ -1243,7 +1256,7 @@ fn build_catalog_refs_no_check(
             CatalogRef {
                 absolute_path: abs.display().to_string(),
                 manifest_path: entry.path.display().to_string(),
-                format: entry.format,
+                format: entry.format.clone(),
                 locale: entry.locale.clone(),
                 status: CatalogStatus::Ok,
             }
@@ -1277,7 +1290,7 @@ fn build_reference_refs(
             refs.push(ReferenceRef {
                 absolute_path: abs.display().to_string(),
                 manifest_path: entry.path.display().to_string(),
-                format: entry.format,
+                format: entry.format.clone(),
                 locale: entry.locale.clone(),
                 status: CatalogStatus::Missing,
             });
@@ -1287,13 +1300,13 @@ fn build_reference_refs(
         let status = match fs.read(&abs) {
             Ok(bytes) => {
                 let prefix = &bytes[..bytes.len().min(64 * 1024)];
-                if confirms_format(prefix, entry.format) {
+                if confirms_format(&abs, prefix, &entry.format) {
                     CatalogStatus::Ok
                 } else {
-                    let sniffed = guess_format(prefix);
+                    let sniffed = guess_format(&abs, prefix);
                     warnings.push(ProjectWarning::ReferenceFormatMismatch {
                         path: abs.clone(),
-                        declared: entry.format,
+                        declared: entry.format.clone(),
                         sniffed,
                     });
                     CatalogStatus::FormatMismatch
@@ -1305,7 +1318,7 @@ fn build_reference_refs(
         refs.push(ReferenceRef {
             absolute_path: abs.display().to_string(),
             manifest_path: entry.path.display().to_string(),
-            format: entry.format,
+            format: entry.format.clone(),
             locale: entry.locale.clone(),
             status,
         });
@@ -1328,20 +1341,12 @@ fn build_reference_refs_no_check(
             ReferenceRef {
                 absolute_path: abs.display().to_string(),
                 manifest_path: entry.path.display().to_string(),
-                format: entry.format,
+                format: entry.format.clone(),
                 locale: entry.locale.clone(),
                 status: CatalogStatus::Ok,
             }
         })
         .collect()
-}
-
-fn catalog_format_str(f: CatalogFormat) -> &'static str {
-    match f {
-        CatalogFormat::QtTs => "qt-ts",
-        CatalogFormat::GettextPo => "gettext-po",
-        CatalogFormat::IcuJson => "icu-json",
-    }
 }
 
 fn backend_kind_str(k: BackendKind) -> &'static str {

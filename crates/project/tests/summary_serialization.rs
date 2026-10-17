@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use i18n_harness_project::{
-    BackendConfig, BackendKind, CatalogEntry, CatalogFormat, InMemoryFs, Project, ProjectFs,
+    BackendConfig, BackendKind, CatalogEntry, FormatId, InMemoryFs, Project, ProjectFs,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ model = "gemma3:27b"
     project
         .add_catalog(CatalogEntry {
             path: PathBuf::from("translations/app2.ts"),
-            format: CatalogFormat::QtTs,
+            format: FormatId::from("qt-ts"),
             locale: "es_ES".to_owned(),
         })
         .expect("add_catalog");

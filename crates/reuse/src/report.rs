@@ -60,7 +60,7 @@ pub struct ReuseReport {
 
     /// Writable base units with no finished reference candidate and no
     /// conflict — i.e. genuinely untranslated leftovers. This is the set the
-    /// caller feeds to `adapter_qt::write_subset` to produce the split
+    /// caller feeds to `FormatDoc::render_subset` to produce the split
     /// remainder.
     pub remaining_ids: Vec<UnitId>,
 }

@@ -18,7 +18,6 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand, ValueEnum};
-use i18n_harness_adapter_qt::{apply, extract, render, write_subset};
 use i18n_harness_backend::{
     ManualBackend, ManualResponse, TranslatedText, TranslationBackend, TranslationOutcome,
     agent_batch,
@@ -26,6 +25,7 @@ use i18n_harness_backend::{
 use i18n_harness_core::{
     Batch, BatchKey, DEFAULT_BATCH_SIZE, Flag, FlagSeverity, Target, Unit, UnitState,
 };
+use i18n_harness_formats::{FormatDoc, FormatRegistry};
 use i18n_harness_gate::metrics::{FileSink, MetricsWriter};
 use i18n_harness_gate::{
     AccelDetail, CjkPunctuationDetail, EmptyTargetDetail, Finding, FindingDetail, GateReport,
@@ -365,9 +365,10 @@ fn run(cli: Cli) -> Result<()> {
 
 fn round_trip(args: RoundTripArgs) -> Result<()> {
     let catalog =
-        extract(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
-    let rendered =
-        render(&catalog, &[]).with_context(|| format!("render {}", args.path.display()))?;
+        open_catalog(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
+    let rendered = catalog
+        .render(catalog.units())
+        .with_context(|| format!("render {}", args.path.display()))?;
     let original = catalog.source_bytes();
 
     if rendered == original {
@@ -416,7 +417,7 @@ fn gate(args: GateArgs) -> Result<()> {
     let locale =
         Locale::by_id(&args.locale).ok_or_else(|| anyhow!("unknown locale: {}", args.locale))?;
     let catalog =
-        extract(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
+        open_catalog(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
     let units = catalog.units();
     let reports = validate_batch(units, locale, None);
 
@@ -593,7 +594,7 @@ fn translate(args: TranslateArgs) -> Result<()> {
     };
 
     let catalog =
-        extract(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
+        open_catalog(&args.path).with_context(|| format!("extract {}", args.path.display()))?;
     let original_units = catalog.units().to_vec();
 
     let backend = build_backend(args.backend)?;
@@ -685,8 +686,9 @@ fn translate(args: TranslateArgs) -> Result<()> {
     // Always render to validate the bytes are well-formed, regardless of
     // findings; renders are pure and surface adapter bugs without mutating
     // disk state.
-    let _bytes =
-        render(&catalog, &overrides).with_context(|| format!("render {}", args.path.display()))?;
+    let _bytes = catalog
+        .render(&overrides)
+        .with_context(|| format!("render {}", args.path.display()))?;
 
     // Hard-finding guard MUST precede `apply()` — write-back is blocked any
     // time the gate found a hard issue, even in --out mode. Soft-only runs
@@ -701,7 +703,8 @@ fn translate(args: TranslateArgs) -> Result<()> {
                 out_path.display(),
             );
         } else {
-            apply(&catalog, &overrides, out_path)
+            catalog
+                .write(&overrides, out_path)
                 .with_context(|| format!("apply → {}", out_path.display()))?;
             println!(
                 "\nwrote: {} ({} units)",
@@ -781,8 +784,8 @@ fn export_batch_one(
     glossary: Option<&Glossary>,
     glossary_path: Option<&Path>,
 ) -> Result<()> {
-    let catalog =
-        extract(catalog_path).with_context(|| format!("extract {}", catalog_path.display()))?;
+    let catalog = open_catalog(catalog_path)
+        .with_context(|| format!("extract {}", catalog_path.display()))?;
 
     let writable: Vec<Unit> = catalog
         .units()
@@ -824,7 +827,6 @@ fn export_batch_one(
 }
 
 fn export_batch_project(project_root: PathBuf, locale_id: String, out: PathBuf) -> Result<()> {
-    use i18n_harness_project::CatalogFormat;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let (project, warnings) = Project::open(&project_root)
@@ -870,15 +872,6 @@ fn export_batch_project(project_root: PathBuf, locale_id: String, out: PathBuf) 
     let mut subfolders: Vec<String> = Vec::new();
 
     for cat_ref in &matching {
-        if cat_ref.format != CatalogFormat::QtTs {
-            eprintln!(
-                "warning: skipping {:?} catalog `{}` — only Qt catalogs are supported in \
-                 export-batch for now",
-                cat_ref.format, cat_ref.manifest_path
-            );
-            continue;
-        }
-
         let slug = manifest_path_slug(&cat_ref.manifest_path, &subfolders);
         let subfolder = out.join(&slug);
         subfolders.push(slug.clone());
@@ -895,8 +888,7 @@ fn export_batch_project(project_root: PathBuf, locale_id: String, out: PathBuf) 
 
     if subfolders.is_empty() {
         return Err(anyhow!(
-            "no Qt catalogs matched locale `{locale_id}` in project {}; \
-             non-Qt catalogs are not yet supported by export-batch",
+            "no catalogs matched locale `{locale_id}` in project {}",
             project_root.display(),
         ));
     }
@@ -907,11 +899,7 @@ fn export_batch_project(project_root: PathBuf, locale_id: String, out: PathBuf) 
         .unwrap_or(0);
 
     // Root README.md
-    let manifest_paths: Vec<&str> = matching
-        .iter()
-        .filter(|c| c.format == CatalogFormat::QtTs)
-        .map(|c| c.manifest_path.as_str())
-        .collect();
+    let manifest_paths: Vec<&str> = matching.iter().map(|c| c.manifest_path.as_str()).collect();
     let readme = render_project_readme(
         &project_root.display().to_string(),
         &locale_id,
@@ -1132,7 +1120,7 @@ fn import_batch_single(
     let responses = agent_batch::read_targets(&dir).map_err(|e| anyhow!("{e}"))?;
 
     let catalog =
-        extract(&apply_path).with_context(|| format!("extract {}", apply_path.display()))?;
+        open_catalog(&apply_path).with_context(|| format!("extract {}", apply_path.display()))?;
     let original_units = catalog.units().to_vec();
 
     let mut writable: Vec<Unit> = Vec::new();
@@ -1230,8 +1218,9 @@ fn import_batch_single(
     let mut overrides = translated_units;
     overrides.extend(preserved);
 
-    let _bytes =
-        render(&catalog, &overrides).with_context(|| format!("render {}", apply_path.display()))?;
+    let _bytes = catalog
+        .render(&overrides)
+        .with_context(|| format!("render {}", apply_path.display()))?;
 
     let write_blocked = summary.hard > 0;
 
@@ -1243,7 +1232,8 @@ fn import_batch_single(
                 out_path.display(),
             );
         } else {
-            apply(&catalog, &overrides, out_path)
+            catalog
+                .write(&overrides, out_path)
                 .with_context(|| format!("apply → {}", out_path.display()))?;
             println!(
                 "\nwrote: {} ({} units)",
@@ -1367,7 +1357,7 @@ fn import_batch_project(
 
         let responses = agent_batch::read_targets(&subfolder).map_err(|e| anyhow!("{e}"))?;
 
-        let catalog = extract(catalog_abs_path)
+        let catalog = open_catalog(catalog_abs_path)
             .with_context(|| format!("extract {}", catalog_abs_path.display()))?;
         let original_units = catalog.units().to_vec();
 
@@ -1460,7 +1450,8 @@ fn import_batch_project(
         let mut overrides = translated_units;
         overrides.extend(preserved);
 
-        let _bytes = render(&catalog, &overrides)
+        let _bytes = catalog
+            .render(&overrides)
             .with_context(|| format!("render {}", catalog_abs_path.display()))?;
 
         let catalog_write_blocked = summary.hard > 0;
@@ -1482,7 +1473,8 @@ fn import_batch_project(
                     dest.display(),
                 );
             } else {
-                apply(&catalog, &overrides, &dest)
+                catalog
+                    .write(&overrides, &dest)
                     .with_context(|| format!("apply → {}", dest.display()))?;
                 println!("\nwrote: {} ({} units)", dest.display(), overrides.len());
             }
@@ -1837,7 +1829,9 @@ fn reuse_single(
         })?;
 
     let out_path = out.as_deref().unwrap_or(&path);
-    apply(&outcome.base, &outcome.units, out_path)
+    outcome
+        .base
+        .write(&outcome.units, out_path)
         .with_context(|| format!("apply → {}", out_path.display()))?;
 
     print_reuse_report(&path, &outcome.report);
@@ -1845,8 +1839,6 @@ fn reuse_single(
 }
 
 fn reuse_project(project_root: PathBuf, locale_id: String) -> Result<()> {
-    use i18n_harness_project::CatalogFormat;
-
     let (project, warnings) = Project::open(&project_root)
         .with_context(|| format!("open project {}", project_root.display()))?;
     for w in &warnings {
@@ -1881,17 +1873,10 @@ fn reuse_project(project_root: PathBuf, locale_id: String) -> Result<()> {
         ));
     }
 
-    let reference_paths: Vec<PathBuf> = project
-        .references()
-        .iter()
-        .filter(|r| r.locale == locale_id && r.format == CatalogFormat::QtTs)
-        .map(|r| PathBuf::from(&r.absolute_path))
-        .collect();
-
-    if reference_paths.is_empty() {
+    let has_references = project.references().iter().any(|r| r.locale == locale_id);
+    if !has_references {
         eprintln!(
-            "note: no Qt references for locale `{locale_id}` in project {}; \
-             nothing to reuse",
+            "note: no references for locale `{locale_id}` in project {}; nothing to reuse",
             project_root.display(),
         );
     }
@@ -1899,15 +1884,13 @@ fn reuse_project(project_root: PathBuf, locale_id: String) -> Result<()> {
     let glossary = project.glossary();
 
     for cat_ref in &matching_bases {
-        if cat_ref.format != CatalogFormat::QtTs {
-            eprintln!(
-                "warning: skipping {:?} catalog `{}` — only Qt catalogs are supported in \
-                 reuse for now",
-                cat_ref.format, cat_ref.manifest_path
-            );
-            continue;
-        }
-
+        // Unit ids are only comparable within one format.
+        let reference_paths: Vec<PathBuf> = project
+            .references()
+            .iter()
+            .filter(|r| r.locale == locale_id && r.format == cat_ref.format)
+            .map(|r| PathBuf::from(&r.absolute_path))
+            .collect();
         let base_path = Path::new(&cat_ref.absolute_path);
 
         let outcome = reuse_from_references(base_path, &reference_paths, locale, glossary)
@@ -1918,7 +1901,9 @@ fn reuse_project(project_root: PathBuf, locale_id: String) -> Result<()> {
                 other => anyhow!("{other}"),
             })?;
 
-        apply(&outcome.base, &outcome.units, base_path)
+        outcome
+            .base
+            .write(&outcome.units, base_path)
             .with_context(|| format!("apply → {}", base_path.display()))?;
 
         print_reuse_report(base_path, &outcome.report);
@@ -1978,8 +1963,8 @@ fn print_reuse_report(base: &Path, report: &i18n_harness_reuse::ReuseReport) {
 
 fn split_remainder(args: SplitRemainderArgs) -> Result<()> {
     let catalog =
-        extract(&args.base).with_context(|| format!("extract {}", args.base.display()))?;
-    let keep = writable_untranslated_ids(&catalog);
+        open_catalog(&args.base).with_context(|| format!("extract {}", args.base.display()))?;
+    let keep = writable_untranslated_ids(catalog.as_ref());
     let count = keep.len();
 
     if let Some(parent) = args.out.parent() {
@@ -1989,8 +1974,11 @@ fn split_remainder(args: SplitRemainderArgs) -> Result<()> {
         }
     }
 
-    write_subset(&catalog, &keep, &args.out)
-        .with_context(|| format!("write_subset → {}", args.out.display()))?;
+    let bytes = catalog
+        .render_subset(&keep)
+        .with_context(|| format!("subset {}", args.base.display()))?;
+    i18n_harness_core::fs::write_atomic(&args.out, &bytes)
+        .with_context(|| format!("write {}", args.out.display()))?;
 
     println!(
         "split-remainder: {} → {} ({count} writable-untranslated unit(s))",
@@ -2041,7 +2029,9 @@ fn merge(args: MergeArgs) -> Result<()> {
         }
     }
 
-    apply(&outcome.base, &outcome.units, &args.out)
+    outcome
+        .base
+        .write(&outcome.units, &args.out)
         .with_context(|| format!("apply → {}", args.out.display()))?;
 
     println!(
@@ -2066,4 +2056,9 @@ fn file_hash(path: &std::path::Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Open a catalog with whichever registered format recognizes it.
+fn open_catalog(path: &Path) -> Result<Box<dyn FormatDoc>> {
+    Ok(FormatRegistry::builtin().open(path, None)?)
 }

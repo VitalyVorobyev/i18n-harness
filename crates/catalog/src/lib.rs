@@ -37,46 +37,44 @@ pub mod po;
 
 pub use catalog::Catalog;
 pub use error::{CatalogError, PlaceholderError};
-pub use format::CatalogFormat;
+pub use format::{CatalogFormat, Confidence, FormatDoc, SniffHit, strip_bom, utf8_prefix};
 pub use icu_json::IcuJsonFormat;
 pub use po::{PoFormat, reconcile_plural_arity};
 
-/// Dispatch table: format-id → boxed implementation.
+/// The formats this crate implements, in registry order.
 ///
-/// Kept tiny (a `match` arm) so adding a new format means one new line.
-/// The caller passes the manifest-declared format string; the dispatcher
-/// returns the corresponding implementation OR
-/// [`CatalogError::UnsupportedFormat`] for `qt-ts` (which lives elsewhere)
-/// and for unknown ids.
-///
-/// # Errors
-///
-/// - [`CatalogError::UnsupportedFormat`] when `format` is `"qt-ts"` (route
-///   to `adapter-qt`) or an unknown id.
-pub fn format_by_id(format: &str) -> Result<Box<dyn CatalogFormat>, CatalogError> {
-    match format {
-        "gettext-po" => Ok(Box::new(PoFormat)),
-        "icu-json" => Ok(Box::new(IcuJsonFormat)),
-        "qt-ts" => Err(CatalogError::UnsupportedFormat(
-            "qt-ts is handled by the adapter-qt crate, not by i18n-harness-catalog".to_owned(),
-        )),
-        other => Err(CatalogError::UnsupportedFormat(other.to_owned())),
-    }
+/// Qt `.ts` is not here: it lives in `adapter-qt`, which implements the same
+/// traits. The full registry (every built-in format) is assembled by the
+/// `i18n-harness-formats` crate.
+pub fn builtin_formats() -> [&'static dyn CatalogFormat; 2] {
+    [&po::PO_FORMAT, &icu_json::ICU_JSON_FORMAT]
 }
 
-/// Open a catalog file using the format named by the manifest.
-///
-/// Convenience over [`format_by_id`] followed by
-/// [`CatalogFormat::extract`]. The Tauri layer uses this in
-/// `open_catalog_in_project` to dispatch by format string.
+/// Look up one of this crate's formats by its manifest id.
 ///
 /// # Errors
 ///
-/// - [`CatalogError::UnsupportedFormat`] when `format` is `"qt-ts"` or
-///   unknown.
-/// - Any error returned by the underlying format's `extract`.
+/// [`CatalogError::UnsupportedFormat`] for an id this crate does not
+/// implement (including `"qt-ts"`, which lives in `adapter-qt`).
+pub fn format_by_id(format: &str) -> Result<&'static dyn CatalogFormat, CatalogError> {
+    builtin_formats()
+        .into_iter()
+        .find(|f| f.id() == format)
+        .ok_or_else(|| CatalogError::UnsupportedFormat(format.to_owned()))
+}
+
+/// Open a catalog file using one of this crate's formats, by manifest id.
+///
+/// # Errors
+///
+/// - [`CatalogError::UnsupportedFormat`] when `format` is not implemented by
+///   this crate.
+/// - Any error returned by the underlying format's parser.
 pub fn open_catalog_by_format(path: &Path, format: &str) -> Result<Catalog, CatalogError> {
-    format_by_id(format)?.extract(path)
+    match format_by_id(format)?.id() {
+        "gettext-po" => PoFormat.extract(path),
+        _ => IcuJsonFormat.extract(path),
+    }
 }
 
 #[cfg(test)]

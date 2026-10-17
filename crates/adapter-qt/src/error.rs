@@ -65,6 +65,18 @@ pub enum ApplyError {
         source: io::Error,
     },
 
+    /// A plural target does not have as many forms as the message has
+    /// `<numerusform>` elements in the file.
+    #[error("unit {id} has {found} plural forms but the file expects {expected}")]
+    PluralFormCount {
+        /// Unit id.
+        id: String,
+        /// `<numerusform>` count of the message in the file.
+        expected: usize,
+        /// Forms in the target that was handed to the writer.
+        found: usize,
+    },
+
     /// A unit passed to `apply` does not correspond to any unit in the
     /// catalog (its [`crate::Unit::id`] is not present).
     ///

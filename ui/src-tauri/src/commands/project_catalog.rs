@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use i18n_harness_core::{Unit, UnitId};
 
-use crate::backing::extract_for_format;
+use crate::backing::{WriteBack, extract_for_format};
 use crate::dto::{CatalogResponse, SaveAllDirtyResponse, SaveSummary, TargetEdit};
 use crate::error;
 use crate::state::{AppState, OpenCatalogEntry};
@@ -51,9 +51,9 @@ pub fn open_catalog_in_project_impl(
         .catalog(&path)
         .ok_or_else(|| format!("catalog not in project: {catalog_path}"))?;
     let abs = PathBuf::from(&catalog_ref.absolute_path);
-    let format = catalog_ref.format;
+    let format = catalog_ref.format.clone();
 
-    let mut catalog = extract_for_format(&abs, format)?;
+    let mut catalog = extract_for_format(&abs, &format)?;
     project.apply_review_state(&abs, catalog.units_mut());
 
     let response = build_catalog_response_backing(&abs, &catalog);
@@ -235,9 +235,10 @@ pub(crate) fn discard_changes_in_project(
             .catalog(&abs)
             .ok_or_else(|| "catalog not registered in project".to_string())?
             .format
+            .clone()
     };
 
-    let mut catalog = extract_for_format(&abs, format)?;
+    let mut catalog = extract_for_format(&abs, &format)?;
     project.apply_review_state(&abs, catalog.units_mut());
 
     let response = build_catalog_response_backing(&abs, &catalog);
