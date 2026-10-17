@@ -52,12 +52,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --draft $prerelease \
-              --title "i18n-harness $GITHUB_REF_NAME" --generate-notes
-          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"$GITHUB_REF_NAME\") | .id")
+          prerelease=false
+          case "$GITHUB_REF_NAME" in *-*) prerelease=true ;; esac
+          # The id comes from the create call itself: a new draft is not in
+          # the release list straight away, and without an id the desktop
+          # jobs build but upload nothing.
+          id=$(gh release view "$GITHUB_REF_NAME" --json databaseId --jq .databaseId 2>/dev/null) || \
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$GITHUB_REF_NAME" -f name="i18n-harness $GITHUB_REF_NAME" \
+              -F draft=true -F prerelease=$prerelease -F generate_release_notes=true --jq .id)
+          if [ -z "$id" ]; then
+            echo "::error::no release id for $GITHUB_REF_NAME"
+            exit 1
+          fi
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
   desktop:
@@ -98,15 +105,31 @@ jobs:
         run: |
           printf '{"bundle":{"windows":{"wix":{"version":"%s"}}}}\n' \
             "${{ needs.release.outputs.msi_version }}" > ui/src-tauri/tauri.windows.conf.json
-      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+      # Tauri signs when APPLE_CERTIFICATE is set at all, even empty, so the
+      # secrets reach the build only when they exist.
+      - name: Apple signing secrets, when configured
+        if: runner.os == 'macOS'
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "No APPLE_CERTIFICATE secret: building unsigned."
+            exit 0
+          fi
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || continue
+            { echo "$name<<__SECRET_END__"; printf '%s\n' "${!name}"; echo "__SECRET_END__"; } >> "$GITHUB_ENV"
+          done
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           projectPath: ui
           releaseId: ${{ needs.release.outputs.id }}
