@@ -206,6 +206,12 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
             plural_arity,
             flags: Default::default(),
             provenance,
+            context: i18n_harness_core::UnitContext {
+                group: entry.msgctxt.clone().filter(|c| !c.is_empty()),
+                disambiguation: None,
+                developer_notes: entry.extracted_comments.clone(),
+                translator_notes: entry.translator_comments.clone(),
+            },
             state,
             source_hash,
             review_status: None,
@@ -311,6 +317,7 @@ struct Entry {
     msgid_plural: Option<String>,
     msgstr_blocks: Vec<RawMsgstrBlock>,
     extracted_comments: Vec<String>,
+    translator_comments: Vec<String>,
     source_refs: Vec<SourceRef>,
 }
 
@@ -499,7 +506,16 @@ impl<'a> Parser<'a> {
             }
             return Ok(());
         }
-        // Plain `# ...` translator comment: ignore (round-trip handles bytes).
+        // Plain `# ...` translator comment (`#|` previous-msgid lines are not
+        // comments). The bytes round-trip regardless.
+        if let Some(rest) = trimmed.strip_prefix('#')
+            && !rest.starts_with('|')
+        {
+            let note = rest.trim();
+            if !note.is_empty() {
+                entry.translator_comments.push(note.to_owned());
+            }
+        }
         Ok(())
     }
 

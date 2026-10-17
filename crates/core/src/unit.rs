@@ -189,6 +189,36 @@ pub struct Provenance {
     pub byte_offset: Option<u32>,
 }
 
+/// What a translator needs to know about a message besides its text.
+///
+/// Filled by each format from whatever it records; every field is optional
+/// because formats record different things.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnitContext {
+    /// Group the message belongs to: Qt `<context><name>`, PO `msgctxt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// Disambiguation between equal source texts: Qt `<comment>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disambiguation: Option<String>,
+    /// Notes from developers: Qt `<extracomment>`, PO `#.`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub developer_notes: Vec<String>,
+    /// Notes left by translators: Qt `<translatorcomment>`, PO `# `.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub translator_notes: Vec<String>,
+}
+
+impl UnitContext {
+    /// True when the format recorded nothing.
+    pub fn is_empty(&self) -> bool {
+        self.group.is_none()
+            && self.disambiguation.is_none()
+            && self.developer_notes.is_empty()
+            && self.translator_notes.is_empty()
+    }
+}
+
 /// One translatable message.
 ///
 /// # Invariants
@@ -230,6 +260,10 @@ pub struct Unit {
 
     /// Placeholders occurring in [`Self::source`] (multiset, left-to-right).
     pub placeholders: Vec<Placeholder>,
+
+    /// Context and comments the format records for this message.
+    #[serde(default, skip_serializing_if = "UnitContext::is_empty")]
+    pub context: UnitContext,
 
     /// CLDR plural-category arity for plural units; `None` for singular
     /// units. The adapter sets this from the catalog (Qt: number of
@@ -344,6 +378,7 @@ impl Unit {
             plural_arity: None,
             flags: FlagSet::new(),
             provenance: Provenance::default(),
+            context: UnitContext::default(),
             state: UnitState::Untranslated,
             source_hash: None,
             review_status: None,

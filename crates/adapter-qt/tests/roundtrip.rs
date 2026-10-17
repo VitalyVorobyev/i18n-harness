@@ -996,3 +996,14 @@ fn plural_target_with_matching_form_count_fills_every_slot() {
         "{out}"
     );
 }
+
+#[test]
+fn context_and_developer_notes_reach_the_unit() {
+    let catalog = extract(&fixtures_dir().join("extracomment.ts")).expect("extract");
+    let unit = &catalog.units()[1];
+    assert_eq!(unit.context.group.as_deref(), Some("TestDialog"));
+    assert_eq!(
+        unit.context.developer_notes,
+        ["First developer note.", "Second developer note."]
+    );
+}
