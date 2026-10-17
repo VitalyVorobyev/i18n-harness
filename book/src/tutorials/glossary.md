@@ -2,7 +2,13 @@
 
 Product names, class names, units and abbreviations must usually stay as
 they are; some words must always be translated the same way. The
-glossary tells the model, and the checks hold it to the first rule.
+glossary — a curated term list, often called a dictionary — tells the
+model, and the checks hold the translations to it.
+
+A glossary does not have to exist before you translate. You can import
+one from a spreadsheet at any time and then
+[apply it](#apply-a-glossary-to-finished-translations) to the strings
+already translated.
 
 ## The example
 
@@ -71,19 +77,75 @@ written to the file until you fix it.
 |---|---|---|
 | Told to a chat model | yes: *Keep these terms unchanged: ParamsManager.* | yes: *Use these translations: "layer" → "Ebene".* |
 | Told to a dedicated translation model | no (these models take no instructions) | no |
-| Checked after translation | **yes** — the term must occur in the translation exactly as often as in the original (whole word, same spelling and case); otherwise a red problem | no — review it yourself |
+| Checked after translation | **yes** — the term must occur in the translation exactly as often as in the original (whole word, same spelling and case); otherwise a red problem | **yes** — the fixed translation must occur, in any case and with an inflected ending; otherwise a yellow warning |
 
 Matching details:
 
 - A term is only mentioned to the model when it occurs in the string.
 - *Keep unchanged* terms are matched case-sensitively as whole words:
   `ParamsManager` does not match inside `ParamsManagerDialog`.
-- Fixed translations are matched as whole words, ignoring case.
+- Fixed translations are found in the original as whole words, ignoring
+  case. In the translation, each word of the fixed translation may end
+  differently in its last two letters when it is longer than four letters,
+  so *Ebenen* or *súboru* count as *Ebene* or *súbor*.
 - **Note** is for people; it is not sent to the model.
 - Fixed translations belong to one language. The column header shows
   which: the language of the file selected when you opened Settings. Open
   Settings from a file of another language to fill in that language.
   *Keep unchanged* applies to all languages.
+
+## The term table
+
+A glossary kept in a spreadsheet can be imported instead of typed. Save
+the sheet as CSV (comma or semicolon) or tab-separated text, with one term
+per row:
+
+| term | translation | note |
+|---|---|---|
+| ParamsManager | | Class name |
+| PhotoVault | | Product name |
+| layer | Ebene | |
+
+- A row **without a translation** (or with the term itself as the
+  translation) is *keep unchanged*.
+- A row **with a translation** is a fixed translation, in the language
+  you import it for.
+- *note* is optional. A first row starting with `term`, `source` or
+  `original` is taken as a header and skipped. Cells may be quoted, as
+  spreadsheets do for text containing the separator.
+
+In the app: **Settings** → **Glossary** → **Import from a spreadsheet…**,
+pick the file, check the rows, then **Save settings**. A term already in
+the glossary is updated; nothing is removed. From the command line:
+
+```sh
+harness import-glossary --language de_DE glossary-demo terms.csv
+```
+
+## Apply a glossary to finished translations
+
+When the glossary arrives after the strings were translated — or you add
+a term later — the existing translations do not follow it yet. The
+checks find them: a changed *keep unchanged* term is a red problem, a
+missing fixed translation a yellow warning.
+
+1. Save the settings with the new glossary.
+2. Open the menu next to **Translate** (the arrow). It reads
+   **Apply the glossary (N strings break it)**, counting every file of
+   the folder, whatever the strings' status.
+3. Choose it. Those strings are translated again with the glossary in
+   the prompt and land under **Check** for review.
+4. Strings that still break the glossary keep their warning or problem;
+   fix them in the editor.
+
+The command-line equivalent is
+`harness translate-folder <folder> --model <model> --fix-glossary --save`.
+
+> **Dedicated translation models do not read the glossary.** A model
+> without a chat template (such as MiLMMT) is given only the text, so
+> retranslating with it cannot fix a glossary term. Apply the glossary
+> with a chat model, fix the remaining strings by hand, or hand them to an
+> agent ([Hand a batch to an AI coding agent](agent.md)).
 
 ## Where it is stored
 

@@ -11,7 +11,7 @@ There are two severities:
 | Severity | Shown as | Effect |
 |---|---|---|
 | **Error** | red, *Problem* label, counted by **Problems only** | The translation is **not written** to the file. On save, the app keeps the file's previous text for that string (an empty translation if there was none) and reports *Saved, with problems held back*; the translation stays in the app to be fixed. `harness import-batch` and `harness translate` write nothing for a file with any error. |
-| **Warning** | yellow | Saved normally. `--deliver` and `import-batch` leave such translations unfinished (to check) instead of done. |
+| **Warning** | yellow | Saved normally. `harness translate-folder --deliver` marks such translations done like clean ones; `import-batch` leaves them unfinished (to check). |
 
 The messages below are those the app shows. For a plural string, a
 message about one form ends with *(form N)*. Placeholders are shown in
@@ -24,7 +24,11 @@ the file's own notation (`%1`, `%(name)s`, `{name}`).
 *Placeholders do not match the original: missing %1; unexpected %2*
 
 Each form of the translation must contain exactly the same placeholders
-as the original, each as often (order may change). See
+as the original, each as often (order may change). In ICU messages the
+kind of each argument counts too: `{count, plural, …}` rendered as
+`{count, množné, …}` is a mismatch, because the application would no
+longer recognise it. For a gettext plural, the forms other than the first
+are compared with `msgid_plural`. See
 [Formats and placeholders](formats.md#placeholders) for what counts as a
 placeholder in each format.
 
@@ -98,9 +102,8 @@ and may not fit*
 The translation is longer than the original by more than the language's
 length factor (see `length_warn_ratio` in
 [The settings file](settings-file.md#localesid)). Originals shorter than
-8 characters are not checked. For plural strings, the characters of all
-forms are added up and compared with the single original, so long plural
-strings can get this warning even when each form is fine.
+8 characters are not checked. For plural strings, the longest form is
+compared with the longest form of the original.
 
 ### Agreement
 
@@ -114,6 +117,17 @@ noun). The check looks for German and Spanish articles and contractions
 languages whose register is formal or informal — German, Spanish,
 French, Italian and others — so a French *la {0}* is flagged too. Worth a
 look; often fine.
+
+### Glossary translation
+
+*Glossary: "layer" should be translated as "Ebene"*
+
+A glossary term with a fixed translation occurs in the original, but its
+translation does not occur in the translation. Matching ignores case and
+lets each word of the fixed translation end differently in its last two
+letters when it is longer than four letters, so inflected forms pass:
+*súbor* is found in *súboru*, *Ebene* in *Ebenen*. See
+[Apply a glossary to finished translations](../tutorials/glossary.md#apply-a-glossary-to-finished-translations).
 
 ### Chinese punctuation
 
