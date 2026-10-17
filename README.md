@@ -40,6 +40,14 @@ built for translators, not developers. `i18n-harness` flips both.
   your trade-off (local-and-free vs. cloud-and-strong vs.
   external-agent) on evidence, not vendor pitch.
 
+## Documentation
+
+The user guide — installing the app, getting a model, step-by-step
+tutorials for each file format, and the reference for the settings file,
+the command-line tools and the checks — is published at
+**<https://vitalyvorobyev.github.io/i18n-harness/>**. Its source is in
+[`book/`](book/) (build it with `mdbook build book`).
+
 ## Status
 
 **Pre-alpha.** Core, multi-catalog project mode (with reference

@@ -8,6 +8,9 @@ target/
 node_modules/
 dist/
 
+# Built user guide
+/book/build/
+
 # Test output
 ui/playwright-report/
 ui/test-results/
