@@ -284,8 +284,8 @@ fn v2_confidence_out_of_bounds_is_malformed_response() {
 
 /// A singular unit served an array `translation` field must surface as
 /// `MalformedResponse` (not get an invalid `Plural` target written into
-/// the singular slot). Mirrors the P1 codex finding on the initial
-/// M4.6.1 commit.
+/// the singular slot). Mirrors the P1 codex finding on the commit that
+/// introduced this behavior.
 #[test]
 fn v2_plural_payload_for_singular_unit_is_malformed_response() {
     let model_response = r#"{"translation":["first","second"],"confidence":0.9}"#;

@@ -62,7 +62,7 @@ pub(crate) fn update_unit_target(
 ///
 /// If `out_path` is `None`, writes back to the path the catalog was
 /// opened from. The original bytes (modulo edited unit bodies) come
-/// through verbatim — the M0 contract.
+/// through verbatim — the round-trip contract.
 #[tauri::command]
 pub(crate) fn save_catalog(
     out_path: Option<String>,

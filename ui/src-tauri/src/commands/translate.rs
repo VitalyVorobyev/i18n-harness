@@ -43,15 +43,14 @@ pub(crate) fn translate_unit_in_project(
     unit_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::dto::TranslateResult, String> {
-    use i18n_harness_backend::{OllamaBackend, TranslationBackend};
+    use i18n_harness_backend::TranslationBackend;
 
     let abs = PathBuf::from(&catalog_path);
     let id = UnitId::from(unit_id);
 
-    let (locale, glossary) =
+    let (locale, glossary, ollama_settings) =
         crate::services::translate::resolve_project_translate_context(&state, &abs)?;
-    let backend =
-        OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
+    let backend = crate::services::translate::build_ollama_backend(&ollama_settings)?;
     let backend_name = backend.name().to_string();
 
     crate::services::translate::translate_one(
@@ -86,12 +85,12 @@ pub(crate) async fn translate_glossary_term(
     term_id: String,
     target_locale: String,
 ) -> Result<String, String> {
-    use i18n_harness_backend::OllamaBackend;
     use i18n_harness_locales::Locale;
+    use i18n_harness_project::BackendKind;
 
-    // Snapshot the glossary and validate the term under the project lock, then
-    // drop the lock before the network call.
-    let (term_source, glossary, locale) = {
+    // Snapshot the glossary, term, locale, and backend settings under the
+    // project lock, then drop the lock before the network call.
+    let (term_source, glossary, locale, ollama_settings) = {
         let abs = PathBuf::from(&project_path);
         let project_guard = state
             .project
@@ -114,12 +113,27 @@ pub(crate) async fn translate_glossary_term(
         let locale = Locale::by_id(&target_locale)
             .ok_or_else(|| format!("unknown locale `{target_locale}`; add it to crates/locales"))?;
 
+        let ollama_settings = if let Some(backend_cfg) = &project.manifest().backends.default {
+            if backend_cfg.kind != BackendKind::Ollama {
+                return Err(format!(
+                    "backend kind {:?} not supported yet",
+                    backend_cfg.kind,
+                ));
+            }
+            crate::services::translate::OllamaSettings {
+                model: backend_cfg.model.clone(),
+                host: backend_cfg.host.clone(),
+                num_ctx: backend_cfg.num_ctx,
+            }
+        } else {
+            crate::services::translate::OllamaSettings::default()
+        };
+
         let term_source = crate::services::translate::glossary_term_source(&glossary, &term_id)?;
-        (term_source, glossary, locale)
+        (term_source, glossary, locale, ollama_settings)
     };
 
-    let backend =
-        OllamaBackend::new().map_err(|e| format!("ollama backend construction failed: {e}"))?;
+    let backend = crate::services::translate::build_ollama_backend(&ollama_settings)?;
     crate::services::translate::dispatch_glossary_term_translation(
         &backend,
         &term_source,
@@ -146,12 +160,12 @@ pub(crate) fn translate_batch_in_project(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<crate::dto::TranslateBatchStarted, String> {
-    use i18n_harness_backend::{OllamaBackend, TranslationBackend};
+    use i18n_harness_backend::TranslationBackend;
 
     let abs = PathBuf::from(&catalog_path);
 
     // 1. Resolve locale / glossary / backend kind via the shared helper.
-    let (locale, glossary) =
+    let (locale, glossary, ollama_settings) =
         crate::services::translate::resolve_project_translate_context(&state, &abs)?;
     let locale_id = locale.id.to_string();
 
@@ -182,12 +196,12 @@ pub(crate) fn translate_batch_in_project(
 
     // 4. Construct the backend on the calling thread so config errors surface
     //    synchronously; if this fails we release the active slot before returning.
-    let backend = match OllamaBackend::new() {
+    let backend = match crate::services::translate::build_ollama_backend(&ollama_settings) {
         Ok(b) => b,
         Err(e) => {
             // Release the active slot we just claimed.
             state.active_batches.release(&active_slot);
-            return Err(format!("ollama backend construction failed: {e}"));
+            return Err(e);
         }
     };
     let backend_name = backend.name().to_string();

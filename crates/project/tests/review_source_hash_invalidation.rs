@@ -1,7 +1,7 @@
 //! Cross-crate integration test: adapter-qt extract → project review → source
 //! change → re-extract → invalidation detected.
 //!
-//! Exercises the full §9.4 slice from the M4.1.5 design doc:
+//! Exercises the full §9.4 slice from the source-hash / review-status design doc:
 //!
 //! 1. Construct a project over a temp dir with one Qt fixture.
 //! 2. Extract through `adapter_qt::extract`; verify units have `source_hash`.

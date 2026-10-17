@@ -14,7 +14,12 @@ name = "i18n_harness_ui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["ollama"]
+# `custom-protocol` makes the binary serve the embedded `ui/dist` bundle.
+# Without it Tauri runs in dev mode and loads `devUrl`, so a plain
+# `cargo build --release` would open a blank window. `bun tauri:dev`
+# opts out with `--no-default-features` to keep the Vite dev server.
+default = ["ollama", "custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
 # Gemma/Ollama HTTP backend. Enabled by default — without it the
 # `translate_unit` command is unavailable and the UI falls back to
 # manual editing only. The backend crate's `manual` feature is on
@@ -38,6 +43,7 @@ i18n-harness-backend = { workspace = true }
 i18n-harness-gate = { workspace = true }
 i18n-harness-glossary = { workspace = true }
 i18n-harness-project = { workspace = true }
+i18n-harness-reuse = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }

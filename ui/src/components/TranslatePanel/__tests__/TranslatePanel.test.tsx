@@ -30,6 +30,7 @@ function makeSummary(locales: string[] = ["de", "fr"]): ProjectSummary {
     schema: 1,
     locales,
     catalogs,
+    references: [],
     glossary_path: null,
     backend: null,
     state_dir: "/project/.i18n-harness",
@@ -46,6 +47,7 @@ const BASE_PROPS = {
   search: "",
   dirtyIds: new Set<string>(),
   reports: {},
+  stats: null,
   busyIds: new Set<string>(),
   batchActive: false,
   error: null,
@@ -148,6 +150,84 @@ describe("TranslatePanel mode switching", () => {
       name: /switch to single-locale view/i,
     });
     expect(singleBtn).toBeDisabled();
+  });
+});
+
+// ── FileFilter visibility + scoping ──────────────────────────────────────────
+
+function summaryWithFiles(
+  files: { path: string; locale: string }[],
+): ProjectSummary {
+  const catalogs: CatalogRef[] = files.map((f) => ({
+    absolute_path: `/project/${f.path}`,
+    manifest_path: f.path,
+    format: "qt-ts",
+    locale: f.locale,
+    status: "ok",
+  }));
+  const locales = [...new Set(files.map((f) => f.locale))];
+  return {
+    root: "/project",
+    name: "Test",
+    schema: 1,
+    locales,
+    catalogs,
+    references: [],
+    glossary_path: null,
+    backend: null,
+    state_dir: "/project/.i18n-harness",
+  };
+}
+
+describe("TranslatePanel file filter", () => {
+  it("shows the file filter in Matrix mode when >1 catalog exists", () => {
+    render(
+      <TranslatePanel
+        {...BASE_PROPS}
+        focusLocale={null}
+        setFocusLocale={vi.fn()}
+      />,
+    );
+    const select = screen.getByRole("combobox", { name: /filter by file/i });
+    const options = Array.from(select.querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(options).toEqual(["All files", "de.ts", "fr.ts"]);
+  });
+
+  it("hides the file filter in Single mode when the locale has one file", () => {
+    render(
+      <TranslatePanel
+        {...BASE_PROPS}
+        focusLocale="de"
+        setFocusLocale={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("combobox", { name: /filter by file/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the file filter in Single mode when the locale has multiple files", () => {
+    const summary = summaryWithFiles([
+      { path: "app_de.ts", locale: "de" },
+      { path: "help_de.ts", locale: "de" },
+      { path: "app_fr.ts", locale: "fr" },
+    ]);
+    render(
+      <TranslatePanel
+        {...BASE_PROPS}
+        summary={summary}
+        focusLocale="de"
+        setFocusLocale={vi.fn()}
+      />,
+    );
+    const select = screen.getByRole("combobox", { name: /filter by file/i });
+    const options = Array.from(select.querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    // Only the two de catalogs (plus the "All files" sentinel) are in scope.
+    expect(options).toEqual(["All files", "app_de.ts", "help_de.ts"]);
   });
 });
 

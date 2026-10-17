@@ -8,7 +8,7 @@
 //! human_target.trim()`, 0.0 otherwise. Smarter metrics (BLEU, chrF) are a
 //! future iteration.
 //!
-//! See `docs/roadmap-product.md` §M4.9 for the full specification.
+//! See `docs/roadmap-product.md` for the full specification.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

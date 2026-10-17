@@ -201,6 +201,25 @@ pub enum ProjectWarning {
         locale: String,
     },
 
+    /// A `[[references]]` entry points at a file that does not exist on disk.
+    /// The entry is still listed with `Missing` status; operations that require
+    /// the file will fail when they attempt to read it.
+    ReferenceNotFound {
+        /// Manifest-relative path of the missing reference catalog.
+        path: PathBuf,
+    },
+
+    /// A `[[references]]` entry's content does not match its declared format.
+    /// The entry is still listed with `FormatMismatch` status.
+    ReferenceFormatMismatch {
+        /// Absolute path of the mismatched file.
+        path: PathBuf,
+        /// Format the manifest declared.
+        declared: CatalogFormat,
+        /// Format the content sniffer detected.
+        sniffed: FormatGuess,
+    },
+
     /// A glossary warning threaded through from `crates/glossary`.
     Glossary(i18n_harness_glossary::GlossaryWarning),
 }
@@ -218,6 +237,20 @@ impl std::fmt::Display for ProjectWarning {
                 write!(
                     f,
                     "catalog `{}` declares locale `{locale}` which is not in the workspace locales table",
+                    path.display()
+                )
+            }
+            Self::ReferenceNotFound { path } => {
+                write!(f, "reference `{}` not found on disk", path.display())
+            }
+            Self::ReferenceFormatMismatch {
+                path,
+                declared,
+                sniffed,
+            } => {
+                write!(
+                    f,
+                    "reference `{}` declared {declared:?} but content looks like {sniffed:?}",
                     path.display()
                 )
             }

@@ -6,7 +6,7 @@
 //! to an external tool (e.g. the `tune-i18n-prompt` Claude Code skill) for
 //! prompt refinement.
 //!
-//! See `docs/roadmap-product.md` §M4.10 for the full specification.
+//! See `docs/roadmap-product.md` for the full specification.
 //!
 //! # Bundle layout
 //!

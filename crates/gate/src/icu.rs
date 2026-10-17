@@ -27,7 +27,7 @@
 //!   placeholders. The parser treats the type segment (`number`, `date`,
 //!   `time`, `spellout`, `ordinal`, `duration`) as opaque — it records the
 //!   placeholder name and moves past the closing brace without parsing the
-//!   style. Hardness lives elsewhere; for the M1 gate the question is "is
+//!   style. Hardness lives elsewhere; the gate's question is "is
 //!   this placeholder present" and "do the plural arms cover the locale's
 //!   categories", not "is the format style well-formed".
 //!
@@ -73,7 +73,7 @@ pub(crate) enum SelectorKind {
 /// arity check currently runs on `Target::Plural::forms.len()` not on
 /// this struct.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // wired in for M4 (ICU-JSON inline plurals)
+#[allow(dead_code)] // wired in for ICU-JSON inline plurals
 pub(crate) struct Selector {
     /// Name of the selector variable. For CLDR plurals this is the
     /// argument whose value the plural categories switch on (typically

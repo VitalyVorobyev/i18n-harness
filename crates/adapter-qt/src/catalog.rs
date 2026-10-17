@@ -45,6 +45,25 @@ pub struct Catalog {
     /// snapshot, `plan_edits_for_unit`'s `candidate.target == original.target`
     /// shortcut would silently treat every save as a no-op.
     pub(crate) original_units: Vec<Unit>,
+
+    /// Byte span of each unit's full `<message …>…</message>` element,
+    /// parallel to [`Self::units`]. Ranges point into [`Self::source_bytes`]
+    /// with the usual inclusive-start / exclusive-end convention: `start` is
+    /// the `<` of `<message`, `end` is the byte just past the `>` of
+    /// `</message>`.
+    ///
+    /// Used by [`crate::render_subset`] for byte-subtraction: a kept message
+    /// is copied verbatim, a dropped message is spliced out. The leading
+    /// whitespace before `start` is **not** included here; the subset writer
+    /// absorbs it separately so the two concerns stay independent.
+    pub(crate) message_spans: Vec<(usize, usize)>,
+
+    /// One [`ContextSpan`] per `<context>` element, in document order.
+    /// Records the context's block span plus the indices (into
+    /// [`Self::units`]) of the messages it contains. Used by
+    /// [`crate::render_subset`] to prune a context whose every member was
+    /// dropped.
+    pub(crate) contexts: Vec<ContextSpan>,
 }
 
 impl Catalog {
@@ -134,6 +153,23 @@ pub(crate) struct EditPoint {
 
     /// Original numerus form bytes, parallel to [`Self::numerus_bodies`].
     pub(crate) original_numerus_bodies: Vec<Vec<u8>>,
+}
+
+/// Byte-level handle for one `<context>` element, used by
+/// [`crate::render_subset`] to drop contexts that become empty after a
+/// subset deletes all their messages.
+///
+/// `block` is `start..end` into [`Catalog::source_bytes`]: `start` is the
+/// `<` of `<context>`, `end` is the byte just past the `>` of `</context>`.
+/// `member_unit_indices` lists the indices (into [`Catalog::units`]) of the
+/// messages parsed inside this context, in document order. A `<message>`
+/// that parsed to no unit (e.g. one with no `<source>`) contributes no
+/// index, which is intentional: such bytes are part of the context block and
+/// are removed only when the *whole context* is removed.
+#[derive(Debug, Clone)]
+pub(crate) struct ContextSpan {
+    pub(crate) block: (usize, usize),
+    pub(crate) member_unit_indices: Vec<usize>,
 }
 
 /// Where the `type="..."` attribute on a `<translation>` lives.

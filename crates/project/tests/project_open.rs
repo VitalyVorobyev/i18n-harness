@@ -40,7 +40,7 @@ fn fs_full() -> Arc<dyn ProjectFs> {
     fs.write_atomic(&root.join("glossary.toml"), glossary.as_bytes())
         .unwrap();
 
-    // Create stub catalog files (content not parsed in M4.1b).
+    // Create stub catalog files (content not parsed at this stage).
     fs.create_dir_all(&root.join("translations")).unwrap();
     fs.write_atomic(&root.join("translations/app_de.ts"), b"<TS></TS>")
         .unwrap();

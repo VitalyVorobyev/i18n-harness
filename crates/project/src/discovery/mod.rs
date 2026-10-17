@@ -247,6 +247,7 @@ impl Project {
             },
             locales: draft.locales,
             catalogs,
+            references: Vec::new(),
             glossary: draft.glossary,
             backends: BackendBlock {
                 default: draft.backend,

@@ -33,10 +33,11 @@ use crate::report::{Finding, GateReport};
 
 /// Top-level event types emitted to `metrics.jsonl`.
 ///
-/// The set is closed at the type level; M1 produces only `GateReject` and
-/// `SoftWarning`. M2 adds `Retry`; M3 adds `HumanEdit`. Older readers that
-/// do not recognize a variant will deserialize-fail on those lines, which
-/// is exactly the behavior we want — silent drop would erode the metric.
+/// The set is closed at the type level; the initial set produces only
+/// `GateReject` and `SoftWarning`, with `Retry` and `HumanEdit` added as
+/// later event kinds. Older readers that do not recognize a variant will
+/// deserialize-fail on those lines, which is exactly the behavior we want —
+/// silent drop would erode the metric.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "kebab-case")]
 pub enum EventKind {
@@ -44,10 +45,10 @@ pub enum EventKind {
     GateReject,
     /// At least one soft finding fired on this unit.
     SoftWarning,
-    /// A human edited the proposed translation. Reserved for M3+.
+    /// A human edited the proposed translation. Reserved for future use.
     HumanEdit,
     /// The backend was asked to retry on this unit (e.g. ICU parse fail).
-    /// Reserved for M2+.
+    /// Reserved for future use.
     Retry,
 }
 
@@ -74,7 +75,7 @@ pub struct Event {
     /// Unit the event pertains to.
     pub unit_id: UnitId,
     /// Lower-case kebab name of the flag that fired (or empty for events
-    /// without a flag, e.g. M3 human-edit).
+    /// without a flag, e.g. a human-edit event).
     pub rule: String,
     /// Per-rule payload (serialized [`crate::FindingDetail`]).
     pub detail: serde_json::Value,

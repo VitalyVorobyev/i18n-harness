@@ -22,7 +22,7 @@ fn root() -> &'static Path {
 }
 
 /// Build an in-memory FS pre-populated with the round-trip fixture manifest
-/// and stub catalog files (existence check only in M4.1b).
+/// and stub catalog files (existence check only; content not parsed).
 fn fs_with_fixture() -> Arc<InMemoryFs> {
     let fs = Arc::new(InMemoryFs::new());
     let root = PathBuf::from(ROOT);

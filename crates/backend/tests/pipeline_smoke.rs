@@ -1,5 +1,5 @@
 //! End-to-end smoke test that wires the [`TranslationBackend`] trait
-//! through the full M2 pipeline:
+//! through the full pipeline:
 //!
 //! ```text
 //!   adapter-qt::extract → batch → manual backend → gate → adapter-qt::apply
@@ -79,7 +79,7 @@ fn full_pipeline_with_manual_backend_translates_then_gate_passes() {
     assert_eq!(outcomes.len(), batch.units.len());
 
     // Merge translation text into a working unit vector. This is exactly
-    // what the M2 translate CLI driver does.
+    // what the translate CLI driver does.
     let mut translated: Vec<Unit> = batch.units.clone();
     for (i, outcome) in outcomes.iter().enumerate() {
         if let TranslationOutcome::Translated { text, .. } = outcome {

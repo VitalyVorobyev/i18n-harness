@@ -38,6 +38,7 @@ function makeMinimalSummary(): ProjectSummary {
     schema: 1,
     locales: ["de_DE"],
     catalogs: [],
+    references: [],
     glossary_path: null,
     backend: null,
     state_dir: "/tmp/test-project/.i18n-harness",

@@ -67,6 +67,9 @@ interface Props {
   /** Status filter lifted from TranslatePanel sub-header. Multi-select set
    *  over the three UI-editable UnitStates. Empty set means "show all". */
   statusFilter: StatusFilterState;
+  /** Narrow to a single catalog file (absolute path), or null for all files.
+   *  Collapses the matrix to the one selected file's units. */
+  fileFilter: string | null;
   onSearchChange: (s: string) => void;
   /** Auto-load a project catalog into the App's openCatalogs cache. The
    *  call is silent — no toast, no selection change. Lets Matrix view
@@ -83,6 +86,12 @@ interface Props {
   onAcceptUnit: (catalogPath: string, unit: Unit) => void;
   /** Open the "Translate untranslated" modal pre-filled with all locales. */
   onOpenTranslateModal: () => void;
+  /** Add the focused cell's source/target to the project glossary. */
+  onAddToGlossary?: (
+    source: string,
+    locale: string,
+    translation: string | null,
+  ) => void;
 }
 
 // ── Matrix-row data model ────────────────────────────────────────────────
@@ -113,10 +122,12 @@ interface MatrixRow {
 export function deriveMatrix(
   summary: ProjectSummary,
   openCatalogs: Map<string, CatalogResponse>,
+  fileFilter: string | null = null,
 ): MatrixRow[] {
   const rows = new Map<UnitId, MatrixRow>();
 
   for (const ref of summary.catalogs) {
+    if (fileFilter && ref.absolute_path !== fileFilter) continue;
     const cached = openCatalogs.get(ref.absolute_path);
     if (!cached) continue;
     for (const unit of cached.units) {
@@ -226,6 +237,7 @@ export function MatrixView({
   batchActive,
   search,
   statusFilter,
+  fileFilter,
   onSearchChange,
   onEnsureCatalogLoaded,
   setFocusLocale,
@@ -233,6 +245,7 @@ export function MatrixView({
   onEditUnit,
   onAcceptUnit,
   onOpenTranslateModal,
+  onAddToGlossary,
 }: Props) {
   // ── Auto-load every project catalog into the cache ──────────────────────
   //
@@ -281,8 +294,8 @@ export function MatrixView({
   // ── Derived matrix + filtered rows ──────────────────────────────────────
 
   const rows = useMemo(
-    () => deriveMatrix(summary, openCatalogs),
-    [summary, openCatalogs],
+    () => deriveMatrix(summary, openCatalogs, fileFilter),
+    [summary, openCatalogs, fileFilter],
   );
 
   const filteredRows = useMemo(() => {
@@ -681,6 +694,8 @@ export function MatrixView({
               activeCatalogPath={focusedEntry.catalogPath}
               busyIds={busyIds}
               onAccept={onInspectorAccept}
+              locale={focusedCell?.locale}
+              onAddToGlossary={onAddToGlossary}
               collapsed={inspectorCollapsed}
               onToggleCollapsed={toggleInspector}
             />

@@ -115,7 +115,7 @@ fn none_source_hash_never_sets_changed_flag() {
         )
         .expect("set_review_status");
 
-    // Unit has no source_hash (e.g. PO adapter in early M4, or vanished unit).
+    // Unit has no source_hash (e.g. early adapter that skips hashing, or vanished unit).
     let mut units = vec![make_unit("Ctx::Hello", None)];
     project.apply_review_state(Path::new("translations/app_de.ts"), &mut units);
 

@@ -1,4 +1,4 @@
-//! Integration test running the gate over the M0 Qt showcase fixture.
+//! Integration test running the gate over the Qt showcase fixture.
 //!
 //! Two passes:
 //!

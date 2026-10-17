@@ -7,11 +7,14 @@ import { loadGlossary, loadMetrics } from "../../lib/tauri";
 import type {
   CatalogRef,
   CatalogResponse,
+  CatalogStateCounts,
   GlossaryLoadResponse,
   MetricEvent,
   MetricsResponse,
   ProjectSummary,
+  ReferenceRef,
 } from "../../lib/types";
+import { severityOf } from "../../lib/types";
 import { Eyebrow, LocaleTag, SegmentBar } from "../primitives";
 
 // ── Inline SVG icons (no external icon library dependency) ────────────────────
@@ -64,7 +67,11 @@ interface LocaleStats {
   proposed: number;
   untranslated: number;
   total: number;
+  /** Deduped "items to review" headline. */
   needsReview: number;
+  /** Breakdown of the headline (may overlap each other and `needsReview`). */
+  conflicts: number;
+  hardFlagged: number;
   isDirty: boolean;
 }
 
@@ -72,6 +79,12 @@ export interface OverviewPanelProps {
   summary: ProjectSummary;
   openCatalogs: Map<string, CatalogResponse>;
   dirtyCatalogPaths: Set<string>;
+  /**
+   * Per-catalog unit-state tally from the latest review scan, keyed by absolute
+   * catalog path. Covers every catalog (even unopened ones), so progress
+   * numbers are accurate without opening each file.
+   */
+  statsByCatalog: Record<string, CatalogStateCounts>;
   focusLocale: string | null;
   setFocusLocale: (locale: string | null) => void;
   setProjectView: (
@@ -83,6 +96,16 @@ export interface OverviewPanelProps {
       | "quality"
       | "review",
   ) => void;
+  /** True when the project declares at least one reference catalog. */
+  hasReferences: boolean;
+  /** True while a project-wide reuse/export batch is in flight. */
+  batchReuseBusy: boolean;
+  /** Apply manifest references into every Qt catalog (project-wide reuse). */
+  onApplyAllReferences: () => void;
+  /** Export a remainder file for every non-reference Qt catalog. */
+  onExportAllRemainders: () => void;
+  /** Open the Review queue filtered to reference-reuse conflicts. */
+  onOpenConflicts: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,35 +121,97 @@ function relativeTime(isoTs: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-function unitCounts(units: CatalogResponse["units"]): {
+interface CatalogCounts {
   finished: number;
   proposed: number;
   untranslated: number;
   needsReview: number;
-} {
+  conflicts: number;
+  hardFlagged: number;
+}
+
+// Mirrors `review_signals` in `services/review_scan.rs`: a unit needs review
+// when its status is needs-review/conflict, it carries a hard flag, or it is
+// still proposed. Finished/untranslated units with only soft/semantic flags are
+// excluded. Used only for the open-catalog fallback; the scan tally is
+// preferred when present.
+function unitCounts(units: CatalogResponse["units"]): CatalogCounts {
   let finished = 0;
   let proposed = 0;
   let untranslated = 0;
   let needsReview = 0;
+  let conflicts = 0;
+  let hardFlagged = 0;
   for (const u of units) {
     if (u.state === "finished") finished++;
     else if (u.state === "proposed") proposed++;
     else if (u.state === "untranslated") untranslated++;
-    if (u.review_status === "needs-review" || (u.flags && u.flags.length > 0)) {
+
+    const isConflict = u.review_status === "conflict";
+    const hasHard = (u.flags ?? []).some((f) => severityOf(f) === "hard");
+    if (isConflict) conflicts++;
+    if (hasHard) hardFlagged++;
+    if (
+      u.review_status === "needs-review" ||
+      isConflict ||
+      hasHard ||
+      u.state === "proposed"
+    ) {
       needsReview++;
     }
   }
-  return { finished, proposed, untranslated, needsReview };
+  return {
+    finished,
+    proposed,
+    untranslated,
+    needsReview,
+    conflicts,
+    hardFlagged,
+  };
 }
 
 /**
- * Compute per-locale aggregated stats from the open catalog cache and the
- * project summary (for catalogs not yet opened).
+ * Resolve per-catalog counts, preferring the scan tally (covers unopened
+ * catalogs) and falling back to the open-catalog cache when the scan map has no
+ * entry for the path yet.
+ */
+function countsForCatalog(
+  ref: CatalogRef,
+  statsByCatalog: Record<string, CatalogStateCounts>,
+  openCatalogs: Map<string, CatalogResponse>,
+): CatalogCounts {
+  const scan = statsByCatalog[ref.absolute_path];
+  if (scan) {
+    return {
+      finished: scan.finished,
+      proposed: scan.proposed,
+      untranslated: scan.untranslated,
+      needsReview: scan.needs_review,
+      conflicts: scan.conflicts,
+      hardFlagged: scan.hard_flagged,
+    };
+  }
+  const cached = openCatalogs.get(ref.absolute_path);
+  if (cached) return unitCounts(cached.units);
+  return {
+    finished: 0,
+    proposed: 0,
+    untranslated: 0,
+    needsReview: 0,
+    conflicts: 0,
+    hardFlagged: 0,
+  };
+}
+
+/**
+ * Compute per-locale aggregated stats, preferring the review-scan tally (which
+ * covers every catalog) and falling back to the open-catalog cache.
  */
 function buildLocaleStats(
   summary: ProjectSummary,
   openCatalogs: Map<string, CatalogResponse>,
   dirtyCatalogPaths: Set<string>,
+  statsByCatalog: Record<string, CatalogStateCounts>,
 ): LocaleStats[] {
   // Group catalog refs by locale.
   const byLocale = new Map<string, CatalogRef[]>();
@@ -142,17 +227,18 @@ function buildLocaleStats(
     let proposed = 0;
     let untranslated = 0;
     let needsReview = 0;
+    let conflicts = 0;
+    let hardFlagged = 0;
     let isDirty = false;
 
     for (const ref of refs) {
-      const cached = openCatalogs.get(ref.absolute_path);
-      if (cached) {
-        const counts = unitCounts(cached.units);
-        finished += counts.finished;
-        proposed += counts.proposed;
-        untranslated += counts.untranslated;
-        needsReview += counts.needsReview;
-      }
+      const counts = countsForCatalog(ref, statsByCatalog, openCatalogs);
+      finished += counts.finished;
+      proposed += counts.proposed;
+      untranslated += counts.untranslated;
+      needsReview += counts.needsReview;
+      conflicts += counts.conflicts;
+      hardFlagged += counts.hardFlagged;
       // Even without a cached catalog, count dirty state.
       if (dirtyCatalogPaths.has(ref.absolute_path)) isDirty = true;
     }
@@ -170,6 +256,8 @@ function buildLocaleStats(
       untranslated,
       total,
       needsReview,
+      conflicts,
+      hardFlagged,
       isDirty,
     });
   }
@@ -638,27 +726,435 @@ function LocaleProgressCard({
         />
       </div>
 
-      {/* Needs review row */}
+      {/* Needs-review row — headline + breakdown. Conflicts drive hard
+          (high-visibility) styling because they block reference reuse. */}
       {stat.needsReview > 0 && (
         <div
           style={{
             marginTop: 10,
             padding: "5px 10px",
-            background: "var(--color-severity-soft-bg)",
-            border: "1px solid var(--color-severity-soft-border)",
+            background:
+              stat.conflicts > 0
+                ? "var(--color-severity-hard-bg)"
+                : "var(--color-severity-soft-bg)",
+            border: `1px solid ${
+              stat.conflicts > 0
+                ? "var(--color-severity-hard-border)"
+                : "var(--color-severity-soft-border)"
+            }`,
             borderRadius: "var(--radius-sm)",
             display: "flex",
             alignItems: "center",
-            gap: 6,
+            flexWrap: "wrap",
+            gap: 8,
             fontSize: 11.5,
-            color: "var(--color-severity-soft)",
+            color:
+              stat.conflicts > 0
+                ? "var(--color-severity-hard)"
+                : "var(--color-severity-soft)",
           }}
         >
           <FlagIcon size={11} />
-          <span>{stat.needsReview} needs review</span>
+          <span style={{ fontWeight: 600 }}>{stat.needsReview} to review</span>
+          {stat.conflicts > 0 && (
+            <span title="Reference-reuse conflicts — resolve in Review">
+              · {stat.conflicts} conflict{stat.conflicts === 1 ? "" : "s"}
+            </span>
+          )}
+          {stat.hardFlagged > 0 && <span>· {stat.hardFlagged} flagged</span>}
+          {stat.proposed > 0 && <span>· {stat.proposed} proposed</span>}
         </div>
       )}
     </button>
+  );
+}
+
+// ── Per-file stats ────────────────────────────────────────────────────────────
+
+/**
+ * One row per translation-target catalog (references excluded), showing total /
+ * untranslated / needs-review counts from the latest review scan. Numbers
+ * populate for every catalog without opening each one.
+ */
+function FilesSection({
+  summary,
+  openCatalogs,
+  statsByCatalog,
+  onOpenCatalog,
+}: {
+  summary: ProjectSummary;
+  openCatalogs: Map<string, CatalogResponse>;
+  statsByCatalog: Record<string, CatalogStateCounts>;
+  onOpenCatalog: (locale: string) => void;
+}) {
+  // Exclude catalogs that are also registered as references (read-only memory).
+  const referencePaths = new Set(
+    summary.references.map((r) => r.absolute_path),
+  );
+  const catalogs = summary.catalogs.filter(
+    (c) => !referencePaths.has(c.absolute_path),
+  );
+
+  if (catalogs.length === 0) return null;
+
+  return (
+    <section aria-labelledby="overview-files-heading">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span id="overview-files-heading">
+          <Eyebrow>Files</Eyebrow>
+        </span>
+        <span style={{ fontSize: 11, color: "var(--color-fg-tertiary)" }}>
+          {catalogs.length} {catalogs.length === 1 ? "file" : "files"}
+        </span>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: "var(--radius-lg)",
+          background: "var(--color-bg-surface)",
+          overflow: "hidden",
+        }}
+      >
+        {catalogs.map((c, i) => {
+          const counts = countsForCatalog(c, statsByCatalog, openCatalogs);
+          const total = counts.finished + counts.proposed + counts.untranslated;
+          const loaded =
+            statsByCatalog[c.absolute_path] !== undefined ||
+            openCatalogs.has(c.absolute_path);
+          return (
+            <button
+              type="button"
+              key={c.manifest_path}
+              onClick={() => onOpenCatalog(c.locale)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 14px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                textAlign: "left",
+                borderBottom:
+                  i < catalogs.length - 1
+                    ? "1px solid var(--color-border-subtle)"
+                    : undefined,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--color-bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+              aria-label={`Open ${c.manifest_path}`}
+            >
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11.5,
+                  color: "var(--color-fg-primary)",
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+                title={c.manifest_path}
+              >
+                {c.manifest_path}
+              </span>
+              {loaded ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexShrink: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      color: "var(--color-fg-tertiary)",
+                    }}
+                    title="Total units"
+                  >
+                    {total} total
+                  </span>
+                  <BreakdownDot
+                    color="var(--color-state-untranslated)"
+                    count={counts.untranslated}
+                    label="untranslated"
+                  />
+                  {counts.needsReview > 0 && (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                        fontSize: 11.5,
+                        color: "var(--color-severity-soft)",
+                      }}
+                      title="Units needing review"
+                    >
+                      <FlagIcon size={11} />
+                      {counts.needsReview}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-fg-tertiary)",
+                  }}
+                >
+                  …
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+// ── Project-wide reuse actions ──────────────────────────────────────────────
+
+function BatchReuseActions({
+  hasQtCatalog,
+  hasReferences,
+  busy,
+  onApplyAll,
+  onExportAll,
+}: {
+  hasQtCatalog: boolean;
+  hasReferences: boolean;
+  busy: boolean;
+  onApplyAll: () => void;
+  onExportAll: () => void;
+}) {
+  // Reuse/remainder are Qt-only; hide the row entirely when no Qt catalog is
+  // registered so non-Qt projects do not see dead controls.
+  if (!hasQtCatalog) return null;
+
+  const applyDisabled = busy || !hasReferences;
+  return (
+    <section aria-label="Project-wide reuse actions">
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          onClick={onApplyAll}
+          disabled={applyDisabled}
+          title={
+            hasReferences
+              ? "Copy expert translations from references into every Qt catalog by exact unit-id match"
+              : "Declare reference catalogs in Settings first"
+          }
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            height: 34,
+            padding: "0 14px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-accent-subtle-border)",
+            background: "var(--color-accent-subtle)",
+            color: "var(--color-accent)",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: applyDisabled ? "not-allowed" : "pointer",
+            opacity: applyDisabled ? 0.5 : 1,
+          }}
+        >
+          {busy ? "Applying…" : "Apply references to all"}
+        </button>
+        <button
+          type="button"
+          onClick={onExportAll}
+          disabled={busy}
+          title="Write a remainder .ts (untranslated leftovers) for every Qt catalog into a folder"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            height: 34,
+            padding: "0 14px",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border-default)",
+            background: "var(--color-bg-elevated)",
+            color: "var(--color-fg-primary)",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: busy ? "not-allowed" : "pointer",
+            opacity: busy ? 0.5 : 1,
+          }}
+        >
+          Export all remainders
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ── References summary ────────────────────────────────────────────────────────
+
+function ReferencesSummarySection({
+  references,
+  onOpenSettings,
+}: {
+  references: ReferenceRef[];
+  onOpenSettings: () => void;
+}) {
+  // Group by locale for a tidy, scannable list.
+  const byLocale = new Map<string, ReferenceRef[]>();
+  for (const r of references) {
+    const group = byLocale.get(r.locale) ?? [];
+    group.push(r);
+    byLocale.set(r.locale, group);
+  }
+
+  return (
+    <section aria-labelledby="overview-refs-heading">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <span id="overview-refs-heading">
+          <Eyebrow>Reference files</Eyebrow>
+        </span>
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "0 8px",
+            height: 24,
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--color-border-subtle)",
+            background: "transparent",
+            fontSize: 11.5,
+            fontWeight: 500,
+            color: "var(--color-fg-tertiary)",
+            cursor: "pointer",
+          }}
+          aria-label="Edit reference files in Settings"
+        >
+          Edit in Settings →
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          border: "1px solid var(--color-border-subtle)",
+          borderRadius: "var(--radius-lg)",
+          background: "var(--color-bg-surface)",
+          overflow: "hidden",
+        }}
+      >
+        {[...byLocale.entries()].map(([locale, refs], groupIdx) => (
+          <div
+            key={locale}
+            style={{
+              padding: "10px 14px",
+              borderBottom:
+                groupIdx < byLocale.size - 1
+                  ? "1px solid var(--color-border-subtle)"
+                  : undefined,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                marginBottom: 6,
+              }}
+            >
+              <LocaleTag locale={locale} tone="muted" />
+              <span style={{ fontSize: 11, color: "var(--color-fg-tertiary)" }}>
+                {refs.length} {refs.length === 1 ? "file" : "files"}
+              </span>
+            </div>
+            <ul
+              style={{
+                margin: 0,
+                padding: 0,
+                listStyle: "none",
+                display: "flex",
+                flexDirection: "column",
+                gap: 3,
+              }}
+            >
+              {refs.map((r) => (
+                <li
+                  key={r.manifest_path}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 11.5,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      color: "var(--color-fg-primary)",
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={r.manifest_path}
+                  >
+                    {r.manifest_path}
+                  </span>
+                  {r.status !== "ok" && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                        border: "1px solid var(--color-severity-hard-border)",
+                        background: "var(--color-severity-hard-bg)",
+                        color: "var(--color-severity-hard)",
+                        flexShrink: 0,
+                      }}
+                      title={`File status: ${r.status}`}
+                    >
+                      {r.status}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -970,10 +1466,23 @@ export function OverviewPanel({
   summary,
   openCatalogs,
   dirtyCatalogPaths,
+  statsByCatalog,
   setFocusLocale,
   setProjectView,
+  hasReferences,
+  batchReuseBusy,
+  onApplyAllReferences,
+  onExportAllRemainders,
+  onOpenConflicts,
 }: OverviewPanelProps) {
-  const stats = buildLocaleStats(summary, openCatalogs, dirtyCatalogPaths);
+  const stats = buildLocaleStats(
+    summary,
+    openCatalogs,
+    dirtyCatalogPaths,
+    statsByCatalog,
+  );
+
+  const totalConflicts = stats.reduce((n, s) => n + s.conflicts, 0);
 
   // Metrics path: <state_dir>/metrics.jsonl (harness convention).
   const metricsPath = summary.state_dir
@@ -1092,6 +1601,64 @@ export function OverviewPanel({
             </ul>
           )}
         </section>
+
+        {/* Reference-reuse conflicts — high-visibility deep-link to Review. */}
+        {totalConflicts > 0 && (
+          <button
+            type="button"
+            onClick={onOpenConflicts}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--color-severity-hard-border)",
+              background: "var(--color-severity-hard-bg)",
+              color: "var(--color-severity-hard)",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+            title="Open the Review queue filtered to conflicts"
+          >
+            <FlagIcon size={14} />
+            <span style={{ flex: 1 }}>
+              {totalConflicts} reference conflict
+              {totalConflicts === 1 ? "" : "s"} need resolution
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              Resolve in Review <ArrowRightIcon size={14} />
+            </span>
+          </button>
+        )}
+
+        {/* Project-wide reuse actions (Qt only) */}
+        <BatchReuseActions
+          hasQtCatalog={summary.catalogs.some((c) => c.format === "qt-ts")}
+          hasReferences={hasReferences}
+          busy={batchReuseBusy}
+          onApplyAll={onApplyAllReferences}
+          onExportAll={onExportAllRemainders}
+        />
+
+        {/* Per-file stats */}
+        <FilesSection
+          summary={summary}
+          openCatalogs={openCatalogs}
+          statsByCatalog={statsByCatalog}
+          onOpenCatalog={handleContinue}
+        />
+
+        {/* Reference files (only when present) */}
+        {summary.references.length > 0 && (
+          <ReferencesSummarySection
+            references={summary.references}
+            onOpenSettings={() => setProjectView("settings")}
+          />
+        )}
 
         {/* Activity + glossary */}
         <div

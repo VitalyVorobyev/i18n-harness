@@ -1,4 +1,4 @@
-// Tauri event listener helpers for M4.8 bulk translate.
+// Tauri event listener helpers for bulk translate.
 //
 // The Tauri 2 `UnlistenFn` is synchronous (`() => void`), not async.
 // We wrap all three batch event subscriptions into a single cleanup

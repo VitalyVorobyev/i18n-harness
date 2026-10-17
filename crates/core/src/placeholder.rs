@@ -51,7 +51,7 @@ pub struct IcuForm {
 /// A single placeholder occurrence inside source or target text.
 ///
 /// One source token can produce many `Placeholder` entries — once per
-/// occurrence (a multiset, not a set). Validation in the gate (M1) walks the
+/// occurrence (a multiset, not a set). Validation in the gate walks the
 /// vector and compares multisets, not sets, because dropping a duplicate is a
 /// real translation bug.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

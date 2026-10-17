@@ -78,8 +78,8 @@ use i18n_harness_locales::Locale;
 
 /// Validate one [`Unit`] against a target locale.
 ///
-/// `glossary` is accepted as `Option<&Glossary>` so that the M2 glossary
-/// rules can land without changing this signature; in M1 the value is
+/// `glossary` is accepted as `Option<&Glossary>` so that glossary
+/// rules can be added without changing this signature; currently the value is
 /// ignored.
 ///
 /// The returned [`GateReport`] carries:

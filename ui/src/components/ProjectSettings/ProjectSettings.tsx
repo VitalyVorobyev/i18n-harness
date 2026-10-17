@@ -6,20 +6,29 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  addCatalogsFromFolder,
   addCatalogToProject,
+  addProjectReference,
   pickCatalogFileForProject,
+  pickCatalogFolder,
+  pickReferenceFiles,
+  pickRemainderOutputFolder,
   removeCatalogFromProject,
   removeLocaleFromProject,
+  removeProjectReference,
   setBackendInProject,
+  splitAllRemainders,
   updateLocaleInProject,
 } from "../../lib/tauri";
 import type {
   BackendConfig,
   BackendKind,
   CatalogFormat,
+  CatalogRef,
   LocaleConfig,
   ProjectOpenResponse,
   ProjectSummary,
+  ReferenceEntry,
   RegisterOverride,
 } from "../../lib/types";
 
@@ -592,6 +601,33 @@ function CatalogsCard({
   const [addForm, setAddForm] = useState<AddCatalogFormState | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const handleToggleRef = useCallback(
+    async (c: CatalogRef, enable: boolean) => {
+      setBusy(true);
+      try {
+        let resp: ProjectOpenResponse;
+        if (enable) {
+          resp = await addProjectReference({
+            path: c.manifest_path,
+            format: c.format,
+            locale: c.locale,
+          });
+        } else {
+          resp = await removeProjectReference(c.manifest_path);
+        }
+        onMutation(resp);
+        flashSaved();
+      } catch (e) {
+        flashError(
+          `Could not ${enable ? "add" : "remove"} reference: ${formatError(e)}`,
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onMutation, flashError, flashSaved],
+  );
+
   const handleRemove = useCallback(
     async (manifestPath: string) => {
       const ok = window.confirm(
@@ -655,6 +691,39 @@ function CatalogsCard({
     }
   }, [addForm, onMutation, flashError, flashInfo, flashSaved]);
 
+  const handleAddFolder = useCallback(async () => {
+    setBusy(true);
+    try {
+      const folder = await pickCatalogFolder();
+      if (!folder) return;
+      const resp = await addCatalogsFromFolder(folder);
+      onMutation(resp);
+      flashSaved();
+      // The first warning is always the "Added N; skipped M" summary line.
+      flashInfo(resp.warnings[0] ?? "Folder scanned.");
+    } catch (e) {
+      flashError(`Could not add folder: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [onMutation, flashError, flashInfo, flashSaved]);
+
+  const handleExportAllRemainders = useCallback(async () => {
+    setBusy(true);
+    try {
+      const outDir = await pickRemainderOutputFolder();
+      if (!outDir) return;
+      const report = await splitAllRemainders(outDir);
+      flashInfo(
+        `Wrote ${report.written.length} remainder file(s); skipped ${report.skipped.length} fully-translated.`,
+      );
+    } catch (e) {
+      flashError(`Export all remainders failed: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [flashError, flashInfo]);
+
   return (
     <Card title="Catalogs" saved={saved}>
       {summary.catalogs.length === 0 ? (
@@ -668,39 +737,80 @@ function CatalogsCard({
                 <th className="text-left py-1.5 px-1 font-medium">Format</th>
                 <th className="text-left py-1.5 px-1 font-medium">Locale</th>
                 <th className="text-left py-1.5 px-1 font-medium">Status</th>
+                <th
+                  className="text-center py-1.5 px-1 font-medium w-10"
+                  title="Mark this catalog as a reference source for reuse"
+                >
+                  Ref
+                </th>
                 <th className="py-1.5 px-1" aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
-              {summary.catalogs.map((c) => (
-                <tr
-                  key={c.absolute_path}
-                  className="border-b border-border-subtle last:border-0 hover:bg-bg-hover/40"
-                >
-                  <td
-                    className="py-1.5 px-1 font-mono text-fg-primary max-w-[220px] truncate"
-                    title={c.manifest_path}
+              {summary.catalogs.map((c) => {
+                const isRef = summary.references.some(
+                  (r) => r.manifest_path === c.manifest_path,
+                );
+                return (
+                  <tr
+                    key={c.absolute_path}
+                    className="border-b border-border-subtle last:border-0 hover:bg-bg-hover/40"
                   >
-                    {c.manifest_path}
-                  </td>
-                  <td className="py-1.5 px-1 text-fg-secondary">{c.format}</td>
-                  <td className="py-1.5 px-1 text-fg-secondary">{c.locale}</td>
-                  <td className="py-1.5 px-1">
-                    <CatalogStatusBadge status={c.status} />
-                  </td>
-                  <td className="py-1.5 px-1">
-                    <button
-                      type="button"
-                      aria-label={`Remove catalog ${c.manifest_path}`}
-                      className={btnDangerCls}
-                      disabled={busy}
-                      onClick={() => void handleRemove(c.manifest_path)}
+                    <td
+                      className="py-1.5 px-1 font-mono text-fg-primary max-w-[220px] truncate"
+                      title={c.manifest_path}
                     >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                      {c.manifest_path}
+                    </td>
+                    <td className="py-1.5 px-1 text-fg-secondary">
+                      {c.format}
+                    </td>
+                    <td className="py-1.5 px-1 text-fg-secondary">
+                      {c.locale}
+                    </td>
+                    <td className="py-1.5 px-1">
+                      <CatalogStatusBadge status={c.status} />
+                    </td>
+                    <td className="py-1.5 px-1 text-center">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isRef}
+                        aria-label={
+                          isRef
+                            ? `Remove ${c.manifest_path} from references`
+                            : `Mark ${c.manifest_path} as a reference`
+                        }
+                        title={
+                          isRef
+                            ? "Used as a reference — click to remove"
+                            : "Mark as a reference to reuse its finished translations into same-locale catalogs"
+                        }
+                        disabled={busy}
+                        className={
+                          isRef
+                            ? "inline-flex items-center justify-center w-5 h-5 rounded border border-accent bg-accent/10 text-accent text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent transition-colors duration-100 disabled:opacity-40"
+                            : "inline-flex items-center justify-center w-5 h-5 rounded border border-border-default text-fg-disabled hover:border-border-strong text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent transition-colors duration-100 disabled:opacity-40"
+                        }
+                        onClick={() => void handleToggleRef(c, !isRef)}
+                      >
+                        {isRef ? "✓" : ""}
+                      </button>
+                    </td>
+                    <td className="py-1.5 px-1">
+                      <button
+                        type="button"
+                        aria-label={`Remove catalog ${c.manifest_path}`}
+                        className={btnDangerCls}
+                        disabled={busy}
+                        onClick={() => void handleRemove(c.manifest_path)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -708,7 +818,7 @@ function CatalogsCard({
 
       {/* Add catalog affordance */}
       {addForm === null ? (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             className={btnCls}
@@ -716,6 +826,15 @@ function CatalogsCard({
             onClick={() => void handlePickFile()}
           >
             Pick file…
+          </button>
+          <button
+            type="button"
+            className={btnCls}
+            disabled={busy}
+            onClick={() => void handleAddFolder()}
+            title="Recursively add every .ts/.po/.json file in a folder"
+          >
+            Add folder…
           </button>
           <button
             type="button"
@@ -732,6 +851,16 @@ function CatalogsCard({
             }
           >
             Add manually
+          </button>
+          <div className="flex-1" />
+          <button
+            type="button"
+            className={btnCls}
+            disabled={busy || summary.catalogs.length === 0}
+            onClick={() => void handleExportAllRemainders()}
+            title="Export the untranslated remainder of every non-reference catalog into one folder"
+          >
+            Export all remainders…
           </button>
         </div>
       ) : (
@@ -1010,6 +1139,188 @@ function BackendCard({
   );
 }
 
+// ── Section — Reference files ────────────────────────────────────────────────
+//
+// Expert-translated catalogs whose finished translations may be reused (by
+// exact unit-id match) into project catalogs of the same locale. Add via a
+// `.ts` picker (one row per file) and remove by manifest-relative path. Both
+// mutations persist the manifest server-side and return a fresh summary, so
+// the list is read straight from `summary.references` and survives a reopen.
+
+function ReferencesCard({
+  summary,
+  onMutation,
+  flashError,
+  flashInfo,
+}: {
+  summary: ProjectSummary;
+  onMutation: (r: ProjectOpenResponse) => void;
+  flashError: (m: string) => void;
+  flashInfo: (m: string) => void;
+}) {
+  const [saved, flashSaved] = useSavedBadge();
+  const [busy, setBusy] = useState(false);
+  const [addLocale, setAddLocale] = useState<string>(summary.locales[0] ?? "");
+
+  const handleAdd = useCallback(async () => {
+    if (!addLocale.trim()) {
+      flashError("Pick a locale for the reference first.");
+      return;
+    }
+    let picked: string[] | null;
+    try {
+      picked = await pickReferenceFiles();
+    } catch (e) {
+      flashError(`File picker failed: ${formatError(e)}`);
+      return;
+    }
+    if (!picked || picked.length === 0) return;
+
+    setBusy(true);
+    let added = 0;
+    try {
+      for (const path of picked) {
+        const entry: ReferenceEntry = {
+          path: relativize(path, summary.root),
+          format: "qt-ts",
+          locale: addLocale.trim(),
+        };
+        const resp = await addProjectReference(entry);
+        onMutation(resp);
+        added += 1;
+      }
+      flashSaved();
+      flashInfo(
+        `Added ${added} reference${added === 1 ? "" : "s"} for ${addLocale}.`,
+      );
+    } catch (e) {
+      flashError(`Could not add reference: ${formatError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [addLocale, summary.root, onMutation, flashError, flashInfo, flashSaved]);
+
+  const handleRemove = useCallback(
+    async (path: string) => {
+      const ok = window.confirm(
+        `Stop using "${path}" as a reference?\n\nThe file on disk is not deleted.`,
+      );
+      if (!ok) return;
+      setBusy(true);
+      try {
+        const resp = await removeProjectReference(path);
+        onMutation(resp);
+        flashSaved();
+        flashInfo(`Removed reference "${path}".`);
+      } catch (e) {
+        flashError(`Could not remove reference: ${formatError(e)}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onMutation, flashError, flashInfo, flashSaved],
+  );
+
+  // Group references by locale for a tidy, scannable list.
+  const byLocale = new Map<string, typeof summary.references>();
+  for (const r of summary.references) {
+    const group = byLocale.get(r.locale) ?? [];
+    group.push(r);
+    byLocale.set(r.locale, group);
+  }
+
+  return (
+    <Card title="Reference files" saved={saved}>
+      <p className="text-xs text-fg-tertiary leading-relaxed">
+        Expert-translated catalogs reused into same-locale project catalogs by
+        exact unit-id match. Use{" "}
+        <span className="font-medium text-fg-secondary">Apply references</span>{" "}
+        on a catalog (in the sidebar) to copy them in.
+      </p>
+
+      {summary.references.length === 0 ? (
+        <p className="text-xs text-fg-disabled italic">
+          No reference files declared yet. Add one to reuse its finished
+          translations into same-locale catalogs.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {[...byLocale.entries()].map(([locale, entries]) => (
+            <div key={locale} className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-loose text-fg-tertiary font-medium">
+                {locale}
+              </span>
+              <ul className="flex flex-col gap-1">
+                {entries.map((r) => (
+                  <li
+                    key={r.manifest_path}
+                    className="flex items-center gap-3 px-2 py-1.5 rounded border border-border-subtle bg-bg-base"
+                  >
+                    <span
+                      className="font-mono text-xs text-fg-primary flex-1 min-w-0 truncate"
+                      title={r.manifest_path}
+                    >
+                      {r.manifest_path}
+                    </span>
+                    <span className="text-[10px] text-fg-disabled shrink-0">
+                      {r.format}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove reference ${r.manifest_path}`}
+                      className={btnDangerCls}
+                      disabled={busy}
+                      onClick={() => void handleRemove(r.manifest_path)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add reference: pick locale, then a .ts file picker (multi-select). */}
+      <div className="flex items-end gap-2 flex-wrap">
+        <div className="flex flex-col gap-0.5">
+          <label className="text-xs text-fg-tertiary" htmlFor="add-ref-locale">
+            Locale
+          </label>
+          {summary.locales.length > 0 ? (
+            <select
+              id="add-ref-locale"
+              value={addLocale}
+              disabled={busy}
+              className={selectCls}
+              onChange={(e) => setAddLocale(e.target.value)}
+            >
+              {summary.locales.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-xs text-fg-disabled italic">
+              Add a locale first.
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          className={btnCls}
+          disabled={busy || summary.locales.length === 0}
+          onClick={() => void handleAdd()}
+        >
+          Add reference files…
+        </button>
+      </div>
+    </Card>
+  );
+}
+
 // ── Section 5 — Prompts (placeholder) ────────────────────────────────────────
 
 function PromptsCard() {
@@ -1045,6 +1356,12 @@ export function ProjectSettings({
         flashError={flashError}
       />
       <CatalogsCard
+        summary={summary}
+        onMutation={onMutation}
+        flashError={flashError}
+        flashInfo={flashInfo}
+      />
+      <ReferencesCard
         summary={summary}
         onMutation={onMutation}
         flashError={flashError}

@@ -42,6 +42,16 @@ interface Props {
   peerLocales?: PeerLocaleEntry[];
   /** Called when the user clicks a peer locale chip to jump to it. */
   onJumpToLocale?: (locale: string) => void;
+  /** Active target locale for this unit, used by "Add to glossary". */
+  locale?: string;
+  /** Add the unit's source (and current target) to the project glossary. The
+   *  host (App) owns the IPC + project refresh + toast. Omit to hide the
+   *  affordance (e.g. when the project has no glossary and cannot create one). */
+  onAddToGlossary?: (
+    source: string,
+    locale: string,
+    translation: string | null,
+  ) => void;
   /** Override width (default 320px / w-80). FocusView passes 260. */
   width?: number | string;
   /** When true, render only a thin 36px vertical strip with an "Inspector"
@@ -67,6 +77,13 @@ function asModelFlag(flag: AnyFlag): ModelFlag | null {
     : null;
 }
 
+/** The unit's current target text for glossary seeding — the singular text or
+ *  the first non-empty plural form, or null when nothing is filled. */
+function currentTargetText(unit: Unit): string | null {
+  if (unit.target.kind === "singular") return unit.target.text ?? null;
+  return unit.target.forms.find((f) => f != null && f.length > 0) ?? null;
+}
+
 const DOT_COLOR: Record<UnitState, string> = {
   untranslated: "var(--color-state-untranslated)",
   proposed: "var(--color-state-proposed)",
@@ -85,6 +102,8 @@ export function Inspector({
   onAccept,
   peerLocales,
   onJumpToLocale,
+  locale,
+  onAddToGlossary,
   width = 320,
   collapsed = false,
   onToggleCollapsed,
@@ -255,6 +274,24 @@ export function Inspector({
           onToggle={() => setGlossOpen((v) => !v)}
         >
           <Muted>No glossary terms in this unit.</Muted>
+          {locale && onAddToGlossary && (
+            <button
+              type="button"
+              onClick={() =>
+                onAddToGlossary(unit.source, locale, currentTargetText(unit))
+              }
+              title="Add this unit's source as a glossary term for the active locale"
+              className={cn(
+                "mt-2 w-full h-7 px-3 rounded-md border text-xs font-medium",
+                "transition-colors duration-100 ease-out",
+                "border-border-default text-fg-primary bg-bg-elevated",
+                "hover:bg-bg-hover hover:border-border-strong active:bg-bg-selected",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+              )}
+            >
+              + Add to glossary
+            </button>
+          )}
         </CollapsibleSection>
 
         {/* ── 3. Metadata ──────────────────────────────────────────────────── */}

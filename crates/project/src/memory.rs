@@ -114,7 +114,7 @@ impl std::fmt::Display for CorrectionId {
 /// so manual (non-MT) corrections serialize compactly; the writer populates
 /// them when an MT result triggered the edit.
 ///
-/// This matters because the M4.10 tuning loop compares prompt versions:
+/// This matters because the tuning loop compares prompt versions:
 /// without this, you cannot tell whether prompt v7 + glossary v3 was better or
 /// worse than prompt v8 + glossary v3. Historical corrections cannot be
 /// backfilled with provenance later, so the schema includes these fields from

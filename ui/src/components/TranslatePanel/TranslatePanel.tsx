@@ -12,10 +12,11 @@
 // from App.tsx without threading the prop through MatrixView/FocusView.
 
 import type { Ref } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "../../lib/cn";
 import type {
   BatchScope,
+  CatalogGateStats,
   CatalogResponse,
   GateReport,
   ProjectSummary,
@@ -23,6 +24,8 @@ import type {
   Unit,
   UnitId,
 } from "../../lib/types";
+import { CatalogStatsBar } from "./CatalogStatsBar";
+import { FileFilter } from "./FileFilter";
 import { FocusView } from "./FocusView";
 import { MatrixView } from "./MatrixView";
 import type { ScopePair, StartPairFn } from "./RunOnScopeModal";
@@ -43,6 +46,8 @@ interface Props {
   search: string;
   dirtyIds: Set<UnitId>;
   reports: Record<UnitId, GateReport>;
+  /** Per-file gate stats for the active catalog; null until gated. */
+  stats: CatalogGateStats | null;
   busyIds: Set<UnitId>;
   batchActive: boolean;
   error: string | null;
@@ -69,6 +74,14 @@ interface Props {
   onTranslateAll: (catalogPath: string, scope: BatchScope) => void;
   /** Per-pair batch starter for RunOnScopeModal. Provided by App.tsx. */
   startBatchForPair: StartPairFn;
+
+  /** Add a unit's source (and current target) to the project glossary.
+   *  Omitted when no glossary exists and one cannot be created. */
+  onAddToGlossary?: (
+    source: string,
+    locale: string,
+    translation: string | null,
+  ) => void;
 }
 
 export function TranslatePanel({
@@ -76,6 +89,7 @@ export function TranslatePanel({
   openCatalogs,
   dirtyIds,
   reports,
+  stats,
   busyIds,
   batchActive,
   search,
@@ -88,6 +102,7 @@ export function TranslatePanel({
   onAcceptUnitFor,
   onTranslateAll: _onTranslateAll,
   startBatchForPair,
+  onAddToGlossary,
 }: Props) {
   // ── Shared sub-header state ─────────────────────────────────────────────
   //
@@ -97,6 +112,15 @@ export function TranslatePanel({
   const [statusFilter, setStatusFilter] = useState<StatusFilterState>(
     () => new Set(EMPTY_STATUS_FILTER),
   );
+
+  // Per-file filter (catalog absolute path, or null for "all files").
+  // Reset on locale focus change: the in-scope file set differs per locale,
+  // so a stale path would silently filter out everything.
+  const [fileFilter, setFileFilter] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the focus locale changes
+  useEffect(() => {
+    setFileFilter(null);
+  }, [focusLocale]);
 
   // ── RunOnScopeModal state ───────────────────────────────────────────────
   //
@@ -217,6 +241,17 @@ export function TranslatePanel({
       {/* Spacer */}
       <span className="flex-1" />
 
+      {/* Per-file statistics for the active catalog */}
+      <CatalogStatsBar stats={stats} />
+
+      {/* File filter — narrow to a single catalog file (hidden with ≤1 file). */}
+      <FileFilter
+        summary={summary}
+        focusLocale={focusLocale}
+        value={fileFilter}
+        onChange={setFileFilter}
+      />
+
       {/* Status filter — always visible, selection persists across mode switches */}
       <StatusFilter value={statusFilter} onChange={setStatusFilter} />
     </div>
@@ -247,6 +282,7 @@ export function TranslatePanel({
           batchActive={batchActive}
           search={search}
           statusFilter={statusFilter}
+          fileFilter={fileFilter}
           onSearchChange={onSearchChange}
           onEnsureCatalogLoaded={onEnsureCatalogLoaded}
           setFocusLocale={setFocusLocale}
@@ -254,6 +290,7 @@ export function TranslatePanel({
           onEditUnit={onEditUnitFor}
           onAcceptUnit={onAcceptUnitFor}
           onOpenTranslateModal={() => openTranslateModal(null)}
+          onAddToGlossary={onAddToGlossary}
         />
       </div>
     );
@@ -274,12 +311,14 @@ export function TranslatePanel({
         busyIds={busyIds}
         batchActive={batchActive}
         statusFilter={statusFilter}
+        fileFilter={fileFilter}
         onStatusFilterChange={setStatusFilter}
         onEnsureCatalogLoaded={onEnsureCatalogLoaded}
         onTranslateUnit={onTranslateUnitFor}
         onEditUnit={onEditUnitFor}
         onAcceptUnit={onAcceptUnitFor}
         onOpenTranslateModal={() => openTranslateModal(focusLocale)}
+        onAddToGlossary={onAddToGlossary}
       />
     </div>
   );

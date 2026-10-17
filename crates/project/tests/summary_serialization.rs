@@ -1,6 +1,6 @@
 //! Tests for `ProjectSummary` serialization to JSON.
 //!
-//! Verifies that the field shape is what M4.2's Tauri command surface expects:
+//! Verifies that the field shape is what the Tauri command surface expects:
 //! paths as strings, not `PathBuf`; `CatalogStatus` as kebab-case strings;
 //! `BackendKind` serialized correctly; `Serialize` but not `Deserialize`.
 

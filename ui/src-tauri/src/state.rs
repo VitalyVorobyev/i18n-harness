@@ -22,17 +22,17 @@ use crate::jobs::{ActiveBatches, JobRegistry};
 /// round-trip on save, so it lives here rather than crossing the IPC
 /// bridge on every command.
 ///
-/// The glossary slot is populated by `load_glossary` or, in M4.2a, as a
+/// The glossary slot is populated by `load_glossary` or as a
 /// side effect of `open_project` when the project declares one. Once set,
 /// it is threaded into every `translate_unit` call so MT proposals respect
 /// project glossary terms.
 ///
-/// The project slot (M4.2a) holds the currently-open project. It coexists
+/// The project slot holds the currently-open project. It coexists
 /// with the file-centric catalog slot: opening a project doesn't auto-open
 /// any catalog, and opening a stand-alone catalog leaves the project slot
 /// untouched.
 ///
-/// The `project_catalogs` slot (M4.2b) is the multi-catalog dirty store
+/// The `project_catalogs` slot is the multi-catalog dirty store
 /// used when working in project mode. It is keyed by absolute path and
 /// populated by `open_catalog_in_project`. The two stores — `catalog`
 /// (singular, file-centric) and `project_catalogs` (multi, project-scoped)
@@ -43,13 +43,13 @@ pub struct AppState {
     pub(crate) glossary: Mutex<Option<Glossary>>,
     pub(crate) project: Mutex<Option<Project>>,
     pub(crate) project_catalogs: Mutex<BTreeMap<PathBuf, OpenCatalogEntry>>,
-    /// In-process registry of cancellable background jobs (M4.2c.2).
+    /// In-process registry of cancellable background jobs.
     /// Each `translate_batch_in_project` call registers a new entry; the
     /// worker thread deregisters on exit. Per-catalog/per-locale
     /// exclusion is enforced at the command level via `active_batches`.
     pub(crate) jobs: JobRegistry,
-    /// Typed concurrency tracker for bulk translate and evaluation workers
-    /// (M4.2c.2). Replaces the old `Mutex<BTreeSet<(PathBuf, String)>>` and
+    /// Typed concurrency tracker for bulk translate and evaluation workers.
+    /// Replaces the old `Mutex<BTreeSet<(PathBuf, String)>>` and
     /// the `("__eval__", "__eval__")` magic key. See [`ActiveBatches`] for
     /// the claim/release contract.
     pub(crate) active_batches: ActiveBatches,

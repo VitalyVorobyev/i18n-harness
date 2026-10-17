@@ -46,12 +46,15 @@ the per-project `.i18n-harness/` state; everything else is split.
 
 The current shipping surface: the validation gate, all three catalog
 adapters (Qt, PO, ICU-JSON) with byte-stable round-trip, project mode
-(multi-catalog manifests), the Tauri desktop UI for translation and
-review, quality eval + tuning bundle export, and the two-phase agent
-translation CLI plus its skill spec. The agent flow is currently a
-CLI surface; UI integration (Settings backend picker + an in-app
-"Translate via Claude Code" affordance) is the next visible step.
-See [`docs/roadmap-product.md`](docs/roadmap-product.md) for the
+(multi-catalog manifests + reference catalogs), the Tauri desktop UI
+for translation and review, quality eval + tuning bundle export, the
+two-phase agent translation CLI plus its skill spec, and deterministic
+reference reuse / remainder split / merge for Qt (CLI + UI; copy expert
+translations by exact unit-id match, carve the leftover, merge it back —
+no model). The agent flow is currently a CLI surface; UI integration
+(Settings backend picker + an in-app "Translate via Claude Code"
+affordance) is the next visible step. See
+[`docs/roadmap-product.md`](docs/roadmap-product.md) for the
 sub-milestone history.
 
 ## Workspace map
@@ -64,8 +67,10 @@ sub-milestone history.
 | `crates/glossary` | TOML glossary loader + validator |
 | `crates/backend` | `TranslationBackend` trait + impls (manual, ollama, openai-compatible) |
 | `crates/catalog` | `CatalogFormat` trait + PO/ICU-JSON serializers |
-| `crates/adapter-qt` | Qt `.ts` adapter (reference adapter; XML round-trip) |
+| `crates/adapter-qt` | Qt `.ts` adapter (reference adapter; XML round-trip + subset writer) |
 | `crates/adapter-react` | React adapter over the catalog serializers |
+| `crates/project` | Project manifest (multi-catalog + `[[references]]`), path/locale resolution, per-project state |
+| `crates/reuse` | Deterministic reference-reuse / remainder-split / merge over Qt catalogs (no model) |
 | `crates/cli` | `harness` binary; entry point for humans and the Tauri UI |
 | `ui/` | Tauri 2 + Vite + React + TS desktop shell ([ui/README.md](ui/README.md)) |
 | `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
@@ -141,12 +146,30 @@ fixtures get added to the round-trip suite, never carved out.
 
 ## Subagents
 
-- `rust-implementer` (Sonnet) — straightforward Rust work that follows an
-  existing pattern.
-- `rust-architect` (Opus) — load-bearing design and tricky implementations
-  (gate, XML round-trip, ICU converters, trait surfaces, batching).
-- `ui-implementer` (Sonnet) — Tauri + React + Vite work for the
-  desktop shell under `ui/`.
+**Default to the main context.** Most work here — bug fixes, small
+features, doc updates, and especially changes that span the Rust
+backend *and* the `ui/` frontend together (a DTO field plus the React
+handler that reads it, a command plus its mock) — is faster, more
+coherent, and easier to verify in a single context than split across
+agents. A round trip through a subagent costs a full context reload and
+a handoff; for a change you could finish yourself in a few edits, that
+overhead is pure loss and tends to produce a worse result.
+
+Reach for a custom subagent only when delegation genuinely pays for
+itself: a large, well-specified slice contained to **one** domain, or
+several independent slices that can run in parallel. When in doubt, do
+it inline.
+
+- `rust-architect` (Opus) — load-bearing *design* and the trickiest
+  implementations (gate, XML round-trip, ICU converters, trait
+  surfaces, batching). Use when getting the abstraction wrong would
+  cascade through the workspace — not for routine changes near those
+  files.
+- `rust-implementer` (Sonnet) — a sizeable, self-contained Rust slice
+  that follows an established pattern and has a clear spec.
+- `ui-implementer` (Sonnet) — a sizeable, self-contained `ui/` slice
+  (Tauri + React + Vite). A small UI tweak alongside a backend change
+  is *not* this — keep those together in the main context.
 
 ## Outstanding setup notes
 

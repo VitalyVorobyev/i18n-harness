@@ -1,0 +1,23 @@
+[package]
+name = "i18n-harness-reuse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Reuse / remainder-split / merge core logic over Qt catalogs: copy expert translations from reference catalogs, split untranslated leftovers, and merge translated halves back."
+
+[lints]
+workspace = true
+
+[dependencies]
+i18n-harness-core.workspace = true
+i18n-harness-locales.workspace = true
+i18n-harness-gate.workspace = true
+i18n-harness-glossary.workspace = true
+i18n-harness-adapter-qt.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

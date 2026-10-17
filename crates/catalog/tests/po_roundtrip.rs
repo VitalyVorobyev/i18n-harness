@@ -1,7 +1,7 @@
 //! Round-trip integration test: every fixture under `fixtures/po/` must
 //! satisfy `apply(extract(f), f.units(), out) == f` byte-for-byte.
 //!
-//! This is the M4.4 contract — analogous to the M0 contract for Qt.
+//! This is the PO round-trip contract — analogous to the Qt round-trip contract.
 //! Regressions here are immediate rollback.
 
 use std::path::{Path, PathBuf};

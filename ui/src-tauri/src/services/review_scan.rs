@@ -8,9 +8,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use i18n_harness_core::ReviewStatus;
+use i18n_harness_core::{ReviewStatus, UnitId, UnitState};
 
-use crate::dto::project::{ReviewQueueItem, ReviewQueueResponse};
+use crate::dto::project::{CatalogStateCounts, ReviewQueueItem, ReviewQueueResponse};
 use crate::error;
 use crate::state::AppState;
 use crate::{OpenCatalogEntry, backing::extract_for_format};
@@ -30,19 +30,38 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     // Collect the list of catalog refs from the project while holding the
     // project lock; drop the lock before any I/O so we do not hold it across
     // extract calls.
-    let catalog_refs: Vec<i18n_harness_project::CatalogRef> = {
+    // Snapshot the catalog list and the folded reviewer notes under one brief
+    // project lock, then drop it before any I/O. The note map is keyed by the
+    // manifest-relative catalog path + unit id, matching the review store's
+    // fold; it carries the reference-conflict candidate JSON so the conflict
+    // view survives a reopen.
+    let (catalog_refs, review_notes): (
+        Vec<i18n_harness_project::CatalogRef>,
+        BTreeMap<(PathBuf, UnitId), String>,
+    ) = {
         let project_guard = state
             .project
             .lock()
             .map_err(error::lock_poisoned("project"))?;
         let project = project_guard.as_ref().ok_or_else(error::no_project)?;
-        project.catalogs().to_vec()
+        let refs = project.catalogs().to_vec();
+        let notes = project
+            .review_map()
+            .iter()
+            .filter_map(|((catalog, unit_id), record)| {
+                record
+                    .reviewer_note
+                    .clone()
+                    .map(|note| ((catalog.clone(), unit_id.clone()), note))
+            })
+            .collect();
+        (refs, notes)
     };
 
     // For each catalog, ensure it is in the project_catalogs store.
     // If it is already open, skip the I/O; otherwise extract + apply and insert.
     for catalog_ref in &catalog_refs {
-        // M4.4 wired gettext-po and M4.5 added icu-json; all manifest
+        // gettext-po and icu-json are both wired; all manifest
         // formats are now handled through `extract_for_format`. The guard
         // remains in case future formats land in the manifest enum before
         // their wiring is finished — surface the gap loudly rather than
@@ -121,6 +140,7 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
 
     let mut items: Vec<ReviewQueueItem> = Vec::new();
     let mut by_catalog: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stats_by_catalog: BTreeMap<String, CatalogStateCounts> = BTreeMap::new();
 
     // Iterate in BTreeMap order (= absolute path order) for deterministic output.
     for (abs, entry) in store.iter() {
@@ -132,8 +152,17 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
         let locale = locale_of.get(&abs_str).cloned().unwrap_or_default();
 
         let mut catalog_count: usize = 0;
+        let mut counts = CatalogStateCounts::default();
 
         for unit in entry.catalog.units() {
+            counts.total += 1;
+            match unit.state {
+                UnitState::Finished => counts.finished += 1,
+                UnitState::Proposed => counts.proposed += 1,
+                UnitState::Untranslated => counts.untranslated += 1,
+                UnitState::Vanished | UnitState::Obsolete => counts.vanished_obsolete += 1,
+            }
+
             // Serialize flags via serde to get the kebab-case strings that the
             // `#[serde(rename_all = "kebab-case")]` attribute on `Flag` produces.
             // `format!("{:?}")` would give PascalCase debug output instead.
@@ -147,11 +176,19 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 })
                 .collect();
 
-            let needs_review =
-                unit.review_status == Some(ReviewStatus::NeedsReview) || !flags.is_empty();
-            if !needs_review {
+            // Breakdown signals + the deduped headline, computed from the live
+            // status/`FlagSet` (see `review_signals`).
+            let signals = review_signals(unit);
+            if signals.is_conflict {
+                counts.conflicts += 1;
+            }
+            if signals.has_hard {
+                counts.hard_flagged += 1;
+            }
+            if !signals.needs_review {
                 continue;
             }
+            counts.needs_review += 1;
 
             let source_preview = truncate_preview(&unit.source, 120);
             let target_preview = extract_target_text(&unit.target, 120);
@@ -169,6 +206,10 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_else(|| "unknown".to_string());
 
+            let reviewer_note = review_notes
+                .get(&(PathBuf::from(&manifest_path), unit.id.clone()))
+                .cloned();
+
             items.push(ReviewQueueItem {
                 catalog_path: abs_str.clone(),
                 catalog_manifest_path: manifest_path.clone(),
@@ -179,13 +220,15 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
                 flags,
                 review_status: review_status_str,
                 state: state_str.to_string(),
+                reviewer_note,
             });
             catalog_count += 1;
         }
 
         if catalog_count > 0 {
-            by_catalog.insert(abs_str, catalog_count);
+            by_catalog.insert(abs_str.clone(), catalog_count);
         }
+        stats_by_catalog.insert(abs_str, counts);
     }
 
     // Sort: by catalog_path then unit_id (both strings, BTreeMap already gave
@@ -202,8 +245,45 @@ pub(crate) fn collect(state: &AppState) -> Result<ReviewQueueResponse, String> {
     Ok(ReviewQueueResponse {
         total_count,
         by_catalog,
+        stats_by_catalog,
         items,
     })
+}
+
+/// The review signals derived from a single unit's status and flags.
+struct ReviewSignals {
+    /// Deduped headline: this unit genuinely needs human attention.
+    needs_review: bool,
+    /// The unit's review status is `Conflict`.
+    is_conflict: bool,
+    /// The unit carries at least one hard (un-shippable) flag.
+    has_hard: bool,
+}
+
+/// Classify a unit for the review-queue scan.
+///
+/// A unit `needs_review` when it has an explicit `NeedsReview`/`Conflict`
+/// review status, carries a hard (un-shippable) flag, or is still `Proposed`
+/// (machine output not yet confirmed). A `Finished`/`Untranslated` unit whose
+/// only flags are soft/semantic is *not* surfaced — counting those inflated the
+/// headline past the point where it could reconcile with the state tally.
+///
+/// The hard/soft split uses the canonical `Flag::severity()` mapping via
+/// `FlagSet::has_hard()` (`crates/core/src/flag.rs`); severity is never
+/// re-derived in this crate.
+fn review_signals(unit: &i18n_harness_core::Unit) -> ReviewSignals {
+    let is_conflict = matches!(unit.review_status, Some(ReviewStatus::Conflict));
+    let has_hard = unit.flags.has_hard();
+    let needs_review = matches!(
+        unit.review_status,
+        Some(ReviewStatus::NeedsReview | ReviewStatus::Conflict)
+    ) || has_hard
+        || matches!(unit.state, UnitState::Proposed);
+    ReviewSignals {
+        needs_review,
+        is_conflict,
+        has_hard,
+    }
 }
 
 /// Truncate `s` to at most `max_chars` characters, preferring a word boundary.
@@ -251,6 +331,73 @@ pub(crate) fn extract_target_text(target: &i18n_harness_core::Target, max_chars:
                 .unwrap_or_default()
         }
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod review_signals_tests {
+    use super::review_signals;
+    use i18n_harness_core::{Flag, ReviewStatus, Unit, UnitState};
+
+    fn unit() -> Unit {
+        Unit::untranslated_singular("ctx::Key", "Source")
+    }
+
+    #[test]
+    fn finished_with_only_soft_flag_is_not_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::LengthWarn);
+        let s = review_signals(&u);
+        assert!(!s.needs_review, "finished + soft flag must not need review");
+        assert!(!s.has_hard);
+        assert!(!s.is_conflict);
+    }
+
+    #[test]
+    fn finished_with_semantic_flag_is_not_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::LowConfidence);
+        assert!(!review_signals(&u).needs_review);
+    }
+
+    #[test]
+    fn proposed_needs_review_even_without_flags() {
+        let mut u = unit();
+        u.state = UnitState::Proposed;
+        assert!(review_signals(&u).needs_review);
+    }
+
+    #[test]
+    fn hard_flag_needs_review_in_any_state() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.flags.insert(Flag::PlaceholderMismatch);
+        let s = review_signals(&u);
+        assert!(s.needs_review);
+        assert!(s.has_hard);
+    }
+
+    #[test]
+    fn explicit_status_needs_review() {
+        let mut u = unit();
+        u.state = UnitState::Finished;
+        u.review_status = Some(ReviewStatus::NeedsReview);
+        assert!(review_signals(&u).needs_review);
+
+        let mut c = unit();
+        c.state = UnitState::Finished;
+        c.review_status = Some(ReviewStatus::Conflict);
+        let s = review_signals(&c);
+        assert!(s.needs_review);
+        assert!(s.is_conflict);
+    }
+
+    #[test]
+    fn untranslated_without_flags_is_not_review() {
+        let u = unit();
+        assert!(!review_signals(&u).needs_review);
     }
 }
 
