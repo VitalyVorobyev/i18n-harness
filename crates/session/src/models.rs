@@ -1,7 +1,7 @@
 //! Model servers: what models are available, and the backend for one.
 
 use i18n_harness_backend::TranslationBackend;
-use i18n_harness_backend::discovery::{ModelInfo, PromptStyle, ServerKind};
+use i18n_harness_backend::discovery::{ModelInfo, ModelProvider, PromptStyle, ServerKind};
 use i18n_harness_project::{BackendConfig, BackendKind};
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +95,34 @@ impl From<ModelInfo> for ModelChoice {
     }
 }
 
+/// A discovery client for the configured server.
+fn provider(settings: &ModelSettings) -> Result<Box<dyn ModelProvider>> {
+    match settings.server {
+        #[cfg(feature = "ollama")]
+        ServerKind::Ollama => Ok(Box::new(
+            i18n_harness_backend::discovery::OllamaServer::new(&settings.host)
+                .with_api_key(api_key(settings.server)),
+        )),
+        #[cfg(feature = "openai-compatible")]
+        ServerKind::OpenAiCompatible => Ok(Box::new(
+            i18n_harness_backend::discovery::OpenAiServer::new(&settings.host)
+                .with_api_key(api_key(settings.server)),
+        )),
+        #[allow(unreachable_patterns)]
+        other => Err(unsupported(other)),
+    }
+}
+
+/// The API key for a server kind, from the environment (never stored).
+#[cfg(any(feature = "ollama", feature = "openai-compatible"))]
+fn api_key(server: ServerKind) -> Option<String> {
+    let var = match server {
+        ServerKind::Ollama => "OLLAMA_API_KEY",
+        ServerKind::OpenAiCompatible => "OPENAI_API_KEY",
+    };
+    std::env::var(var).ok().filter(|k| !k.is_empty())
+}
+
 /// The models on the configured server that can translate (embedding-only
 /// models are left out).
 ///
@@ -103,21 +131,7 @@ impl From<ModelInfo> for ModelChoice {
 /// [`SessionError::Backend`] when the server cannot be reached; for a local
 /// Ollama server that usually means it is not running.
 pub fn list_models(settings: &ModelSettings) -> Result<Vec<ModelChoice>> {
-    use i18n_harness_backend::discovery::ModelProvider;
-    let provider: Box<dyn ModelProvider> = match settings.server {
-        #[cfg(feature = "ollama")]
-        ServerKind::Ollama => Box::new(
-            i18n_harness_backend::discovery::OllamaServer::new(&settings.host)
-                .with_api_key(std::env::var("OLLAMA_API_KEY").ok()),
-        ),
-        #[cfg(feature = "openai-compatible")]
-        ServerKind::OpenAiCompatible => Box::new(
-            i18n_harness_backend::discovery::OpenAiServer::new(&settings.host)
-                .with_api_key(std::env::var("OPENAI_API_KEY").ok()),
-        ),
-        #[allow(unreachable_patterns)]
-        _ => return Err(unsupported(settings.server)),
-    };
+    let provider = provider(settings)?;
     let mut choices = Vec::new();
     for summary in provider.list_models()? {
         let info = provider.describe(&summary.id)?;
@@ -128,28 +142,47 @@ pub fn list_models(settings: &ModelSettings) -> Result<Vec<ModelChoice>> {
     Ok(choices)
 }
 
-/// The translation backend for `settings`.
+/// The translation backend for `settings`: the selected model, prompted
+/// with the profile its server's report calls for.
 ///
 /// # Errors
 ///
 /// [`SessionError::NeedsModel`] when no model is selected;
-/// [`SessionError::Backend`] for a server kind this build cannot translate
-/// with.
+/// [`SessionError::Backend`] when the server cannot be reached or does not
+/// offer the model.
 pub fn backend(settings: &ModelSettings) -> Result<Box<dyn TranslationBackend>> {
     let model = settings.model.clone().ok_or(SessionError::NeedsModel)?;
-    match settings.server {
-        #[cfg(feature = "ollama")]
-        ServerKind::Ollama => {
-            let mut backend = i18n_harness_backend::OllamaBackend::new()?
-                .with_host(settings.host.clone())
-                .with_model(model);
-            if let Some(num_ctx) = settings.num_ctx {
-                backend = backend.with_num_ctx(num_ctx);
-            }
-            Ok(Box::new(backend))
-        }
-        other => Err(unsupported(other)),
-    }
+    let info = provider(settings)?.describe(&model)?;
+    model_backend(settings, model, info.prompt_style)
+}
+
+#[cfg(any(feature = "ollama", feature = "openai-compatible"))]
+fn model_backend(
+    settings: &ModelSettings,
+    model: String,
+    style: PromptStyle,
+) -> Result<Box<dyn TranslationBackend>> {
+    use i18n_harness_backend::ModelBackend;
+    use i18n_harness_backend::profile::Profile;
+    Ok(Box::new(
+        ModelBackend::new(
+            settings.server,
+            settings.host.clone(),
+            model,
+            Profile::builtin(style),
+        )
+        .with_api_key(api_key(settings.server))
+        .with_num_ctx(settings.num_ctx),
+    ))
+}
+
+#[cfg(not(any(feature = "ollama", feature = "openai-compatible")))]
+fn model_backend(
+    settings: &ModelSettings,
+    _model: String,
+    _style: PromptStyle,
+) -> Result<Box<dyn TranslationBackend>> {
+    Err(unsupported(settings.server))
 }
 
 fn unsupported(server: ServerKind) -> SessionError {

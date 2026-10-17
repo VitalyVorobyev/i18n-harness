@@ -105,4 +105,25 @@ pub trait TranslationBackend: Send + Sync {
         locale: &Locale,
         glossary: Option<&Glossary>,
     ) -> Result<Vec<TranslationOutcome>, BackendError>;
+
+    /// [`Self::translate_batch`] for units whose `source` text is in the
+    /// language `source` rather than the catalog's original language — for
+    /// instance an existing German translation used to produce Slovak.
+    ///
+    /// The default ignores `source`; backends whose prompt names the
+    /// source language override it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::translate_batch`].
+    fn translate_batch_from(
+        &self,
+        batch: &Batch,
+        source: &Locale,
+        locale: &Locale,
+        glossary: Option<&Glossary>,
+    ) -> Result<Vec<TranslationOutcome>, BackendError> {
+        let _ = source;
+        self.translate_batch(batch, locale, glossary)
+    }
 }

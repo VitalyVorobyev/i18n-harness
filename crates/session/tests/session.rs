@@ -166,11 +166,11 @@ fn pivot_input_is_the_existing_text_and_falls_back_to_the_source() {
     };
     // Sound German: translate from it.
     let task = by_source(&session, "Filter Size");
-    assert_eq!(task.request.source, "Filtergröße");
+    assert_eq!(task.segments[0].request.source, "Filtergröße");
     assert_eq!(task.input_locale, "de_DE");
     // No German: translate from English.
     let task = by_source(&session, "pix");
-    assert_eq!(task.request.source, "pix");
+    assert_eq!(task.segments[0].request.source, "pix");
     assert_eq!(task.input_locale, "en");
     // German plural with empty forms is incomplete: English.
     let task = by_source(&session, "file(s)");
@@ -187,21 +187,18 @@ fn pivot_input_is_the_existing_text_and_falls_back_to_the_source() {
 }
 
 /// A backend that "translates" by tagging the input, so tests can see which
-/// text it received. Plural units get three forms.
+/// text it received. It only ever sees single forms: the session expands
+/// plural strings itself.
 fn tagging_backend(
     seen: &Mutex<Vec<String>>,
 ) -> impl i18n_harness_backend::TranslationBackend + '_ {
     ManualBackend::new(move |ctx: &PromptContext<'_>| {
+        assert!(
+            ctx.unit.plural_arity.is_none(),
+            "plural reached the backend"
+        );
         seen.lock().unwrap().push(ctx.unit.source.clone());
-        if ctx.unit.plural_arity.is_some() {
-            ManualResponse::Plural(vec![
-                "{count} súbor".into(),
-                "{count} súbory".into(),
-                "{count} súborov".into(),
-            ])
-        } else {
-            ManualResponse::Singular(format!("SK:{}", ctx.unit.source))
-        }
+        ManualResponse::Singular(format!("SK:{}", ctx.unit.source))
     })
 }
 
@@ -304,8 +301,11 @@ fn deliver_marks_clean_results_done_and_save_writes_them() {
         written.contains("<translation>SK:Filtergröße</translation>"),
         "{written}"
     );
-    assert!(
-        written.contains("<numerusform>%n súborov</numerusform>"),
+    assert_eq!(
+        written
+            .matches("<numerusform>SK:%n file(s) successfully imported.</numerusform>")
+            .count(),
+        3,
         "{written}"
     );
     // Everything outside the translations is byte-identical.
@@ -410,4 +410,80 @@ fn glossary_edits_create_the_file_and_reach_the_model() {
     // Removing a term from the list removes it from the file.
     session.set_glossary("sk_SK", Vec::new()).unwrap();
     assert!(session.glossary("sk_SK").is_empty());
+}
+
+#[test]
+fn plural_forms_are_translated_with_their_sample_counts() {
+    let (_dir, mut session, path) = open();
+    let plural_id = session
+        .units(&path, &UnitFilter::default(), 0, usize::MAX)
+        .unwrap()
+        .units
+        .into_iter()
+        .find(|u| !u.plural_slots.is_empty())
+        .unwrap()
+        .id;
+    let task = session
+        .prepare(
+            &path,
+            &i18n_harness_core::UnitId::from(plural_id.as_str()),
+            InputText::Auto,
+        )
+        .unwrap();
+    let inputs: Vec<&str> = task
+        .segments
+        .iter()
+        .map(|s| s.request.source.as_str())
+        .collect();
+    assert_eq!(
+        inputs,
+        [
+            "1 file(s) successfully imported.",
+            "2 file(s) successfully imported.",
+            "0 file(s) successfully imported."
+        ]
+    );
+
+    // A Slovak "model" that declines by the number it sees.
+    let backend = ManualBackend::new(|ctx: &PromptContext<'_>| {
+        let n = ctx.unit.source.split(' ').next().unwrap().to_owned();
+        let noun = match n.as_str() {
+            "1" => "súbor bol úspešne importovaný",
+            "2" => "súbory boli úspešne importované",
+            _ => "súborov bolo úspešne importovaných",
+        };
+        ManualResponse::Singular(format!("{n} {noun}."))
+    });
+    let outcome = i18n_harness_session::translate_task(&backend, &task).unwrap();
+    let applied = session.apply(&task, outcome, Promotion::Review).unwrap();
+    assert!(applied.translated, "{:?}", applied.failure);
+    assert_eq!(
+        applied.unit.target,
+        [
+            "%n súbor bol úspešne importovaný.",
+            "%n súbory boli úspešne importované.",
+            "%n súborov bolo úspešne importovaných."
+        ]
+    );
+    assert!(
+        applied
+            .unit
+            .issues
+            .iter()
+            .all(|i| i.severity != IssueSeverity::Error),
+        "{:?}",
+        applied.unit.issues
+    );
+
+    // A model that drops the number fails the string instead of guessing.
+    let lossy = ManualBackend::new(|_: &PromptContext<'_>| {
+        ManualResponse::Singular("súbory importované".into())
+    });
+    let outcome = i18n_harness_session::translate_task(&lossy, &task).unwrap();
+    assert!(
+        !session
+            .apply(&task, outcome, Promotion::Review)
+            .unwrap()
+            .translated
+    );
 }
