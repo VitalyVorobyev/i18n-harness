@@ -12,9 +12,10 @@ use i18n_harness_project::{CatalogRef, Project, ProjectWarning};
 
 use crate::error::{Result, SessionError};
 use crate::issues::issues;
+use crate::shared::{SharedIndex, SharedInfo};
 use crate::view::{
-    CatalogSummary, IssueSeverity, PluralSlot, SaveReport, StatusCounts, UnitFilter, UnitPage,
-    UnitStatus, UnitView,
+    CatalogSummary, CheckSettings, IssueSeverity, PluralSlot, SaveReport, Show, StatusCounts,
+    UnitFilter, UnitPage, UnitRow, UnitStatus, UnitView,
 };
 
 /// One open catalog.
@@ -199,7 +200,10 @@ impl Session {
 
     /// Summaries of every open catalog, in settings order.
     pub fn catalogs(&self) -> Vec<CatalogSummary> {
-        self.catalogs.iter().map(|c| self.summarize(c)).collect()
+        let shared = SharedIndex::build(&self.catalogs);
+        (0..self.catalogs.len())
+            .map(|slot| self.summarize(slot, &shared))
+            .collect()
     }
 
     /// Summary of one catalog.
@@ -208,30 +212,37 @@ impl Session {
     ///
     /// [`SessionError::UnknownCatalog`].
     pub fn catalog_summary(&self, path: &Path) -> Result<CatalogSummary> {
-        Ok(self.summarize(self.catalog(path)?))
+        let slot = self.catalog_index(path)?;
+        Ok(self.summarize(slot, &SharedIndex::build(&self.catalogs)))
     }
 
-    fn summarize(&self, c: &OpenCatalog) -> CatalogSummary {
+    fn summarize(&self, slot: usize, shared: &SharedIndex) -> CatalogSummary {
+        let c = &self.catalogs[slot];
         let glossary = self.project.glossary();
         let mut counts = StatusCounts::default();
-        for unit in c.doc.units().iter().filter(|u| is_active(u)) {
+        for (index, unit) in c.doc.units().iter().enumerate() {
+            if !is_active(unit) {
+                continue;
+            }
             counts.total += 1;
             match status_of(unit, c.pivot.is_some()) {
                 UnitStatus::ToDo => counts.to_do += 1,
                 UnitStatus::Check => counts.check += 1,
                 UnitStatus::Done => counts.done += 1,
             }
-            if c.is_translation(unit) && c.gate(unit, glossary).flags.has_hard() {
-                counts.errors += 1;
+            if c.is_translation(unit) {
+                let found = issues(&c.gate(unit, glossary), unit, c.doc.format());
+                let has = |s| found.iter().any(|i| i.severity == s);
+                counts.errors += usize::from(has(IssueSeverity::Error));
+                counts.warnings += usize::from(has(IssueSeverity::Warning));
             }
+            let info = shared.info(&self.catalogs, (slot, index));
+            counts.only_here += usize::from(!info.shared);
+            counts.inconsistent += usize::from(info.inconsistent);
         }
         CatalogSummary {
             path: c.path.display().to_string(),
-            name: c
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            name: file_name(&c.path),
             relative_path: c.relative.clone(),
             format: c.doc.format().id().to_owned(),
             format_name: c.doc.format().display_name().to_owned(),
@@ -257,39 +268,148 @@ impl Session {
         offset: usize,
         limit: usize,
     ) -> Result<UnitPage> {
-        let catalog = self.catalog(path)?;
+        let slot = self.catalog_index(path)?;
+        let selected = self.select(&[slot], filter);
+        let matching = selected.len();
+        let units = selected
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(|(_, view, _)| view)
+            .collect();
+        Ok(UnitPage { units, matching })
+    }
+
+    /// Every string matching `filter`, of one catalog (`path`) or of all,
+    /// as list rows in catalog then document order.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::UnknownCatalog`].
+    pub fn rows(&self, path: Option<&Path>, filter: &UnitFilter) -> Result<Vec<UnitRow>> {
+        let slots: Vec<usize> = match path {
+            Some(path) => vec![self.catalog_index(path)?],
+            None => (0..self.catalogs.len()).collect(),
+        };
+        Ok(self
+            .select(&slots, filter)
+            .into_iter()
+            .map(|(slot, view, info)| {
+                let catalog = &self.catalogs[slot];
+                let has = |s| view.issues.iter().any(|i| i.severity == s);
+                UnitRow {
+                    path: catalog.path.display().to_string(),
+                    file: file_name(&catalog.path),
+                    error: has(IssueSeverity::Error),
+                    warning: has(IssueSeverity::Warning),
+                    shared: info.shared,
+                    inconsistent: info.inconsistent,
+                    group: view.context.group.clone(),
+                    existing: view.existing.and_then(|e| e.into_iter().next()),
+                    target: view.target.into_iter().next().unwrap_or_default(),
+                    id: view.id,
+                    source: view.source,
+                    status: view.status,
+                }
+            })
+            .collect())
+    }
+
+    /// The strings of the catalogs in `slots` that match `filter`, with
+    /// their views and how they relate to other files.
+    fn select(&self, slots: &[usize], filter: &UnitFilter) -> Vec<(usize, UnitView, SharedInfo)> {
+        let shared = SharedIndex::build(&self.catalogs);
         let needle = filter
             .search
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_lowercase);
-        let mut matching = 0usize;
-        let mut units = Vec::new();
-        for unit in catalog.doc.units().iter().filter(|u| is_active(u)) {
-            let view = self.view(catalog, unit);
-            if !filter.statuses.is_empty() && !filter.statuses.contains(&view.status) {
-                continue;
+        let mut out = Vec::new();
+        for &slot in slots {
+            let catalog = &self.catalogs[slot];
+            for (index, unit) in catalog.doc.units().iter().enumerate() {
+                if !is_active(unit) {
+                    continue;
+                }
+                let view = self.view(catalog, unit);
+                if !filter.statuses.is_empty() && !filter.statuses.contains(&view.status) {
+                    continue;
+                }
+                let info = shared.info(&self.catalogs, (slot, index));
+                let has = |s| view.issues.iter().any(|i| i.severity == s);
+                let shown = match filter.show {
+                    Show::Everything => true,
+                    Show::Problems => has(IssueSeverity::Error),
+                    Show::Warnings => has(IssueSeverity::Warning),
+                    Show::Inconsistent => info.inconsistent,
+                    Show::Shared => info.shared,
+                };
+                if !shown {
+                    continue;
+                }
+                if let Some(needle) = &needle
+                    && !matches_search(&view, needle)
+                {
+                    continue;
+                }
+                out.push((slot, view, info));
             }
-            if filter.errors_only
-                && !view
-                    .issues
-                    .iter()
-                    .any(|i| i.severity == IssueSeverity::Error)
-            {
-                continue;
-            }
-            if let Some(needle) = &needle
-                && !matches_search(&view, needle)
-            {
-                continue;
-            }
-            if matching >= offset && units.len() < limit {
-                units.push(view);
-            }
-            matching += 1;
         }
-        Ok(UnitPage { units, matching })
+        out
+    }
+
+    /// The tunable check settings for target `locale`, with this project's
+    /// overrides applied.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::UnknownLocale`].
+    pub fn check_settings(&self, locale: &str) -> Result<CheckSettings> {
+        let effective = self
+            .project
+            .locale(locale)
+            .map(|r| r.effective_locale())
+            .or_else(|| Locale::by_id(locale).copied())
+            .ok_or_else(|| SessionError::UnknownLocale(locale.to_owned()))?;
+        Ok(CheckSettings {
+            length_ratio: effective.length_warn_ratio,
+            length_min_chars: effective.length_warn_min_chars,
+        })
+    }
+
+    /// Store the check settings for target `locale` in the settings file and
+    /// apply them to the open catalogs of that language.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::InvalidInput`] for a ratio that is not a positive
+    /// number; [`SessionError::Project`] when the settings file cannot be
+    /// written.
+    pub fn set_check_settings(&mut self, locale: &str, settings: CheckSettings) -> Result<()> {
+        if !(settings.length_ratio.is_finite() && settings.length_ratio > 0.0) {
+            return Err(SessionError::InvalidInput(format!(
+                "the length ratio must be a positive number, not {}",
+                settings.length_ratio
+            )));
+        }
+        let mut config = self
+            .project
+            .manifest()
+            .locales
+            .get(locale)
+            .cloned()
+            .unwrap_or_default();
+        config.length_warn_ratio = Some(settings.length_ratio);
+        config.length_warn_min_chars = Some(settings.length_min_chars);
+        self.project.update_locale(locale, config)?;
+        self.project.save_manifest()?;
+        let effective = self.check_settings(locale)?;
+        for catalog in self.catalogs.iter_mut().filter(|c| c.locale.id == locale) {
+            catalog.locale.length_warn_ratio = effective.length_ratio;
+            catalog.locale.length_warn_min_chars = effective.length_min_chars;
+        }
+        Ok(())
     }
 
     /// One string.
@@ -677,6 +797,12 @@ fn plural_slots(catalog: &OpenCatalog, unit: &Unit) -> Vec<PluralSlot> {
             example: labelled.then(|| table[i].1),
         })
         .collect()
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn matches_search(view: &UnitView, needle: &str) -> bool {

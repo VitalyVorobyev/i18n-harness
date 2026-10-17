@@ -17,6 +17,11 @@ export interface StatusCounts {
   check: number;
   done: number;
   errors: number;
+  warnings: number;
+  /** Strings another file of the same language translates differently. */
+  inconsistent: number;
+  /** Strings that occur in no other file of the same language. */
+  only_here: number;
 }
 
 export interface CatalogSummary {
@@ -58,15 +63,35 @@ export interface UnitView {
   editable: boolean;
 }
 
+/** Which strings to list beyond their status. */
+export type Show = "everything" | "problems" | "warnings" | "inconsistent" | "shared";
+
 export interface UnitFilter {
   statuses: UnitStatus[];
-  errors_only: boolean;
+  show: Show;
   search: string | null;
 }
 
-export interface UnitPage {
-  units: UnitView[];
-  matching: number;
+/** One line of a string list; the selected string's full view comes from `getUnit`. */
+export interface UnitRow {
+  path: string;
+  file: string;
+  id: string;
+  source: string;
+  existing: string | null;
+  target: string;
+  status: UnitStatus;
+  group: string | null;
+  error: boolean;
+  warning: boolean;
+  shared: boolean;
+  inconsistent: boolean;
+}
+
+/** The checks a project can tune, per target language. */
+export interface CheckSettings {
+  length_ratio: number;
+  length_min_chars: number;
 }
 
 export interface SaveReport {

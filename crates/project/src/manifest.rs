@@ -98,6 +98,10 @@ pub struct LocaleConfig {
     /// translation is 30 % longer than the source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length_warn_ratio: Option<f32>,
+    /// Override the shortest original (in characters) the length check
+    /// applies to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length_warn_min_chars: Option<u32>,
 }
 
 /// Register style for a locale — how formal the translated text should be.

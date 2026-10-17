@@ -181,6 +181,10 @@ pub struct Locale {
     /// flagged for review. Source locale `en` uses `1.0` (no expansion
     /// expected since it is the reference).
     pub length_warn_ratio: f32,
+
+    /// Originals shorter than this many characters are not length-checked:
+    /// a short label has too little text for a ratio to mean anything.
+    pub length_warn_min_chars: u32,
 }
 
 impl Locale {

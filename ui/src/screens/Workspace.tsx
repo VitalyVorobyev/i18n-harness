@@ -4,14 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CatalogSummary,
+  CheckSettings,
   FolderView,
   GlossaryEntry,
   Language,
   ModelChoice,
   ModelSettings,
+  Show,
   TranslationEvent,
-  UnitPage,
   TranslateScope,
+  UnitRow,
   UnitView,
 } from "../api";
 import { errorKind, errorMessage, useApi } from "../api";
@@ -23,7 +25,7 @@ import type { RunState } from "../workspace/RunBar";
 import { RunBar } from "../workspace/RunBar";
 import { SettingsDialog } from "../workspace/SettingsDialog";
 import type { StatusTab } from "../workspace/Strings";
-import { PAGE_SIZE, Strings } from "../workspace/Strings";
+import { Strings, rowKey } from "../workspace/Strings";
 import { Toolbar } from "../workspace/Toolbar";
 
 /** Every translated string whose text breaks the glossary. */
@@ -41,11 +43,15 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const [tab, setTab] = useState<StatusTab>("to-do");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [errorsOnly, setErrorsOnly] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [page, setPage] = useState<UnitPage | null>(null);
+  const [show, setShow] = useState<Show>("everything");
+  const [rows, setRows] = useState<UnitRow[] | null>(null);
   const [reload, setReload] = useState(0);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [active, setActive] = useState<UnitRow | null>(null);
+  const [activeUnit, setActiveUnit] = useState<UnitView | null>(null);
+  // The row whose editor should take keyboard focus once shown (chosen from
+  // the keyboard rather than with the mouse).
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<ModelSettings | null>(null);
   const [models, setModels] = useState<ModelChoice[] | null>(null);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -53,12 +59,13 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   const [busyUnit, setBusyUnit] = useState(false);
   const [languages, setLanguages] = useState<Language[]>([]);
   const [glossary, setGlossary] = useState<GlossaryEntry[] | null>(null);
+  const [checks, setChecks] = useState<CheckSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pivotFor, setPivotFor] = useState<CatalogSummary | null>(null);
   const [glossaryIssues, setGlossaryIssues] = useState(0);
 
   const catalog = catalogs.find((c) => c.path === selected) ?? null;
-  const activeUnit = page?.units.find((u) => u.id === activeId) ?? null;
+  const activeKey = active ? rowKey(active) : null;
   const dirty = catalogs.some((c) => c.dirty);
   const running = run.kind === "running";
 
@@ -72,23 +79,35 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     return () => clearTimeout(t);
   }, [search]);
 
-  // The current page of strings.
+  // The strings of the selected file. A newer request supersedes an older
+  // one; the rows on screen stay until the new ones arrive.
   useEffect(() => {
     if (selected === null) return;
     let live = true;
     api
-      .listUnits(
-        selected,
-        { statuses: tab === "all" ? [] : [tab], errors_only: errorsOnly, search: query || null },
-        offset,
-        PAGE_SIZE,
-      )
-      .then((next) => live && setPage(next))
+      .listRows(selected, { statuses: tab === "all" ? [] : [tab], show, search: query || null })
+      .then((next) => live && setRows(next))
       .catch((error: unknown) => live && fail("Could not load the strings", error));
     return () => {
       live = false;
     };
-  }, [api, selected, tab, errorsOnly, query, offset, reload, fail]);
+  }, [api, selected, tab, show, query, reload, fail]);
+
+  // The full view of the selected string, for the editor.
+  useEffect(() => {
+    if (active === null) {
+      setActiveUnit(null);
+      return;
+    }
+    let live = true;
+    api
+      .getUnit(active.path, active.id)
+      .then((unit) => live && setActiveUnit(unit))
+      .catch((error: unknown) => live && fail("Could not load the string", error));
+    return () => {
+      live = false;
+    };
+  }, [api, active, fail]);
 
   // Model settings and the models the server offers.
   useEffect(() => {
@@ -123,9 +142,8 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
       const summary = event.catalog;
       setCatalogs((all) => all.map((c) => (c.path === summary.path ? summary : c)));
     }
-    if (event.unit) {
-      const unit = event.unit;
-      setPage((p) => (p ? { ...p, units: p.units.map((u) => (u.id === unit.id ? unit : u)) } : p));
+    if (event.unit && event.catalog) {
+      updateRow(event.catalog.path, event.unit);
     }
     if (progress.event === "started") {
       setRun({ kind: "running", done: 0, total: progress.total, failed: 0, cancelling: false });
@@ -219,33 +237,58 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     // oxlint-disable-next-line react/exhaustive-deps
   }, [api, fail]);
 
-  // Ctrl/Cmd+S saves.
+  // Ctrl/Cmd+S saves; Ctrl/Cmd+F goes to the search field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         void save();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [save]);
 
-  const replaceUnit = (unit: UnitView) =>
-    setPage((p) => (p ? { ...p, units: p.units.map((u) => (u.id === unit.id ? unit : u)) } : p));
+  // Bring a row in line with a changed string, keeping its place in the list.
+  function updateRow(path: string, unit: UnitView) {
+    const patch = (r: UnitRow): UnitRow =>
+      r.path === path && r.id === unit.id
+        ? {
+            ...r,
+            target: unit.target[0] ?? "",
+            status: unit.status,
+            error: unit.issues.some((i) => i.severity === "error"),
+            warning: unit.issues.some((i) => i.severity === "warning"),
+          }
+        : r;
+    setRows((all) => all?.map(patch) ?? all);
+    setActive((a) => (a ? patch(a) : a));
+    setActiveUnit((u) => (u && active?.path === path && u.id === unit.id ? unit : u));
+  }
 
-  const nextId = (after: string): string | null => {
-    const units = page?.units ?? [];
-    const i = units.findIndex((u) => u.id === after);
-    return units[i + 1]?.id ?? null;
+  const neighbour = (step: 1 | -1): UnitRow | null => {
+    const list = rows ?? [];
+    const i = active ? list.findIndex((r) => rowKey(r) === rowKey(active)) : -1;
+    return list[i + step] ?? null;
+  };
+
+  const activate = (row: UnitRow | null, focus: boolean) => {
+    setActive(row);
+    setFocusKey(focus && row ? rowKey(row) : null);
   };
 
   const saveUnit = async (forms: string[], done: boolean) => {
-    if (!catalog || !activeUnit) return;
+    if (!active) return;
     try {
-      const unit = await api.setTranslation(catalog.path, activeUnit.id, forms, done);
-      replaceUnit(unit);
-      if (done) setActiveId(nextId(unit.id));
+      const after = neighbour(1);
+      const unit = await api.setTranslation(active.path, active.id, forms, done);
+      updateRow(active.path, unit);
+      if (done) activate(after, true);
       await refreshCatalogs();
     } catch (error) {
       fail("Could not change the translation", error);
@@ -253,10 +296,10 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
   };
 
   const translateUnit = async () => {
-    if (!catalog || !activeUnit) return;
+    if (!active) return;
     setBusyUnit(true);
     try {
-      replaceUnit(await api.translateOne(catalog.path, activeUnit.id, "auto"));
+      updateRow(active.path, await api.translateOne(active.path, active.id, "auto"));
       await refreshCatalogs();
     } catch (error) {
       fail("Could not translate the string", error);
@@ -285,21 +328,29 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
     if (!catalog) return;
     try {
       setGlossary(await api.getGlossary(catalog.locale));
+      setChecks(await api.getCheckSettings(catalog.locale));
       setSettingsOpen(true);
     } catch (error) {
       fail("Could not load the glossary", error);
     }
   };
 
-  const setView = (next: Partial<{ tab: StatusTab; errorsOnly: boolean; selected: string }>) => {
-    setOffset(0);
-    setActiveId(null);
+  const setView = (next: Partial<{ tab: StatusTab; show: Show; selected: string }>) => {
+    // Choosing the file already shown changes nothing (and must not blank
+    // the list: the loading effect would not run again).
+    if (next.selected === selected && next.tab === undefined && next.show === undefined) return;
+    setActive(null);
     if (next.tab !== undefined) setTab(next.tab);
-    if (next.errorsOnly !== undefined) setErrorsOnly(next.errorsOnly);
-    if (next.selected !== undefined) {
+    if (next.show !== undefined) setShow(next.show);
+    if (next.selected !== undefined && next.selected !== selected) {
       setSelected(next.selected);
-      setPage(null);
+      setRows(null);
     }
+  };
+
+  // Esc in the editor returns to the selected row of the list.
+  const focusList = () => {
+    document.querySelector<HTMLElement>('section[aria-label="Strings"] tr[aria-current]')?.focus();
   };
 
   return (
@@ -343,17 +394,13 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
               tab={tab}
               onTab={(t) => setView({ tab: t })}
               search={search}
-              onSearch={(s) => {
-                setOffset(0);
-                setSearch(s);
-              }}
-              errorsOnly={errorsOnly}
-              onErrorsOnly={(on) => setView({ errorsOnly: on })}
-              page={page}
-              offset={offset}
-              onOffset={setOffset}
-              activeId={activeId}
-              onActivate={(u) => setActiveId(u.id)}
+              onSearch={setSearch}
+              searchRef={searchRef}
+              show={show}
+              onShow={(s) => setView({ show: s })}
+              rows={rows}
+              activeKey={activeKey}
+              onActivate={(row, keyboard) => activate(row, keyboard)}
             />
           ) : (
             <p className="p-6 text-fg-muted">This folder has no translation files.</p>
@@ -362,13 +409,16 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         right={
           catalog ? (
             <Editor
-              key={`${catalog.path}::${activeUnit?.id ?? ""}::${activeUnit?.target.join("\u0000") ?? ""}`}
+              key={`${active?.path ?? ""}::${activeUnit?.id ?? ""}::${activeUnit?.target.join("\u0000") ?? ""}`}
               catalog={catalog}
-              unit={activeUnit}
+              unit={activeUnit !== null && activeUnit.id === active?.id ? activeUnit : null}
               canTranslate={settings?.model != null && !running}
               busy={busyUnit}
+              autoFocus={focusKey !== null && focusKey === activeKey}
               onSave={(forms, done) => void saveUnit(forms, done)}
               onTranslate={() => void translateUnit()}
+              onLeave={focusList}
+              onStep={(step) => activate(neighbour(step), true)}
             />
           ) : null
         }
@@ -405,16 +455,19 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
         />
       )}
 
-      {settingsOpen && catalog && settings && glossary && (
+      {settingsOpen && catalog && settings && glossary && checks && (
         <SettingsDialog
           locale={catalog.locale}
           language={catalog.language}
           glossary={glossary}
           settings={settings}
+          checks={checks}
           onClose={() => setSettingsOpen(false)}
           onSaved={(_glossary, saved) => {
             setSettingsOpen(false);
             setSettings(saved);
+            // Warnings and their counts depend on the check settings.
+            void refreshCatalogs();
             // Issues shown in the list depend on the glossary.
             setReload((n) => n + 1);
             toast({ tone: "success", title: "Settings saved" });

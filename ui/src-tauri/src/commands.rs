@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use i18n_harness_locales::Locale;
 use i18n_harness_session::{
-    CatalogSummary, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session, SessionError,
-    TranslateScope, UnitFilter, UnitPage, UnitView,
+    CatalogSummary, CheckSettings, GlossaryEntry, ModelChoice, ModelSettings, SaveReport, Session,
+    SessionError, TranslateScope, UnitFilter, UnitRow, UnitView,
 };
 use serde::Serialize;
 
@@ -85,15 +85,44 @@ pub(crate) fn list_catalogs(
     state.with(|s| Ok(s.catalogs()))
 }
 
+/// The strings of one catalog (`path`) or of every catalog (`None`) that
+/// match `filter`.
 #[tauri::command]
-pub(crate) fn list_units(
-    path: String,
+pub(crate) fn list_rows(
+    path: Option<String>,
     filter: UnitFilter,
-    offset: usize,
-    limit: usize,
     state: tauri::State<'_, AppState>,
-) -> CommandResult<UnitPage> {
-    state.with(|s| Ok(s.units(Path::new(&path), &filter, offset, limit)?))
+) -> CommandResult<Vec<UnitRow>> {
+    state.with(|s| Ok(s.rows(path.as_deref().map(Path::new), &filter)?))
+}
+
+#[tauri::command]
+pub(crate) fn get_unit(
+    path: String,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<UnitView> {
+    state.with(|s| Ok(s.unit(Path::new(&path), &id)?))
+}
+
+#[tauri::command]
+pub(crate) fn get_check_settings(
+    locale: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<CheckSettings> {
+    state.with(|s| Ok(s.check_settings(&locale)?))
+}
+
+#[tauri::command]
+pub(crate) fn set_check_settings(
+    locale: String,
+    settings: CheckSettings,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<CheckSettings> {
+    state.with(|s| {
+        s.set_check_settings(&locale, settings)?;
+        Ok(s.check_settings(&locale)?)
+    })
 }
 
 #[tauri::command]

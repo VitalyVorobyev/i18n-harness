@@ -72,7 +72,9 @@ test("the language of the existing text can be changed", async ({ page }) => {
   await page.getByRole("option", { name: /Slovak \(already translated\)/ }).click();
   await dialog.getByRole("button", { name: "Apply" }).click();
   await expect(
-    page.getByRole("navigation", { name: "Files" }).getByText("Slovak · Qt Linguist"),
+    page
+      .getByRole("navigation", { name: "Files" })
+      .getByRole("button", { name: /App_sk_SK\.ts Slovak · Qt Linguist/ }),
   ).toBeVisible();
 });
 
@@ -118,4 +120,70 @@ test("a glossary imported later is applied to finished translations", async ({ p
   await expect(
     page.getByRole("menuitem", { name: "Every translation follows the glossary" }),
   ).toBeVisible();
+});
+
+test("choosing the file already shown keeps its strings", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  const files = page.getByRole("navigation", { name: "Files" });
+  await files.getByText("App_sk_SK.ts").click();
+  await files.getByText("App_sk_SK.ts").click();
+  await expect(page.getByRole("cell", { name: /Filter Size/ })).toBeVisible();
+});
+
+test("the keyboard moves through the strings and into the editor", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("cell", { name: /Filter Size/ }).click();
+  const editor = page.getByRole("complementary", { name: "Translation" });
+  await expect(editor.getByText("Filter Size", { exact: true })).toBeVisible();
+
+  // Enter on the row: the cursor goes into its translation.
+  await page.keyboard.press("Enter");
+  await expect(editor.getByRole("textbox")).toBeFocused();
+
+  // Alt+↓ while editing: the next string, still in the editor.
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect(editor.getByText("pix", { exact: true })).toBeVisible();
+  await expect(editor.getByRole("textbox")).toBeFocused();
+
+  await page.keyboard.press("Alt+ArrowDown");
+  await expect(editor.getByText(/defects under %1 mm/)).toBeVisible();
+  await page.keyboard.press("Alt+ArrowUp");
+  await expect(editor.getByText("pix", { exact: true })).toBeVisible();
+
+  // Esc: back to the list, on the selected row.
+  await page.keyboard.press("Escape");
+  await expect(page.locator('tr[aria-current="true"]')).toBeFocused();
+
+  // Ctrl+F: the search field.
+  await page.keyboard.press("Control+f");
+  await expect(page.getByRole("textbox", { name: "Search strings" })).toBeFocused();
+});
+
+test("warnings can be listed and the length check tuned", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("combobox", { name: "Which strings" }).click();
+  await page.getByRole("option", { name: "Warnings (1)" }).click();
+  await expect(page.getByRole("cell", { name: /Fit the image to the window/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Zoom in/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("tab", { name: "Checks" }).click();
+  const ratio = dialog.getByRole("spinbutton", { name: "Warn when a translation is longer than" });
+  await ratio.fill("3");
+  await ratio.blur();
+  await dialog.getByRole("button", { name: "Save settings" }).click();
+  await expect(page.getByText("No warnings in this file.")).toBeVisible();
+});
+
+test("strings translated differently in another file can be listed", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("navigation", { name: "Files" }).getByText("Viewer_sk_SK.ts").click();
+  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("combobox", { name: "Which strings" }).click();
+  await page.getByRole("option", { name: /Translated differently in other files \(1\)/ }).click();
+  await expect(page.getByRole("cell", { name: "Priblížiť" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
 });

@@ -78,6 +78,7 @@ fn manifest_overrides_register() {
         register: Some(RegisterOverride::Informal),
         variant: None,
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     // Manifest says informal; workspace says formal.
@@ -93,6 +94,7 @@ fn manifest_overrides_variant() {
         register: None,
         variant: Some("de_AT".to_owned()),
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     assert_eq!(r.variant(), "de_AT");
@@ -106,6 +108,7 @@ fn manifest_overrides_length_warn_ratio() {
         register: None,
         variant: None,
         length_warn_ratio: Some(1.1),
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     assert!((r.length_warn_ratio() - 1.1).abs() < f32::EPSILON);
@@ -117,6 +120,7 @@ fn manifest_partial_override_leaves_other_fields_as_workspace() {
         register: Some(RegisterOverride::Neutral),
         variant: None,
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     assert_eq!(r.register(), Register::Neutral);
@@ -176,6 +180,7 @@ fn cldr_plural_is_workspace_immutable() {
         register: Some(RegisterOverride::Informal),
         variant: Some("de_AT".to_owned()),
         length_warn_ratio: Some(1.1),
+        length_warn_min_chars: None,
     };
     let glossary_toml = r#"
 [meta]
@@ -201,6 +206,7 @@ fn script_is_workspace_immutable() {
         register: Some(RegisterOverride::Informal),
         variant: None,
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     assert_eq!(r.script(), Script::Latin);
@@ -214,6 +220,7 @@ fn glossary_wins_over_manifest_register() {
         register: Some(RegisterOverride::Formal),
         variant: None,
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let glossary_toml = r#"
 [meta]
@@ -233,6 +240,7 @@ fn glossary_wins_over_manifest_variant() {
         register: None,
         variant: Some("de_AT".to_owned()),
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let glossary_toml = r#"
 [meta]
@@ -252,6 +260,7 @@ fn manifest_wins_over_workspace_when_no_glossary() {
         register: Some(RegisterOverride::Neutral),
         variant: None,
         length_warn_ratio: Some(1.2),
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     assert_eq!(r.register(), Register::Neutral);
@@ -266,6 +275,7 @@ fn workspace_locale_carries_workspace_register_not_resolved() {
         register: Some(RegisterOverride::Informal),
         variant: None,
         length_warn_ratio: None,
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     // resolved register is Informal.
@@ -280,6 +290,7 @@ fn effective_locale_carries_every_manifest_override() {
         register: Some(RegisterOverride::Informal),
         variant: Some("de_CH".to_owned()),
         length_warn_ratio: Some(1.8),
+        length_warn_min_chars: None,
     };
     let r = resolve_with_manifest("de_DE", cfg);
     let effective = r.effective_locale();

@@ -8,11 +8,12 @@ import type {
   Language,
   ModelChoice,
   ModelSettings,
+  CheckSettings,
   SaveReport,
   TranslateScope,
   TranslationEvent,
   UnitFilter,
-  UnitPage,
+  UnitRow,
   UnitView,
 } from "./types";
 
@@ -25,7 +26,9 @@ export interface Api {
   openFolder(path: string): Promise<FolderView>;
   closeFolder(): Promise<void>;
   listCatalogs(): Promise<CatalogSummary[]>;
-  listUnits(path: string, filter: UnitFilter, offset: number, limit: number): Promise<UnitPage>;
+  /** The strings of one file, or of every file when `path` is `null`, that match `filter`. */
+  listRows(path: string | null, filter: UnitFilter): Promise<UnitRow[]>;
+  getUnit(path: string, id: string): Promise<UnitView>;
   setTranslation(path: string, id: string, forms: string[], done: boolean): Promise<UnitView>;
   setDone(path: string, ids: string[], done: boolean): Promise<UnitView[]>;
   save(path: string | null): Promise<SaveReport>;
@@ -38,6 +41,8 @@ export interface Api {
   readGlossaryTable(path: string): Promise<GlossaryEntry[]>;
   /** How many strings a run over `scope` would cover. */
   planSize(scope: TranslateScope): Promise<number>;
+  getCheckSettings(locale: string): Promise<CheckSettings>;
+  setCheckSettings(locale: string, settings: CheckSettings): Promise<CheckSettings>;
   getModelSettings(): Promise<ModelSettings>;
   setModelSettings(settings: ModelSettings): Promise<ModelSettings>;
   listModels(settings: ModelSettings): Promise<ModelChoice[]>;

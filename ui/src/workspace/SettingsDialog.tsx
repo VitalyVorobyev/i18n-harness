@@ -5,6 +5,7 @@ import {
   Dialog,
   Field,
   Input,
+  NumberInput,
   SegmentedControl,
   Tabs,
   toast,
@@ -12,11 +13,11 @@ import {
 import { FileUp, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import type { GlossaryEntry, ModelSettings, ServerKind } from "../api";
+import type { CheckSettings, GlossaryEntry, ModelSettings, ServerKind } from "../api";
 import { errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 
-type Tab = "glossary" | "server";
+type Tab = "glossary" | "checks" | "server";
 
 interface Row extends GlossaryEntry {
   rowId: number;
@@ -26,12 +27,13 @@ let nextRowId = 0;
 const withId = (entry: GlossaryEntry): Row => ({ ...entry, rowId: nextRowId++ });
 const withoutId = ({ rowId: _rowId, ...entry }: Row): GlossaryEntry => entry;
 
-/** One dialog for everything a project can be told: glossary and model server. */
+/** One dialog for everything a project can be told: glossary, checks and model server. */
 export function SettingsDialog(props: {
   locale: string;
   language: string;
   glossary: GlossaryEntry[];
   settings: ModelSettings;
+  checks: CheckSettings;
   onClose: () => void;
   onSaved: (glossary: GlossaryEntry[], settings: ModelSettings) => void;
 }) {
@@ -39,6 +41,7 @@ export function SettingsDialog(props: {
   const [tab, setTab] = useState<Tab>("glossary");
   const [entries, setEntries] = useState<Row[]>(() => props.glossary.map(withId));
   const [settings, setSettings] = useState<ModelSettings>(props.settings);
+  const [checks, setChecks] = useState<CheckSettings>(props.checks);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -99,6 +102,7 @@ export function SettingsDialog(props: {
         props.locale,
         entries.filter((e) => e.term.trim() !== "").map(withoutId),
       );
+      await api.setCheckSettings(props.locale, checks);
       const saved = await api.setModelSettings(settings);
       props.onSaved(glossary, saved);
     } catch (error) {
@@ -135,6 +139,7 @@ export function SettingsDialog(props: {
         onSelect={setTab}
         items={[
           { id: "glossary", label: "Glossary", count: entries.length },
+          { id: "checks", label: "Checks" },
           { id: "server", label: "Model server" },
         ]}
       />
@@ -231,6 +236,45 @@ export function SettingsDialog(props: {
               the term unchanged.
             </span>
           </div>
+        </div>
+      )}
+
+      {tab === "checks" && (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-fg-muted">
+            When a {props.language} translation is flagged as too long to fit. A warning never stops
+            a translation from being saved.
+          </p>
+          <Field
+            label="Warn when a translation is longer than"
+            description="Times the length of the original. Translations often run 20–40% longer than English."
+          >
+            <NumberInput
+              className="w-32"
+              value={checks.length_ratio}
+              precision={2}
+              min={0.5}
+              max={10}
+              step={0.1}
+              unit="×"
+              onValueChange={(length_ratio) => setChecks({ ...checks, length_ratio })}
+            />
+          </Field>
+          <Field
+            label="Skip originals shorter than"
+            description="Short labels have too little text for a ratio to mean anything."
+          >
+            <NumberInput
+              className="w-32"
+              value={checks.length_min_chars}
+              precision={0}
+              min={0}
+              max={1000}
+              step={1}
+              unit="characters"
+              onValueChange={(n) => setChecks({ ...checks, length_min_chars: Math.round(n) })}
+            />
+          </Field>
         </div>
       )}
 

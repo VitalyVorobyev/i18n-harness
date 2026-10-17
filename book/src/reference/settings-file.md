@@ -70,6 +70,7 @@ table means "use the defaults".
 |---|---|---|
 | `register` | `"formal"`, `"informal"`, `"neutral"` | How to address the user. Chat models are told *Address the user formally/informally*. The built-in default is formal for languages that distinguish (German, Spanish, French, …) and neutral otherwise. |
 | `length_warn_ratio` | number | The [length check](checks.md#length) warns when a translation is longer than the original by this factor. Defaults depend on the script (1.3 for Latin, 0.6 for Chinese, …; German 1.4). |
+| `length_warn_min_chars` | integer | Originals shorter than this many characters are not length-checked. Default 8. |
 | `variant` | string | A variant tag such as `es_419`. Recorded; the current translation path does not use it. |
 
 Plural rules, script and the language's name always come from CLDR and

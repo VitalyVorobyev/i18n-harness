@@ -8,6 +8,9 @@ const counts = (to_do: number, check: number, done: number, errors = 0) => ({
   check,
   done,
   errors,
+  warnings: 0,
+  inconsistent: 0,
+  only_here: to_do + check + done,
 });
 
 describe("countsLine", () => {

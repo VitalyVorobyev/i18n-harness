@@ -44,6 +44,9 @@ pub struct ResolvedLocale {
     /// Effective length_warn_ratio: manifest overrides workspace; glossary
     /// cannot override this field (it has no `length_warn_ratio` field).
     effective_length_warn_ratio: f32,
+    /// Effective shortest length-checked original: manifest overrides
+    /// workspace.
+    effective_length_warn_min_chars: u32,
 }
 
 impl ResolvedLocale {
@@ -70,6 +73,7 @@ impl ResolvedLocale {
         let mut effective_register = workspace.register;
         let mut effective_variant: &'static str = workspace.variant;
         let mut effective_length_warn_ratio = workspace.length_warn_ratio;
+        let mut effective_length_warn_min_chars = workspace.length_warn_min_chars;
 
         // Layer 2: manifest overrides.
         if let Some(cfg) = manifest {
@@ -84,6 +88,9 @@ impl ResolvedLocale {
             }
             if let Some(ratio) = cfg.length_warn_ratio {
                 effective_length_warn_ratio = ratio;
+            }
+            if let Some(min) = cfg.length_warn_min_chars {
+                effective_length_warn_min_chars = min;
             }
         }
 
@@ -103,6 +110,7 @@ impl ResolvedLocale {
             effective_register,
             effective_variant,
             effective_length_warn_ratio,
+            effective_length_warn_min_chars,
         })
     }
 
@@ -144,6 +152,12 @@ impl ResolvedLocale {
         self.effective_length_warn_ratio
     }
 
+    /// Effective shortest original the length check applies to, after the
+    /// manifest override.
+    pub fn length_warn_min_chars(&self) -> u32 {
+        self.effective_length_warn_min_chars
+    }
+
     /// The locale record with this project's overrides (register, variant,
     /// length ratio) applied — what the gate and the prompt should use.
     pub fn effective_locale(&self) -> Locale {
@@ -151,6 +165,7 @@ impl ResolvedLocale {
             register: self.effective_register,
             variant: self.effective_variant,
             length_warn_ratio: self.effective_length_warn_ratio,
+            length_warn_min_chars: self.effective_length_warn_min_chars,
             ..*self.workspace
         }
     }

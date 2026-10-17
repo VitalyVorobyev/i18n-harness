@@ -26,6 +26,7 @@ struct Defaults {
 struct Entry {
     register: Option<RegisterName>,
     length_warn_ratio: Option<f32>,
+    length_warn_min_chars: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -130,6 +131,11 @@ fn build(id: String, tag: &Tag, cldr: &'static CldrLanguage) -> Locale {
         .or_else(|| defaults.scripts.get(script_code).copied())
         .or(defaults.fallback.length_warn_ratio)
         .unwrap_or(1.3);
+    let length_warn_min_chars = exact
+        .and_then(|e| e.length_warn_min_chars)
+        .or_else(|| language.and_then(|e| e.length_warn_min_chars))
+        .or(defaults.fallback.length_warn_min_chars)
+        .unwrap_or(8);
 
     let id: &'static str = Box::leak(id.into_boxed_str());
     Locale {
@@ -142,6 +148,7 @@ fn build(id: String, tag: &Tag, cldr: &'static CldrLanguage) -> Locale {
         variant: id,
         script: Script::from_iso15924(script_code),
         length_warn_ratio,
+        length_warn_min_chars,
     }
 }
 

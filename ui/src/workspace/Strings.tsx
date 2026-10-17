@@ -1,20 +1,15 @@
 import type { Column } from "@vitavision/ui";
-import {
-  Button,
-  Input,
-  SegmentedControl,
-  Skeleton,
-  StatusDot,
-  Table,
-  ToggleChip,
-} from "@vitavision/ui";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Input, Kbd, SegmentedControl, Select, Skeleton, StatusDot, Table } from "@vitavision/ui";
+import { CircleAlert, GitCompareArrows, Search, TriangleAlert } from "lucide-react";
+import type { Ref } from "react";
 
-import type { CatalogSummary, UnitPage, UnitStatus, UnitView } from "../api";
-import { STATUS_LABEL } from "../lib/format";
+import type { CatalogSummary, Show, UnitRow, UnitStatus } from "../api";
+import { STATUS_LABEL, plural } from "../lib/format";
 
 export type StatusTab = UnitStatus | "all";
-export const PAGE_SIZE = 100;
+
+/** Height of one row of the windowed list, in pixels. */
+const ROW_HEIGHT = 36;
 
 const DOT: Record<UnitStatus, "neutral" | "warning" | "normal"> = {
   "to-do": "neutral",
@@ -28,15 +23,15 @@ export function Strings(props: {
   onTab: (tab: StatusTab) => void;
   search: string;
   onSearch: (search: string) => void;
-  errorsOnly: boolean;
-  onErrorsOnly: (on: boolean) => void;
-  page: UnitPage | null;
-  offset: number;
-  onOffset: (offset: number) => void;
-  activeId: string | null;
-  onActivate: (unit: UnitView) => void;
+  searchRef: Ref<HTMLInputElement>;
+  show: Show;
+  onShow: (show: Show) => void;
+  rows: UnitRow[] | null;
+  activeKey: string | null;
+  /** `keyboard`: chosen with Enter or Space, so the editor should take focus. */
+  onActivate: (row: UnitRow, keyboard: boolean) => void;
 }) {
-  const { catalog, page } = props;
+  const { catalog, rows, searchRef } = props;
   const counts = catalog.counts;
   const tabs = [
     { value: "to-do", label: `To do ${counts.to_do.toLocaleString()}` },
@@ -44,11 +39,17 @@ export function Strings(props: {
     { value: "done", label: `Done ${counts.done.toLocaleString()}` },
     { value: "all", label: `All ${counts.total.toLocaleString()}` },
   ];
-
-  const columns = columnsFor(catalog);
-
-  const from = page && page.matching > 0 ? props.offset + 1 : 0;
-  const to = page ? Math.min(props.offset + PAGE_SIZE, page.matching) : 0;
+  const shared = counts.total - counts.only_here;
+  const showOptions: { value: Show; label: string }[] = [
+    { value: "everything", label: "Everything" },
+    { value: "problems", label: `Problems (${counts.errors.toLocaleString()})` },
+    { value: "warnings", label: `Warnings (${counts.warnings.toLocaleString()})` },
+    {
+      value: "inconsistent",
+      label: `Translated differently in other files (${counts.inconsistent.toLocaleString()})`,
+    },
+    { value: "shared", label: `Also in other files (${shared.toLocaleString()})` },
+  ];
 
   return (
     <section aria-label="Strings" className="flex h-full min-h-0 flex-col">
@@ -67,6 +68,7 @@ export function Strings(props: {
             className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-subtle"
           />
           <Input
+            ref={searchRef}
             aria-label="Search strings"
             placeholder="Search text, context or id"
             className="pl-7"
@@ -74,13 +76,18 @@ export function Strings(props: {
             onChange={(e) => props.onSearch(e.target.value)}
           />
         </div>
-        <ToggleChip checked={props.errorsOnly} onCheckedChange={props.onErrorsOnly} size="sm">
-          Problems only{counts.errors > 0 ? ` (${counts.errors})` : ""}
-        </ToggleChip>
+        <div className="w-44">
+          <Select
+            aria-label="Which strings"
+            value={props.show}
+            onValueChange={(v) => props.onShow((v || "everything") as Show)}
+            options={showOptions}
+          />
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {page === null ? (
+      <div className="min-h-0 flex-1">
+        {rows === null ? (
           <div className="space-y-2 p-3">
             <Skeleton className="h-8" />
             <Skeleton className="h-8" />
@@ -88,120 +95,144 @@ export function Strings(props: {
           </div>
         ) : (
           <Table
+            // A fresh table when rows come back after an empty list: the
+            // windowed table keeps measuring the scroll area it had before.
+            key={rows.length === 0 ? "empty" : "rows"}
             caption={`${catalog.name}: strings`}
-            columns={columns}
-            rows={page.units}
-            rowKey={(u) => u.id}
-            onRowClick={(u) => props.onActivate(u)}
-            isRowActive={(u) => u.id === props.activeId}
-            empty={emptyMessage(props.tab, props.search, props.errorsOnly)}
+            columns={columnsFor(catalog)}
+            rows={rows}
+            rowKey={rowKey}
+            className="h-full"
+            windowed={{ rowHeight: ROW_HEIGHT }}
+            onRowClick={(row, _index, event) => props.onActivate(row, event.type === "keydown")}
+            isRowActive={(row) => rowKey(row) === props.activeKey}
+            empty={emptyMessage(props.tab, props.search, props.show)}
           />
         )}
       </div>
 
-      {page !== null && page.matching > PAGE_SIZE && (
-        <div className="flex items-center justify-end gap-2 border-t border-line px-3 py-1.5 text-sm text-fg-muted">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-3 py-1.5 text-xs text-fg-subtle">
+        <span>
+          {rows === null ? "…" : plural(rows.length, "string", "strings")} shown ·{" "}
+          {plural(counts.only_here, "string", "strings")} only in this file
+        </span>
+        <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
-            {from.toLocaleString()}–{to.toLocaleString()} of {page.matching.toLocaleString()}
+            <Kbd>Enter</Kbd> edit
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Previous page"
-            icon={<ChevronLeft aria-hidden size={16} />}
-            disabled={props.offset === 0}
-            onClick={() => props.onOffset(Math.max(0, props.offset - PAGE_SIZE))}
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Next page"
-            icon={<ChevronRight aria-hidden size={16} />}
-            disabled={to >= page.matching}
-            onClick={() => props.onOffset(props.offset + PAGE_SIZE)}
-          />
-        </div>
-      )}
+          <span>
+            <Kbd>Esc</Kbd> list
+          </span>
+          <span>
+            <Kbd>Alt</Kbd>+<Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> previous / next
+          </span>
+          <span>
+            <Kbd>Ctrl</Kbd>+<Kbd>F</Kbd> search
+          </span>
+        </span>
+      </div>
     </section>
   );
 }
 
-function columnsFor(catalog: CatalogSummary): Column<UnitView>[] {
+export function rowKey(row: UnitRow): string {
+  return `${row.path}\u0000${row.id}`;
+}
+
+function columnsFor(catalog: CatalogSummary): Column<UnitRow>[] {
   return [
     {
       key: "status",
       header: <span className="sr-only">Status</span>,
       width: "2rem",
-      cell: statusCell,
+      cell: (r) => (
+        <StatusDot tone={DOT[r.status]}>
+          <span className="sr-only">{STATUS_LABEL[r.status]}</span>
+        </StatusDot>
+      ),
     },
     {
       key: "source",
       header: "Original",
-      cell: sourceCell,
+      cell: (r) => <Text text={r.source} title={r.group ? `${r.group}: ${r.source}` : r.source} />,
     },
     ...(catalog.pivot_language
-      ? [{ key: "existing", header: `From ${catalog.pivot_language}`, cell: existingCell }]
+      ? [
+          {
+            key: "existing",
+            header: `From ${catalog.pivot_language}`,
+            cell: (r: UnitRow) => <Text text={r.existing ?? ""} muted />,
+          },
+        ]
       : []),
     {
       key: "target",
       header: catalog.language,
-      cell: targetCell,
+      cell: (r) => <Text text={r.target} placeholder="Not translated" />,
+    },
+    {
+      key: "markers",
+      header: <span className="sr-only">Remarks</span>,
+      width: "4.5rem",
+      cell: markers,
     },
   ];
 }
 
-function statusCell(u: UnitView) {
+function markers(r: UnitRow) {
   return (
-    <StatusDot tone={DOT[u.status]}>
-      <span className="sr-only">{STATUS_LABEL[u.status]}</span>
-    </StatusDot>
-  );
-}
-
-function sourceCell(u: UnitView) {
-  return <Cell text={u.source} context={u.context.group} />;
-}
-
-function existingCell(u: UnitView) {
-  return <Cell text={u.existing?.[0] ?? ""} muted />;
-}
-
-function targetCell(u: UnitView) {
-  return (
-    <span className="flex items-start gap-1.5">
-      <Cell text={u.target[0] ?? ""} placeholder="Not translated" />
-      {u.issues.some((i) => i.severity === "error") && (
-        <span className="shrink-0 text-xs font-medium text-defect">Problem</span>
-      )}
-    </span>
-  );
-}
-
-function Cell(props: {
-  text: string;
-  context?: string | undefined;
-  muted?: boolean;
-  placeholder?: string;
-}) {
-  return (
-    <span className="block min-w-0">
-      {props.text === "" ? (
-        <span className="italic text-fg-subtle">{props.placeholder ?? "—"}</span>
-      ) : (
-        <span className={props.muted ? "line-clamp-2 text-fg-muted" : "line-clamp-2"}>
-          {props.text}
+    <span className="flex items-center gap-1.5">
+      {r.error && (
+        <span title="Problem: not written to the file until fixed" className="text-defect">
+          <CircleAlert aria-hidden size={14} />
+          <span className="sr-only">Problem</span>
         </span>
       )}
-      {props.context && (
-        <span className="block truncate text-xs text-fg-subtle">{props.context}</span>
+      {r.warning && (
+        <span title="Warning" className="text-warn">
+          <TriangleAlert aria-hidden size={14} />
+          <span className="sr-only">Warning</span>
+        </span>
+      )}
+      {r.inconsistent && (
+        <span title="Translated differently in another file" className="text-fg-muted">
+          <GitCompareArrows aria-hidden size={14} />
+          <span className="sr-only">Translated differently in another file</span>
+        </span>
       )}
     </span>
   );
 }
 
-function emptyMessage(tab: StatusTab, search: string, errorsOnly: boolean): string {
+function Text(props: { text: string; title?: string; muted?: boolean; placeholder?: string }) {
+  if (props.text === "") {
+    return <span className="italic text-fg-subtle">{props.placeholder ?? "—"}</span>;
+  }
+  return (
+    <span
+      className={props.muted ? "block truncate text-fg-muted" : "block truncate"}
+      title={props.title ?? props.text}
+    >
+      {props.text}
+    </span>
+  );
+}
+
+function emptyMessage(tab: StatusTab, search: string, show: Show): string {
   if (search.trim() !== "") return "No string matches the search.";
-  if (errorsOnly) return "No problems in this file.";
+  switch (show) {
+    case "problems":
+      return "No problems in this file.";
+    case "warnings":
+      return "No warnings in this file.";
+    case "inconsistent":
+      return "Every string shared with other files is translated the same way there.";
+    case "shared":
+      return "No string of this file occurs in another file.";
+    case "everything":
+      break;
+  }
   switch (tab) {
     case "to-do":
       return "Nothing left to translate in this file.";
