@@ -531,3 +531,63 @@ fn a_saved_translation_awaiting_review_is_unfinished_in_a_pivot_file() {
         "{written}"
     );
 }
+
+#[test]
+fn gettext_plural_forms_translate_from_msgid_plural_with_their_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let po = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/po/plurals_polish.po");
+    let text = std::fs::read_to_string(po)
+        .unwrap()
+        .replace("Language: pl_PL", "Language: sk_SK")
+        .replace(
+            "msgstr[0] \"%d nowa wiadomość\"\nmsgstr[1] \"%d nowe wiadomości\"\nmsgstr[2] \"%d nowych wiadomości\"",
+            "msgstr[0] \"\"\nmsgstr[1] \"\"\nmsgstr[2] \"\"",
+        );
+    std::fs::write(dir.path().join("sk.po"), text).unwrap();
+    let mut session = Session::open_folder(dir.path()).unwrap();
+    let path = PathBuf::from(&session.catalogs()[0].path);
+    let plan = session.plan(&TranslateScope::default()).unwrap();
+    let (p, id) = plan
+        .iter()
+        .find(|(_, id)| id.0.contains("new message"))
+        .unwrap();
+    let task = session.prepare(p, id, InputText::Auto).unwrap();
+    let inputs: Vec<(&str, Option<u32>)> = task
+        .segments
+        .iter()
+        .map(|s| (s.request.source.as_str(), s.count.as_ref().map(|(n, _)| *n)))
+        .collect();
+    assert_eq!(
+        inputs,
+        [
+            ("1 new message", Some(1)),
+            ("2 new messages", Some(2)),
+            ("0 new messages", Some(0)),
+        ]
+    );
+
+    let backend = ManualBackend::new(|ctx: &PromptContext<'_>| {
+        let n: String = ctx
+            .unit
+            .source
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        ManualResponse::Singular(match n.as_str() {
+            "1" => "1 nová správa".into(),
+            "2" => "2 nové správy".into(),
+            _ => format!("{n} nových správ"),
+        })
+    });
+    let outcome = i18n_harness_session::translate_task(&backend, &task).unwrap();
+    let applied = session.apply(&task, outcome, Promotion::Review).unwrap();
+    assert!(applied.translated, "{:?}", applied.failure);
+    session.save(None).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        written.contains(
+            "msgstr[0] \"%d nová správa\"\nmsgstr[1] \"%d nové správy\"\nmsgstr[2] \"%d nových správ\""
+        ),
+        "{written}"
+    );
+}

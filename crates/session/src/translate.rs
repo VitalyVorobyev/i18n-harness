@@ -382,15 +382,18 @@ impl Session {
         // The text to translate from: the pivot-language text when it is
         // sound, else the original.
         let mut input_icu = unit.source.clone();
+        // gettext keeps the plural original apart; counts other than one
+        // translate from it.
+        let mut plural_input_icu = unit.source_plural.clone();
         let mut input_locale = "en".to_owned();
         if let (InputText::Auto, Some(pivot), Some(existing)) =
             (input, catalog.pivot, catalog.existing.get(id))
             && let Some(text) = sound_pivot_text(catalog, unit, existing, self.project().glossary())
         {
             input_icu = text;
+            plural_input_icu = None;
             input_locale = pivot.id.to_owned();
         }
-        let input_text = native(&input_icu);
 
         let mut base = unit.clone();
         base.target = Target::Singular { text: None };
@@ -408,23 +411,25 @@ impl Session {
         let segments = if let Target::Plural { forms } = &unit.target {
             // One request per form, with a count that selects that form
             // written in place of the count placeholder.
-            let token = native("{count}");
             let samples = plural_samples(&catalog.locale, forms.len());
             samples
                 .into_iter()
                 .map(|n| {
-                    if input_text.contains(&token) {
-                        segment(
-                            input_text.replace(&token, &n.to_string()),
-                            Some((n, token.clone())),
-                        )
-                    } else {
-                        segment(input_text.clone(), None)
+                    let icu = match &plural_input_icu {
+                        Some(plural) if n != 1 => plural,
+                        _ => &input_icu,
+                    };
+                    let text = native(icu);
+                    match count_placeholder(icu).map(|t| native(&t)) {
+                        Some(token) if text.contains(&token) => {
+                            segment(text.replace(&token, &n.to_string()), Some((n, token)))
+                        }
+                        _ => segment(text, None),
                     }
                 })
                 .collect()
         } else {
-            vec![segment(input_text, None)]
+            vec![segment(native(&input_icu), None)]
         };
 
         Ok(TranslationTask {
@@ -590,6 +595,32 @@ impl Session {
             cancelled: false,
         });
         Ok(())
+    }
+}
+
+/// The placeholder that carries a plural message's count, in ICU form:
+/// `{count}` when there is one (Qt `%n`, a named gettext count), else the
+/// message's only placeholder (a bare gettext `%d`). `None` when several
+/// placeholders leave the count ambiguous.
+fn count_placeholder(icu: &str) -> Option<String> {
+    let mut found: Vec<&str> = Vec::new();
+    let mut rest = icu;
+    while let Some(start) = rest.find('{') {
+        let Some(len) = rest[start..].find('}') else {
+            break;
+        };
+        let token = &rest[start..start + len + 1];
+        if !token[1..token.len() - 1].contains([',', '{']) && !found.contains(&token) {
+            found.push(token);
+        }
+        rest = &rest[start + len + 1..];
+    }
+    if found.contains(&"{count}") {
+        return Some("{count}".to_owned());
+    }
+    match found.as_slice() {
+        [only] => Some((*only).to_owned()),
+        _ => None,
     }
 }
 

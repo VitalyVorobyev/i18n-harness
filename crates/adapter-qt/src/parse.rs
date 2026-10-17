@@ -427,6 +427,7 @@ impl ParseState {
         let unit = Unit {
             id: UnitId::from(id_str.clone()),
             source: icu_source,
+            source_plural: None,
             target,
             placeholders,
             plural_arity: numerus.then_some(numerus_originals.len() as u32),

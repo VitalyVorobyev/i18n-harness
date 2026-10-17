@@ -49,8 +49,14 @@ pub(crate) fn run(unit: &Unit, ctx: &GateContext<'_>) -> GateReport {
     arity_check(unit, ctx, &mut findings);
     let parsed_targets = parse_targets(&target_slots, &mut findings);
 
+    let plural_source_msg = unit.source_plural.as_deref().and_then(|s| parse(s).ok());
     if let Some(source) = source_msg.as_ref() {
-        placeholder_check(source, &parsed_targets, &mut findings);
+        placeholder_check(
+            source,
+            plural_source_msg.as_ref(),
+            &parsed_targets,
+            &mut findings,
+        );
     }
 
     empty_when_finished_check(unit, &mut findings);
@@ -155,24 +161,40 @@ fn arity_check(unit: &Unit, ctx: &GateContext<'_>, findings: &mut Vec<Finding>) 
     }
 }
 
-fn placeholder_check(source: &Message, targets: &[ParsedTarget], findings: &mut Vec<Finding>) {
-    let source_multiset = placeholder_multiset(source);
-    let mut source_typed = source.typed.clone();
-    source_typed.sort();
+/// Every target slot must carry the source's placeholders. With a separate
+/// plural original (gettext `msgid_plural`), forms after the first follow
+/// it; the first form may follow either, since a singular such as "One
+/// file" legitimately spells the count out.
+fn placeholder_check(
+    source: &Message,
+    plural_source: Option<&Message>,
+    targets: &[ParsedTarget],
+    findings: &mut Vec<Finding>,
+) {
+    let reference = |msg: &Message| {
+        let mut typed = msg.typed.clone();
+        typed.sort();
+        (placeholder_multiset(msg), typed)
+    };
+    let singular = reference(source);
+    let plural = plural_source.map(reference);
     for t in targets {
         let Some(ref msg) = t.msg else {
             continue;
         };
-        let target_multiset = placeholder_multiset(msg);
-        let mut target_typed = msg.typed.clone();
-        target_typed.sort();
+        let target = reference(msg);
+        let (source_multiset, source_typed) = match &plural {
+            Some(p) if t.slot > 0 || target == *p => p,
+            _ => &singular,
+        };
+        let (target_multiset, target_typed) = &target;
         if source_multiset == target_multiset && source_typed == target_typed {
             continue;
         }
-        let (mut missing, mut extra) = diff_multisets(&source_multiset, &target_multiset);
+        let (mut missing, mut extra) = diff_multisets(source_multiset, target_multiset);
         // A typed argument whose keyword changed (`plural` → `pluriel`) keeps
         // its name; report the typed forms.
-        let (typed_missing, typed_extra) = diff_multisets(&source_typed, &target_typed);
+        let (typed_missing, typed_extra) = diff_multisets(source_typed, target_typed);
         missing.extend(typed_missing);
         extra.extend(typed_extra);
         findings.push(Finding {

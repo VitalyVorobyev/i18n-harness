@@ -255,6 +255,12 @@ pub struct Unit {
     /// Source text, ICU-normalized.
     pub source: String,
 
+    /// The plural original, ICU-normalized, for formats that store one
+    /// separately (gettext `msgid_plural`). `None` when the source text
+    /// covers every count (Qt `%n`, an ICU `plural` selector).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_plural: Option<String>,
+
     /// Target text(s). See [`Target`].
     pub target: Target,
 
@@ -373,6 +379,7 @@ impl Unit {
         Self {
             id: id.into(),
             source: source.into(),
+            source_plural: None,
             target: Target::Singular { text: None },
             placeholders: Vec::new(),
             plural_arity: None,

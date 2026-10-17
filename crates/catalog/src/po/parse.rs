@@ -134,6 +134,12 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
             parse_placeholders(&entry.msgid).map_err(CatalogError::PlaceholderConversion)?;
         let placeholders = synthesize_placeholders(&source_placeholders);
 
+        let source_plural = entry
+            .msgid_plural
+            .as_deref()
+            .map(to_icu)
+            .transpose()
+            .map_err(CatalogError::PlaceholderConversion)?;
         let plural_arity = entry.msgid_plural.as_ref().map(|_| {
             // Source arity for plurals is fixed to 2 in gettext (msgid +
             // msgid_plural); the target locale's arity may differ.
@@ -201,6 +207,7 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
         let unit = Unit {
             id,
             source: source_icu,
+            source_plural,
             target,
             placeholders,
             plural_arity,

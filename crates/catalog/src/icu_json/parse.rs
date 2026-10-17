@@ -154,6 +154,7 @@ pub(super) fn extract(path: &Path) -> Result<Catalog, CatalogError> {
         let unit = Unit {
             id: UnitId::from(leaf.path),
             source: source_icu,
+            source_plural: None,
             target,
             placeholders: Vec::new(),
             plural_arity: None,
