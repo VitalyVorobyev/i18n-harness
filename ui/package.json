@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:web": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
@@ -13,7 +14,7 @@
     "format": "biome format --write",
     "audit": "bun audit --prod",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev -- --no-default-features --features ollama",
     "tauri:build": "tauri build",
     "test": "vitest",
     "test:run": "vitest run",
