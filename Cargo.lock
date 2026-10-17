@@ -1498,8 +1498,10 @@ dependencies = [
  "i18n-harness-locales",
  "i18n-harness-project",
  "i18n-harness-reuse",
+ "i18n-harness-session",
  "serde_json",
  "sha2",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
