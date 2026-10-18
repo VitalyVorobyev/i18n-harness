@@ -7,7 +7,7 @@ import {
   ThemeToggle,
   Tooltip,
 } from "@vitavision/ui";
-import { ChevronDown, FolderClosed, Languages, Save, Settings } from "lucide-react";
+import { ChevronDown, FolderClosed, FolderX, Languages, Save, Settings } from "lucide-react";
 
 import type { ModelChoice } from "../api";
 import { modelLabel, modelNote, plural } from "../lib/format";
@@ -147,9 +147,13 @@ export function Toolbar(props: {
         onClick={props.onSettings}
       />
       <ThemeToggle />
-      <Button variant="ghost" onClick={props.onClose}>
-        Close
-      </Button>
+      <Button
+        variant="ghost"
+        aria-label="Close the folder"
+        title="Close the folder"
+        icon={<FolderX aria-hidden size={16} />}
+        onClick={props.onClose}
+      />
     </div>
   );
 }

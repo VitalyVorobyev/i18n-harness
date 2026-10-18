@@ -1,19 +1,11 @@
 import type { Column } from "@vitavision/ui";
-import {
-  Button,
-  Input,
-  Kbd,
-  SegmentedControl,
-  Select,
-  Skeleton,
-  StatusDot,
-  Table,
-} from "@vitavision/ui";
-import { BookA, CircleAlert, GitCompareArrows, Search, TriangleAlert, X } from "lucide-react";
+import { Kbd, Skeleton, StatusDot, Table } from "@vitavision/ui";
+import { BookA, CircleAlert, GitCompareArrows, TriangleAlert } from "lucide-react";
 import type { Ref } from "react";
 
 import type { CatalogSummary, Show, UnitRow, UnitStatus } from "../api";
-import { STATUS_LABEL, plural } from "../lib/format";
+import { STATUS_LABEL } from "../lib/format";
+import { StringsFilters } from "./StringsFilters";
 
 export type StatusTab = UnitStatus | "all";
 
@@ -42,6 +34,10 @@ export function Strings(props: {
   onTerm: (term: string | null) => void;
   /** The glossary terms some string of the language uses. */
   terms: string[];
+  /** The folder has several files. */
+  multiFile: boolean;
+  /** Drop the search and every filter but the status. */
+  onClear: () => void;
   rows: UnitRow[] | null;
   activeKey: string | null;
   /** `keyboard`: chosen with Enter or Space, so the editor should take focus. */
@@ -50,91 +46,24 @@ export function Strings(props: {
   onDeselect: () => void;
 }) {
   const { catalog, rows, searchRef } = props;
-  const counts = catalog.counts;
-  const tabs = [
-    { value: "to-do", label: `To do ${counts.to_do.toLocaleString()}` },
-    { value: "check", label: `Check ${counts.check.toLocaleString()}` },
-    { value: "done", label: `Done ${counts.done.toLocaleString()}` },
-    { value: "all", label: `All ${counts.total.toLocaleString()}` },
-  ];
-  const shared = counts.total - counts.only_here;
-  const showOptions: { value: Show; label: string }[] = [
-    { value: "everything", label: "Everything" },
-    { value: "problems", label: `Problems (${counts.errors.toLocaleString()})` },
-    { value: "warnings", label: `Warnings (${counts.warnings.toLocaleString()})` },
-    {
-      value: "inconsistent",
-      label: `Translated differently in other files (${counts.inconsistent.toLocaleString()})`,
-    },
-    { value: "shared", label: `Also in other files (${shared.toLocaleString()})` },
-    { value: "glossary", label: `Use a glossary term (${counts.glossary.toLocaleString()})` },
-    {
-      value: "glossary-broken",
-      label: `Do not follow the glossary (${counts.glossary_broken.toLocaleString()})`,
-    },
-  ];
-  const termOptions = [
-    { value: "", label: "Any term" },
-    ...props.terms.map((t) => ({ value: t, label: t })),
-  ];
-  const glossaryShown = props.show === "glossary" || props.show === "glossary-broken";
-  const filtered = props.search.trim() !== "" || props.show !== "everything" || props.term !== null;
-
   return (
     <section aria-label="Strings" className="flex h-full min-h-0 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-        <SegmentedControl
-          aria-label="Show strings"
-          value={props.tab}
-          options={tabs}
-          onValueChange={(v) => props.onTab(v as StatusTab)}
-          size="sm"
-        />
-        <div className="relative min-w-48 flex-1">
-          <Search
-            aria-hidden
-            size={14}
-            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-fg-subtle"
-          />
-          <Input
-            ref={searchRef}
-            aria-label="Search strings"
-            placeholder="Search text, context or id"
-            className="pl-7"
-            value={props.search}
-            onChange={(e) => props.onSearch(e.target.value)}
-          />
-        </div>
-        <div className="w-44">
-          <Select
-            aria-label="Which strings"
-            value={props.show}
-            onValueChange={(v) => props.onShow((v || "everything") as Show)}
-            options={showOptions}
-          />
-        </div>
-        {glossaryShown && props.terms.length > 0 && (
-          <div className="w-44">
-            <Select
-              aria-label="Glossary term"
-              value={props.term ?? ""}
-              onValueChange={(v) => props.onTerm(v === "" ? null : v)}
-              options={termOptions}
-            />
-          </div>
-        )}
-        {!glossaryShown && props.term !== null && (
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<X aria-hidden size={14} />}
-            aria-label={`Stop showing only strings with "${props.term}"`}
-            onClick={() => props.onTerm(null)}
-          >
-            Term: {props.term}
-          </Button>
-        )}
-      </div>
+      <StringsFilters
+        counts={catalog.counts}
+        multiFile={props.multiFile}
+        tab={props.tab}
+        onTab={props.onTab}
+        search={props.search}
+        onSearch={props.onSearch}
+        searchRef={searchRef}
+        show={props.show}
+        onShow={props.onShow}
+        term={props.term}
+        onTerm={props.onTerm}
+        terms={props.terms}
+        matching={rows?.length ?? null}
+        onClear={props.onClear}
+      />
 
       <div
         className="min-h-0 flex-1"
@@ -172,9 +101,6 @@ export function Strings(props: {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-3 py-1.5 text-xs text-fg-subtle">
-        {filtered && rows !== null && (
-          <span>{plural(rows.length, "string matches", "strings match")}</span>
-        )}
         <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
             <Kbd>↑</Kbd>
@@ -189,9 +115,6 @@ export function Strings(props: {
           <span>
             <Kbd>Alt</Kbd>+<Kbd>↑</Kbd>
             <Kbd>↓</Kbd> previous / next
-          </span>
-          <span>
-            <Kbd>Ctrl</Kbd>+<Kbd>F</Kbd> search
           </span>
         </span>
       </div>

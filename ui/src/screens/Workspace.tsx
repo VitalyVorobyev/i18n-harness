@@ -647,6 +647,13 @@ export function Workspace(props: { folder: FolderView; onClose: () => void }) {
               term={term}
               onTerm={setTerm}
               terms={usedTerms}
+              multiFile={catalogs.length > 1}
+              onClear={() => {
+                setActive(null);
+                setShow("everything");
+                setTerm(null);
+                setSearch("");
+              }}
               rows={rows}
               activeKey={activeKey}
               onActivate={(row, keyboard) => activate(row, keyboard)}

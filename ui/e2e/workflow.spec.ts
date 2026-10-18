@@ -24,7 +24,7 @@ test("open, translate, confirm and save", async ({ page }) => {
     files.getByRole("heading", { name: "Slovak · from German · Qt Linguist" }),
   ).toBeVisible();
   // The German texts of a pivot catalog are work to do.
-  await expect(page.getByRole("radio", { name: /To do 46/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^To do\s*46$/ })).toBeVisible();
 
   // The model picker lists what the server offers.
   await page.getByRole("combobox", { name: "Translation model" }).click();
@@ -35,10 +35,10 @@ test("open, translate, confirm and save", async ({ page }) => {
   await expect(page.getByRole("status")).toContainText("Finished. 46 translated", {
     timeout: 20_000,
   });
-  await expect(page.getByRole("radio", { name: /Check 46/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^Check\s*46$/ })).toBeVisible();
 
   // Review one string: it was translated from the German text.
-  await page.getByRole("radio", { name: /Check/ }).click();
+  await page.getByRole("tab", { name: /^Check/ }).click();
   await page.getByRole("cell", { name: /Filter Size/ }).click();
   const editor = page.getByRole("complementary", { name: "Translation" });
   await expect(editor.getByRole("textbox")).toHaveValue("SK·Filtergröße");
@@ -46,7 +46,7 @@ test("open, translate, confirm and save", async ({ page }) => {
 
   await editor.getByRole("textbox").fill("Veľkosť filtra");
   await editor.getByRole("button", { name: "Done" }).click();
-  await expect(page.getByRole("radio", { name: /Done 1/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /^Done\s*1$/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
@@ -58,7 +58,7 @@ test("a translation that drops a placeholder is flagged", async ({ page }) => {
   const editor = page.getByRole("complementary", { name: "Translation" });
   await editor.getByRole("textbox").fill("<b>Ignorovať</b> chyby pod mm");
   await editor.getByRole("button", { name: "Keep as draft" }).click();
-  await page.getByRole("radio", { name: /Check/ }).click();
+  await page.getByRole("tab", { name: /^Check/ }).click();
   await page.getByRole("cell", { name: /Ignore<\/b> defects under/ }).click();
   await expect(
     editor.getByText(/Placeholders do not match the original: missing %1/),
@@ -185,9 +185,11 @@ test("warnings can be listed and the length check tuned", async ({ page }) => {
     .getByRole("navigation", { name: "Files" })
     .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
     .click();
-  await page.getByRole("radio", { name: /All/ }).click();
-  await page.getByRole("combobox", { name: "Which strings" }).click();
-  await page.getByRole("option", { name: "Warnings (1)" }).click();
+  await page.getByRole("tab", { name: /^All/ }).click();
+  await page
+    .getByRole("group", { name: "Show only" })
+    .getByRole("button", { name: /^Warnings\s*1$/ })
+    .click();
   await expect(page.getByRole("cell", { name: /Fit the image to the window/ })).toBeVisible();
   await expect(page.getByRole("cell", { name: /Zoom in/ })).toHaveCount(0);
 
@@ -207,9 +209,11 @@ test("strings translated differently in another file can be listed", async ({ pa
     .getByRole("navigation", { name: "Files" })
     .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
     .click();
-  await page.getByRole("radio", { name: /All/ }).click();
-  await page.getByRole("combobox", { name: "Which strings" }).click();
-  await page.getByRole("option", { name: /Translated differently in other files \(1\)/ }).click();
+  await page.getByRole("tab", { name: /^All/ }).click();
+  await page
+    .getByRole("group", { name: "Show only" })
+    .getByRole("button", { name: /^Differs\s*1$/ })
+    .click();
   await expect(page.getByRole("cell", { name: "Priblížiť" })).toBeVisible();
   await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
 });
@@ -221,7 +225,7 @@ test("strings to do are filled from what other files agree on", async ({ page })
   await page.getByRole("menuitem", { name: "Fill from other files (1)" }).click();
   await expect(page.getByText("1 string filled from other files")).toBeVisible();
   // "Filter Size" is done in Viewer_sk_SK.ts, so it is done here too.
-  await page.getByRole("radio", { name: /Done/ }).click();
+  await page.getByRole("tab", { name: /^Done/ }).click();
   await expect(page.getByRole("cell", { name: "Veľkosť filtra" })).toBeVisible();
 });
 
@@ -231,7 +235,7 @@ test("a translation differing between files is resolved from the editor", async 
     .getByRole("navigation", { name: "Files" })
     .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
     .click();
-  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("tab", { name: /^All/ }).click();
   await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
   const editor = page.getByRole("complementary", { name: "Translation" });
   const others = editor.getByRole("region", { name: "Other files" });
@@ -247,10 +251,10 @@ test("a translation differing between files is resolved from the editor", async 
   await others.getByRole("button", { name: "Use this translation in every file" }).click();
   await expect(page.getByText("Used in 1 other file")).toBeVisible();
   await expect(others.getByText("Priblížiť")).toBeVisible();
-  await page.getByRole("combobox", { name: "Which strings" }).click();
+  // Nothing differs any more: the chip is gone.
   await expect(
-    page.getByRole("option", { name: "Translated differently in other files (0)" }),
-  ).toBeVisible();
+    page.getByRole("group", { name: "Show only" }).getByRole("button", { name: /^Differs/ }),
+  ).toHaveCount(0);
 });
 
 test("all files can be listed together", async ({ page }) => {
@@ -259,7 +263,7 @@ test("all files can be listed together", async ({ page }) => {
     .getByRole("navigation", { name: "Files" })
     .getByRole("button", { name: /^All files:/ })
     .click();
-  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("tab", { name: /^All/ }).click();
   await expect(page.getByRole("columnheader", { name: "File" })).toBeVisible();
   // Only the rows in view are drawn; the search brings a later file's string up.
   await page.getByRole("textbox", { name: "Search strings" }).fill("Print");
@@ -275,7 +279,7 @@ test("the file summary shows where a file is and opens the strings behind each c
 }) => {
   await page.getByRole("button", { name: "Open folder…" }).click();
   const files = page.getByRole("navigation", { name: "Files" });
-  await expect(files.getByText("46 strings · 45 unique · 0 translated")).toBeVisible();
+  await expect(files.getByText("46 · 45 · 0")).toBeVisible();
   await files.getByRole("button", { name: /^Viewer_sk_SK\.ts:/ }).click();
   const summary = page.getByRole("complementary", { name: "Summary" });
   await expect(summary.getByText("/demo/translations/Viewer_sk_SK.ts")).toBeVisible();
@@ -296,7 +300,10 @@ test("strings shared between files are compared and resolved across files", asyn
   await page.getByRole("button", { name: "Open folder…" }).click();
   await page.getByRole("radio", { name: "Across files" }).click();
   const across = page.getByRole("region", { name: "Across files" });
-  await expect(across.getByRole("radio", { name: "Translated differently 1" })).toBeChecked();
+  await expect(across.getByRole("tab", { name: /^Translated differently\s*1$/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   await across.getByRole("cell", { name: "Zoom in" }).click();
   const detail = page.getByRole("complementary", { name: "Shared string" });
   await expect(detail.getByText("2 translations in 2 files")).toBeVisible();
@@ -304,10 +311,10 @@ test("strings shared between files are compared and resolved across files", asyn
 
   await detail.getByRole("button", { name: "Use this in every file" }).first().click();
   await expect(page.getByText("Changed in 1 other file")).toBeVisible();
-  await expect(across.getByRole("radio", { name: "Translated differently 0" })).toBeVisible();
+  await expect(across.getByRole("tab", { name: /^Translated differently$/ })).toBeVisible();
 
   // A file's copy opens in the strings view.
-  await across.getByRole("radio", { name: /^All/ }).click();
+  await across.getByRole("tab", { name: /^All/ }).click();
   await across.getByRole("cell", { name: "Filter Size" }).click();
   await detail
     .getByRole("button", { name: /App_sk_SK\.ts/ })
@@ -324,7 +331,9 @@ test("the glossary terms of a string are shown and filter the list", async ({ pa
   const terms = editor.getByRole("region", { name: "Glossary" });
   await expect(terms.getByText("keep unchanged")).toBeVisible();
   await terms.getByRole("button", { name: "ParamsManager" }).click();
-  await expect(page.getByRole("button", { name: /Stop showing only strings with/ })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Remove the filter “ParamsManager”" }),
+  ).toBeVisible();
   await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
   await expect(page.getByRole("cell", { name: "Open ParamsManager" })).toBeVisible();
 });

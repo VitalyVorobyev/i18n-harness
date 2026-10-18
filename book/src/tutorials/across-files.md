@@ -13,9 +13,10 @@ formats reuse a key for different text.
 
 ## See how much the files share
 
-Each file in the file list counts its **unique** strings, the ones that
-occur in no other file: the file's own work. The rest also appear
-elsewhere. **All files** counts the **distinct** strings of the folder.
+The middle number under each file in the file list counts its **unique**
+strings, the ones that occur in no other file: the file's own work. The
+rest also appear elsewhere. For **All files** it counts the **distinct**
+strings of the folder.
 
 ## Compare strings across files
 
@@ -41,12 +42,11 @@ does what the menu entry below does.
 
 ## Filter the strings of a file
 
-The list next to the search has two entries for shared strings:
+Two chips above the list pick shared strings:
 
-- **Also in other files** — every string that occurs in another file too.
-- **Translated differently in other files** — strings whose translations
-  are not the same in every file. An icon at the end of the row marks
-  them.
+- **Shared**: every string that occurs in another file too.
+- **Differs**: strings whose translations are not the same in every
+  file. An icon at the end of the row marks them.
 
 **All files** at the top of the file list shows the strings of every file
 in one list, with a **File** column. Search, the status tabs and the
@@ -65,8 +65,8 @@ the translation can simply be copied — no model needed.
    **Done** if it is done in one of the other files, otherwise **Check**.
 
 Strings that other files translate *differently* are left to do, and the
-message says how many; choose **Translated differently in other files**
-to see them. Save to write the files.
+message says how many; the **Differs** chip, or **Across files**, lists
+them. Save to write the files.
 
 ## Resolve a string translated differently
 

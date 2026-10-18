@@ -5,9 +5,9 @@ import {
   Empty,
   Field,
   Input,
-  SegmentedControl,
   Skeleton,
   Table,
+  Tabs,
   Textarea,
 } from "@vitavision/ui";
 import { ArrowUpRight, Copy, Search } from "lucide-react";
@@ -78,18 +78,19 @@ export function Across(props: {
     );
   }, [shared, props.kind, search]);
 
-  const kinds: { value: SharedKind; label: string }[] = [
-    { value: "differ", label: `Translated differently ${count("differ").toLocaleString()}` },
-    { value: "missing", label: `Missing in some files ${count("missing").toLocaleString()}` },
+  const kinds: { id: SharedKind; label: string; count: number }[] = [
+    { id: "differ", label: "Translated differently", count: count("differ") },
+    { id: "missing", label: "Missing in some files", count: count("missing") },
     ...(props.pivotLanguage
       ? [
           {
-            value: "existing" as const,
-            label: `${props.pivotLanguage} differs ${count("existing").toLocaleString()}`,
+            id: "existing" as const,
+            label: `${props.pivotLanguage} differs`,
+            count: count("existing"),
           },
         ]
       : []),
-    { value: "all", label: `All ${count("all").toLocaleString()}` },
+    { id: "all", label: "All", count: count("all") },
   ];
 
   return (
@@ -115,12 +116,11 @@ export function Across(props: {
         </Button>
       </div>
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-        <SegmentedControl
-          aria-label="Which shared strings"
-          size="sm"
-          value={props.kind}
-          options={kinds}
-          onValueChange={(v) => props.onKind(v as SharedKind)}
+        <Tabs<SharedKind>
+          label="Which shared strings"
+          active={props.kind}
+          onSelect={props.onKind}
+          items={kinds}
         />
         <div className="relative min-w-48 flex-1">
           <Search

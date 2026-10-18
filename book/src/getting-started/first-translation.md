@@ -33,13 +33,13 @@ Linguist* names the target language, the language of any text already in
 the files, and the format (and the folder, when the files live in
 several). Each file is listed by its short name, `AcfSln` for
 `AcfSln_sk_SK.ts`, with a bar showing how far it is: green for done,
-amber for strings to check, grey for the rest still to do. Under the
-name, a line counts the file's strings, how many of them are **unique**
-(they occur in no other file) and how many are translated. A red number
-counts problems and a dot marks unsaved changes; hover a file for its
-full name. **All files** at the top shows every file's strings together;
-its line counts the **distinct** strings, each counted once however many
-files have it.
+amber for strings to check, grey for the rest still to do. The three
+numbers under the name are the file's strings, its **unique** strings
+(they occur in no other file) and its translated strings; hover them for
+the legend. A red number counts problems and a dot marks unsaved
+changes. **All files** at the top shows every file's strings together;
+its middle number counts the **distinct** strings, each counted once
+however many files have it.
 
 ![Workspace](../images/workspace.png)
 
@@ -54,25 +54,28 @@ what they contain. Add `.i18n-harness/` to your `.gitignore`; keep
 The middle of the window lists the strings of the selected file:
 
 - The tabs **To do**, **Check**, **Done** and **All** filter by status.
-  The numbers are counts.
+  The numbers are counts; a tab with nothing in it shows none.
   - **To do** — not translated yet.
   - **Check** — has a translation nobody has confirmed: a model
     suggestion or a draft you kept.
   - **Done** — confirmed.
 - **Search** finds text in the original, the translation, the context or
-  the string's id.
-- The list next to the search narrows it further, with counts:
-  - **Everything**;
+  the string's id. <kbd>Esc</kbd> in the field clears it.
+- The chips under them narrow the list, each with its count. A chip
+  appears only when there is something to show; click it again to turn it
+  off, or click **Clear filters**. Each chip has the icon that marks such
+  strings in the list:
   - **Problems**: translations that would break the application
     (see step 5);
   - **Warnings**: translations worth a second look, for example ones much
     longer than the original;
-  - **Translated differently in other files**: the same string has another
-    translation in another file of the folder;
-  - **Also in other files**: strings that occur in more than one file;
-  - **Use a glossary term** and **Do not follow the glossary**; with
-    either, a second list narrows them to one term (see
-    [Use a glossary](../tutorials/glossary.md)).
+  - **Glossary breaks**: translations that do not follow a glossary term;
+  - **Differs**: the same string has another translation in another file
+    of the folder;
+  - **Glossary**: strings whose original contains a glossary term; with
+    this or **Glossary breaks** on, a list narrows them to one term (see
+    [Use a glossary](../tutorials/glossary.md));
+  - **Shared**: strings that occur in more than one file.
 
 The columns are **Original** (the source text; hover it to see its
 context) and the target language. For files that arrived filled with

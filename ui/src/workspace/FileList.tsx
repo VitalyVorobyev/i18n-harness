@@ -56,13 +56,14 @@ function progressText(counts: StatusCounts): string {
   return counts.errors > 0 ? `${text}; ${plural(counts.errors, "problem", "problems")}` : text;
 }
 
-/** "1,079 strings · 960 unique · 1,060 translated" under a file's name. */
-function statsLine(counts: StatusCounts, distinct: number | null): string {
-  const parts = [plural(counts.total, "string", "strings")];
-  if (distinct !== null) parts.push(`${distinct.toLocaleString()} distinct`);
-  else parts.push(`${counts.only_here.toLocaleString()} unique`);
-  parts.push(`${(counts.total - counts.to_do).toLocaleString()} translated`);
-  return parts.join(" · ");
+/**
+ * "1,079 · 960 · 1,060" under a file's name: strings, unique (or, for
+ * all files, distinct) strings, translated strings. The tooltip names them.
+ */
+function statsLine(counts: StatusCounts, unique: number | null): string {
+  return [counts.total, unique, counts.total - counts.to_do]
+    .map((n) => (n === null ? "…" : n.toLocaleString()))
+    .join(" · ");
 }
 
 /**
@@ -87,7 +88,7 @@ export function FileList(props: {
             label="All files"
             title={`All ${props.catalogs.length} files: ${progressText(all.counts)}`}
             stats={statsLine(all.counts, props.distinct)}
-            statsTitle={`${plural(all.counts.total, "string", "strings")} in ${props.catalogs.length} files${props.distinct === null ? "" : `, ${props.distinct.toLocaleString()} of them different`}; ${(all.counts.total - all.counts.to_do).toLocaleString()} translated`}
+            statsTitle={`${plural(all.counts.total, "string", "strings")} in ${props.catalogs.length} files · ${props.distinct === null ? "…" : props.distinct.toLocaleString()} distinct (counting a string in several files once) · ${(all.counts.total - all.counts.to_do).toLocaleString()} translated`}
             summary={all}
             active={props.selected === ALL_FILES}
             onSelect={() => props.onSelect(ALL_FILES)}
@@ -104,8 +105,8 @@ export function FileList(props: {
                 key={c.path}
                 label={shortName(c)}
                 title={`${c.relative_path}: ${progressText(c.counts)}`}
-                stats={statsLine(c.counts, null)}
-                statsTitle={`${plural(c.counts.total, "string", "strings")}; ${c.counts.only_here.toLocaleString()} occur in no other file; ${(c.counts.total - c.counts.to_do).toLocaleString()} translated`}
+                stats={statsLine(c.counts, c.counts.only_here)}
+                statsTitle={`${plural(c.counts.total, "string", "strings")} · ${c.counts.only_here.toLocaleString()} unique (in no other file) · ${(c.counts.total - c.counts.to_do).toLocaleString()} translated`}
                 summary={c}
                 active={c.path === props.selected}
                 onSelect={() => props.onSelect(c.path)}
