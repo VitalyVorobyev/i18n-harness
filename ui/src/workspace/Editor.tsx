@@ -1,5 +1,5 @@
 import { Badge, Button, Callout, Empty, Field, Kbd, Textarea } from "@vitavision/ui";
-import { Check, Copy, Languages, Undo2 } from "lucide-react";
+import { Check, CircleCheck, Copy, Languages, TriangleAlert, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CatalogSummary, SiblingView, UnitView } from "../api";
@@ -18,6 +18,8 @@ export function Editor(props: {
   siblings: SiblingView[] | null;
   /** Copy the saved translation to every other file. */
   onUseEverywhere: () => void;
+  /** List the strings that use a glossary term. */
+  onTerm: (term: string) => void;
   /** Take keyboard focus when shown (the string was chosen from the keyboard). */
   autoFocus: boolean;
   onSave: (forms: string[], done: boolean) => void;
@@ -142,6 +144,50 @@ export function Editor(props: {
               );
             })}
         </section>
+
+        {unit.terms.length > 0 && (
+          <section aria-label="Glossary" className="space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-fg-subtle">Glossary</h3>
+            <ul className="divide-y divide-line rounded-panel border border-line">
+              {unit.terms.map((t) => {
+                const translated = unit.target.some((x) => x !== "");
+                return (
+                  <li key={t.term} className="flex items-center gap-2 px-2.5 py-1.5 text-sm">
+                    <button
+                      type="button"
+                      className="truncate font-medium hover:underline"
+                      title={`Show every string with "${t.term}"`}
+                      onClick={() => props.onTerm(t.term)}
+                    >
+                      {t.term}
+                    </button>
+                    <span className="min-w-0 flex-1 truncate text-fg-muted">
+                      {t.keep
+                        ? "keep unchanged"
+                        : t.translation
+                          ? `→ ${t.translation}`
+                          : `no ${props.catalog.language} translation in the glossary`}
+                    </span>
+                    {translated &&
+                      (t.broken ? (
+                        <span className="flex shrink-0 items-center gap-1 text-warn">
+                          <TriangleAlert aria-hidden size={14} />
+                          Not followed
+                        </span>
+                      ) : (
+                        (t.keep || t.translation) && (
+                          <span className="flex shrink-0 items-center gap-1 text-normal">
+                            <CircleCheck aria-hidden size={14} />
+                            Followed
+                          </span>
+                        )
+                      ))}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
         {props.siblings && props.siblings.length > 0 && (
           <section aria-label="Other files" className="space-y-2">

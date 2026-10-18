@@ -13,9 +13,33 @@ formats reuse a key for different text.
 
 ## See how much the files share
 
-Under the list of strings, the app counts the strings of the selected
-file that occur **only in this file**. Those are the file's own work;
-the rest also appear elsewhere.
+Each file in the file list counts its **unique** strings, the ones that
+occur in no other file: the file's own work. The rest also appear
+elsewhere. **All files** counts the **distinct** strings of the folder.
+
+## Compare strings across files
+
+**Across files** in the toolbar lists every string that occurs in more
+than one file, with how many files have it and how they translate it:
+
+![Strings across files](../images/across-files.png)
+
+- **Translated differently**: the files have more than one translation.
+- **Missing in some files**: translated the same way where it is
+  translated, still to do elsewhere.
+- **German differs** (named after the language, for files that arrived
+  filled with another language): the existing text differs between the
+  files, a sign that the earlier translation was not consistent either.
+- **All**.
+
+Click a string to see each version of its translation with the files
+that use it and their status. **Use this in every file** gives every file
+that version, with its status. **Or one new translation for every file**
+writes a new text to all of them, marked done. Click a file name to open
+the string in that file. **Fill N strings from other files** at the top
+does what the menu entry below does.
+
+## Filter the strings of a file
 
 The list next to the search has two entries for shared strings:
 
@@ -46,8 +70,9 @@ to see them. Save to write the files.
 
 ## Resolve a string translated differently
 
-Click the string. The editor shows an **Other files** section with each
-file's translation and status:
+Use **Across files** (above), or click the string in the strings view.
+The editor shows an **Other files** section with each file's translation
+and status:
 
 ![The same string in other files](../images/other-files.png)
 

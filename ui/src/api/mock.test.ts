@@ -4,7 +4,7 @@ import type { TranslationEvent } from "./types";
 import { createMockApi } from "./mock";
 
 const QT = "/demo/translations/App_sk_SK.ts";
-const filter = { statuses: [], show: "everything" as const, search: null };
+const filter = { statuses: [], show: "everything" as const, term: null, search: null };
 
 // The mock stands in for the session in dev mode and e2e, so it must follow
 // the same rules the UI relies on.

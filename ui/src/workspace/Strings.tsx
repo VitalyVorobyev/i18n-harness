@@ -1,6 +1,15 @@
 import type { Column } from "@vitavision/ui";
-import { Input, Kbd, SegmentedControl, Select, Skeleton, StatusDot, Table } from "@vitavision/ui";
-import { CircleAlert, GitCompareArrows, Search, TriangleAlert } from "lucide-react";
+import {
+  Button,
+  Input,
+  Kbd,
+  SegmentedControl,
+  Select,
+  Skeleton,
+  StatusDot,
+  Table,
+} from "@vitavision/ui";
+import { BookA, CircleAlert, GitCompareArrows, Search, TriangleAlert, X } from "lucide-react";
 import type { Ref } from "react";
 
 import type { CatalogSummary, Show, UnitRow, UnitStatus } from "../api";
@@ -28,10 +37,17 @@ export function Strings(props: {
   searchRef: Ref<HTMLInputElement>;
   show: Show;
   onShow: (show: Show) => void;
+  /** Only strings using this glossary term. */
+  term: string | null;
+  onTerm: (term: string | null) => void;
+  /** The glossary terms some string of the language uses. */
+  terms: string[];
   rows: UnitRow[] | null;
   activeKey: string | null;
   /** `keyboard`: chosen with Enter or Space, so the editor should take focus. */
   onActivate: (row: UnitRow, keyboard: boolean) => void;
+  /** Esc in the list: back to the file summary. */
+  onDeselect: () => void;
 }) {
   const { catalog, rows, searchRef } = props;
   const counts = catalog.counts;
@@ -51,7 +67,18 @@ export function Strings(props: {
       label: `Translated differently in other files (${counts.inconsistent.toLocaleString()})`,
     },
     { value: "shared", label: `Also in other files (${shared.toLocaleString()})` },
+    { value: "glossary", label: `Use a glossary term (${counts.glossary.toLocaleString()})` },
+    {
+      value: "glossary-broken",
+      label: `Do not follow the glossary (${counts.glossary_broken.toLocaleString()})`,
+    },
   ];
+  const termOptions = [
+    { value: "", label: "Any term" },
+    ...props.terms.map((t) => ({ value: t, label: t })),
+  ];
+  const glossaryShown = props.show === "glossary" || props.show === "glossary-broken";
+  const filtered = props.search.trim() !== "" || props.show !== "everything" || props.term !== null;
 
   return (
     <section aria-label="Strings" className="flex h-full min-h-0 flex-col">
@@ -86,9 +113,38 @@ export function Strings(props: {
             options={showOptions}
           />
         </div>
+        {glossaryShown && props.terms.length > 0 && (
+          <div className="w-44">
+            <Select
+              aria-label="Glossary term"
+              value={props.term ?? ""}
+              onValueChange={(v) => props.onTerm(v === "" ? null : v)}
+              options={termOptions}
+            />
+          </div>
+        )}
+        {!glossaryShown && props.term !== null && (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<X aria-hidden size={14} />}
+            aria-label={`Stop showing only strings with "${props.term}"`}
+            onClick={() => props.onTerm(null)}
+          >
+            Term: {props.term}
+          </Button>
+        )}
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div
+        className="min-h-0 flex-1"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && props.activeKey !== null) {
+            e.preventDefault();
+            props.onDeselect();
+          }
+        }}
+      >
         {rows === null ? (
           <div className="space-y-2 p-3">
             <Skeleton className="h-8" />
@@ -110,17 +166,15 @@ export function Strings(props: {
               props.onActivate(row, "key" in event && (event.key === "Enter" || event.key === " "))
             }
             isRowActive={(row) => rowKey(row) === props.activeKey}
-            empty={emptyMessage(props.tab, props.search, props.show, props.allFiles)}
+            empty={emptyMessage(props.tab, props.search, props.show, props.term, props.allFiles)}
           />
         )}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-3 py-1.5 text-xs text-fg-subtle">
-        <span>
-          {rows === null ? "…" : plural(rows.length, "string", "strings")} shown ·{" "}
-          {plural(counts.only_here, "string", "strings")}{" "}
-          {props.allFiles ? "in only one file" : "only in this file"}
-        </span>
+        {filtered && rows !== null && (
+          <span>{plural(rows.length, "string matches", "strings match")}</span>
+        )}
         <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
             <Kbd>↑</Kbd>
@@ -130,7 +184,7 @@ export function Strings(props: {
             <Kbd>Enter</Kbd> edit
           </span>
           <span>
-            <Kbd>Esc</Kbd> list
+            <Kbd>Esc</Kbd> back
           </span>
           <span>
             <Kbd>Alt</Kbd>+<Kbd>↑</Kbd>
@@ -154,11 +208,13 @@ function columnsFor(catalog: CatalogSummary, allFiles: boolean): Column<UnitRow>
     {
       key: "status",
       header: <span className="sr-only">Status</span>,
-      width: "2rem",
+      width: "2.25rem",
       cell: (r) => (
-        <StatusDot tone={DOT[r.status]}>
-          <span className="sr-only">{STATUS_LABEL[r.status]}</span>
-        </StatusDot>
+        <span className="flex pl-3">
+          <StatusDot tone={DOT[r.status]}>
+            <span className="sr-only">{STATUS_LABEL[r.status]}</span>
+          </StatusDot>
+        </span>
       ),
     },
     ...(allFiles
@@ -193,7 +249,7 @@ function columnsFor(catalog: CatalogSummary, allFiles: boolean): Column<UnitRow>
     {
       key: "markers",
       header: <span className="sr-only">Remarks</span>,
-      width: "4.5rem",
+      width: "5.5rem",
       cell: markers,
     },
   ];
@@ -212,6 +268,21 @@ function markers(r: UnitRow) {
         <span title="Warning" className="text-warn">
           <TriangleAlert aria-hidden size={14} />
           <span className="sr-only">Warning</span>
+        </span>
+      )}
+      {r.terms > 0 && (
+        <span
+          title={
+            r.glossary_broken
+              ? "Does not follow the glossary"
+              : `Uses ${r.terms === 1 ? "a glossary term" : `${r.terms} glossary terms`}`
+          }
+          className={r.glossary_broken ? "text-warn" : "text-fg-subtle"}
+        >
+          <BookA aria-hidden size={14} />
+          <span className="sr-only">
+            {r.glossary_broken ? "Does not follow the glossary" : "Uses a glossary term"}
+          </span>
         </span>
       )}
       {r.inconsistent && (
@@ -238,9 +309,20 @@ function Text(props: { text: string; title?: string; muted?: boolean; placeholde
   );
 }
 
-function emptyMessage(tab: StatusTab, search: string, show: Show, allFiles: boolean): string {
+function emptyMessage(
+  tab: StatusTab,
+  search: string,
+  show: Show,
+  term: string | null,
+  allFiles: boolean,
+): string {
   const here = allFiles ? "in any file" : "in this file";
   if (search.trim() !== "") return "No string matches the search.";
+  if (term !== null) {
+    return show === "glossary-broken"
+      ? `Every translation ${here} follows "${term}".`
+      : `No string ${here} uses "${term}".`;
+  }
   switch (show) {
     case "problems":
       return `No problems ${here}.`;
@@ -252,6 +334,10 @@ function emptyMessage(tab: StatusTab, search: string, show: Show, allFiles: bool
       return allFiles
         ? "No string occurs in more than one file."
         : "No string of this file occurs in another file.";
+    case "glossary":
+      return `No string ${here} uses a glossary term.`;
+    case "glossary-broken":
+      return `Every translation ${here} follows the glossary.`;
     case "everything":
       break;
   }

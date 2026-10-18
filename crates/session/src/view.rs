@@ -64,6 +64,10 @@ pub struct StatusCounts {
     /// Strings whose id and original occur in no other file of the same
     /// language.
     pub only_here: usize,
+    /// Strings whose original contains a glossary term.
+    pub glossary: usize,
+    /// Translations that do not follow a glossary term in their original.
+    pub glossary_broken: usize,
 }
 
 /// One open catalog file.
@@ -124,6 +128,8 @@ pub struct UnitView {
     pub state: UnitState,
     /// Problems with the current translation.
     pub issues: Vec<Issue>,
+    /// The glossary terms in the original, in glossary order.
+    pub terms: Vec<TermHit>,
     /// Context and comments recorded in the file.
     pub context: UnitContext,
     /// False for strings the application no longer uses.
@@ -145,6 +151,23 @@ pub enum Show {
     Inconsistent,
     /// Strings that also occur in another file of the same language.
     Shared,
+    /// Strings whose original contains a glossary term.
+    Glossary,
+    /// Translations that do not follow a glossary term in their original.
+    GlossaryBroken,
+}
+
+/// A glossary term found in a string's original.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermHit {
+    /// The term as the glossary has it.
+    pub term: String,
+    /// The term stays unchanged in a translation.
+    pub keep: bool,
+    /// The translation the glossary requires for this string's language.
+    pub translation: Option<String>,
+    /// The current translation does not follow the term.
+    pub broken: bool,
 }
 
 /// Which strings to list.
@@ -156,6 +179,9 @@ pub struct UnitFilter {
     /// Only strings of this kind.
     #[serde(default)]
     pub show: Show,
+    /// Only strings whose original contains this glossary term.
+    #[serde(default)]
+    pub term: Option<String>,
     /// Case-insensitive text search over source, existing text, translation,
     /// context and id.
     #[serde(default)]
@@ -190,6 +216,10 @@ pub struct UnitRow {
     pub shared: bool,
     /// Another file of the same language translates it differently.
     pub inconsistent: bool,
+    /// Glossary terms in the original.
+    pub terms: usize,
+    /// The translation does not follow a glossary term.
+    pub glossary_broken: bool,
 }
 
 /// The same string in another file of the same language.
@@ -202,8 +232,33 @@ pub struct SiblingView {
     /// Its translation there, one entry per form, in the placeholder syntax
     /// of the file asked about (empty: none).
     pub target: Vec<String>,
+    /// The text the file held when opened, when that text is in another
+    /// language than the translation (the file has a pivot language).
+    pub existing: Option<Vec<String>>,
     /// Its status there.
     pub status: UnitStatus,
+}
+
+/// A string that occurs in several files of the same language, with each
+/// file's translation of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedString {
+    /// Its id, the same in every file.
+    pub id: String,
+    /// Original text, first form.
+    pub source: String,
+    /// Context group (Qt context, gettext msgctxt).
+    pub group: Option<String>,
+    /// Target language name.
+    pub language: String,
+    /// Every file it occurs in, in settings order.
+    pub members: Vec<SiblingView>,
+    /// How many different translations the files have (0: none yet).
+    pub translations: usize,
+    /// Files where it has no translation yet.
+    pub missing: usize,
+    /// The files' pivot-language texts differ from each other.
+    pub existing_differs: bool,
 }
 
 /// What filling strings from other files did (or would do).

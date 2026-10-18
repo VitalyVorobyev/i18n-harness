@@ -90,7 +90,8 @@ test("the glossary view edits terms and saves them as you type", async ({ page }
   // ParamsManager occurs in one string; clicking the count lists it.
   await glossary.getByRole("button", { name: /Show the 1 string using ParamsManager/ }).click();
   await expect(page.getByRole("cell", { name: "Open ParamsManager" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Search strings" })).toHaveValue("ParamsManager");
+  await expect(page.getByRole("combobox", { name: "Glossary term" })).toHaveText(/ParamsManager/);
+  await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
 
   await page.getByRole("radio", { name: "Glossary" }).click();
   await glossary.getByRole("button", { name: "Add term" }).click();
@@ -267,4 +268,63 @@ test("all files can be listed together", async ({ page }) => {
   await expect(
     page.getByRole("complementary", { name: "Translation" }).getByText("Print", { exact: true }),
   ).toBeVisible();
+});
+
+test("the file summary shows where a file is and opens the strings behind each count", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  const files = page.getByRole("navigation", { name: "Files" });
+  await expect(files.getByText("46 strings · 45 unique · 0 translated")).toBeVisible();
+  await files.getByRole("button", { name: /^Viewer_sk_SK\.ts:/ }).click();
+  const summary = page.getByRole("complementary", { name: "Summary" });
+  await expect(summary.getByText("/demo/translations/Viewer_sk_SK.ts")).toBeVisible();
+  await summary.getByRole("button", { name: /Warnings/ }).click();
+  await expect(page.getByRole("cell", { name: /Fit the image to the window/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Zoom in/ })).toHaveCount(0);
+
+  // A string replaces the summary; Esc twice (editor, then list) brings it back.
+  await page.getByRole("cell", { name: /Fit the image to the window/ }).click();
+  await expect(page.getByRole("complementary", { name: "Translation" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("complementary", { name: "Summary" })).toBeVisible();
+});
+
+test("strings shared between files are compared and resolved across files", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("radio", { name: "Across files" }).click();
+  const across = page.getByRole("region", { name: "Across files" });
+  await expect(across.getByRole("radio", { name: "Translated differently 1" })).toBeChecked();
+  await across.getByRole("cell", { name: "Zoom in" }).click();
+  const detail = page.getByRole("complementary", { name: "Shared string" });
+  await expect(detail.getByText("2 translations in 2 files")).toBeVisible();
+  await expect(detail.getByText("Zväčšiť")).toBeVisible();
+
+  await detail.getByRole("button", { name: "Use this in every file" }).first().click();
+  await expect(page.getByText("Changed in 1 other file")).toBeVisible();
+  await expect(across.getByRole("radio", { name: "Translated differently 0" })).toBeVisible();
+
+  // A file's copy opens in the strings view.
+  await across.getByRole("radio", { name: /^All/ }).click();
+  await across.getByRole("cell", { name: "Filter Size" }).click();
+  await detail
+    .getByRole("button", { name: /App_sk_SK\.ts/ })
+    .first()
+    .click();
+  const editor = page.getByRole("complementary", { name: "Translation" });
+  await expect(editor.getByText("Filter Size", { exact: true })).toBeVisible();
+});
+
+test("the glossary terms of a string are shown and filter the list", async ({ page }) => {
+  await page.getByRole("button", { name: "Open folder…" }).click();
+  await page.getByRole("cell", { name: "Open ParamsManager" }).click();
+  const editor = page.getByRole("complementary", { name: "Translation" });
+  const terms = editor.getByRole("region", { name: "Glossary" });
+  await expect(terms.getByText("keep unchanged")).toBeVisible();
+  await terms.getByRole("button", { name: "ParamsManager" }).click();
+  await expect(page.getByRole("button", { name: /Stop showing only strings with/ })).toBeVisible();
+  await expect(page.getByRole("cell", { name: /Filter Size/ })).toHaveCount(0);
+  await expect(page.getByRole("cell", { name: "Open ParamsManager" })).toBeVisible();
 });

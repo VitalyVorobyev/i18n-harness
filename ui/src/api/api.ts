@@ -11,6 +11,7 @@ import type {
   CheckSettings,
   FillReport,
   SaveReport,
+  SharedString,
   SiblingView,
   TermUsage,
   TranslateScope,
@@ -34,6 +35,8 @@ export interface Api {
   getUnit(path: string, id: string): Promise<UnitView>;
   /** The same string in the other files of its language. */
   siblings(path: string, id: string): Promise<SiblingView[]>;
+  /** Every string that occurs in more than one file of its language. */
+  sharedStrings(): Promise<SharedString[]>;
   /** Copy a string's translation to every other file; resolves with how many changed. */
   useEverywhere(path: string, id: string): Promise<number>;
   /** Fill strings to do in `paths` (every file when empty) from what other files agree on. */

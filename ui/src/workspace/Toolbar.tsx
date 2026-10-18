@@ -14,7 +14,7 @@ import { modelLabel, modelNote, plural } from "../lib/format";
 import { folderName } from "../lib/recent";
 
 /** What the main area shows. */
-export type View = "strings" | "glossary";
+export type View = "strings" | "across" | "glossary";
 
 export function Toolbar(props: {
   root: string;
@@ -62,6 +62,7 @@ export function Toolbar(props: {
         onValueChange={(v) => props.onView(v as View)}
         options={[
           { value: "strings", label: "Strings" },
+          { value: "across", label: "Across files" },
           { value: "glossary", label: "Glossary" },
         ]}
       />

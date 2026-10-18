@@ -335,3 +335,83 @@ fn one_translation_can_be_used_everywhere() {
         .unwrap();
     assert!(session.use_everywhere(&paths[2], &new.id).is_err());
 }
+
+#[test]
+fn shared_strings_list_each_string_in_several_files_with_its_translations() {
+    let (_dir, session, _) = open_to_fill();
+    let shared = session.shared_strings();
+    let of = |source: &str| shared.iter().find(|s| s.source == source).unwrap();
+    // A and B agree on Open; C has it to do.
+    let opened = of("Open");
+    assert_eq!(opened.members.len(), 3);
+    assert_eq!((opened.translations, opened.missing), (1, 1));
+    assert_eq!(opened.members[0].target, ["Otvoriť"]);
+    assert_eq!(opened.members[2].target, [""]);
+    assert!(!opened.existing_differs);
+    // A string in one file only is not listed.
+    assert!(shared.iter().all(|s| s.source != "New"));
+
+    let (_dir, session, _) = open();
+    let shared = session.shared_strings();
+    let close = shared.iter().find(|s| s.source == "Close").unwrap();
+    assert_eq!((close.translations, close.missing), (2, 0));
+    // "Open" of C has another context: A and B only.
+    let opened = shared.iter().find(|s| s.source == "Open").unwrap();
+    assert_eq!(opened.members.len(), 2);
+}
+
+#[test]
+fn strings_are_filtered_by_glossary_term_and_by_broken_terms() {
+    use i18n_harness_session::GlossaryEntry;
+    let (_dir, mut session, [a, _, _]) = open();
+    session
+        .set_glossary(
+            "sk_SK",
+            vec![
+                GlossaryEntry {
+                    term: "Open".to_owned(),
+                    keep: false,
+                    translation: Some("Otvoriť".to_owned()),
+                    note: None,
+                },
+                GlossaryEntry {
+                    term: "Close".to_owned(),
+                    keep: true,
+                    translation: None,
+                    note: None,
+                },
+            ],
+        )
+        .unwrap();
+    let term = |t: &str| UnitFilter {
+        term: Some(t.to_owned()),
+        ..UnitFilter::default()
+    };
+    assert_eq!(
+        sources(&session, None, &term("Close")),
+        [
+            ("A_sk_SK.ts".to_owned(), "Close".to_owned()),
+            ("B_sk_SK.ts".to_owned(), "Close".to_owned()),
+        ]
+    );
+    assert_eq!(sources(&session, None, &show(Show::Glossary)).len(), 5);
+    // Both translations of Close change a term that must stay.
+    assert_eq!(
+        sources(&session, None, &show(Show::GlossaryBroken)).len(),
+        2
+    );
+
+    let rows = session.rows(Some(&a), &UnitFilter::default()).unwrap();
+    let close = rows.iter().find(|r| r.source == "Close").unwrap();
+    assert_eq!((close.terms, close.glossary_broken), (1, true));
+    let counts = session.catalog_summary(&a).unwrap().counts;
+    assert_eq!((counts.glossary, counts.glossary_broken), (2, 1));
+
+    let unit = session.unit(&a, &close.id).unwrap();
+    assert_eq!(unit.terms.len(), 1);
+    assert!(unit.terms[0].keep && unit.terms[0].broken);
+    let open = rows.iter().find(|r| r.source == "Open").unwrap();
+    let unit = session.unit(&a, &open.id).unwrap();
+    assert_eq!(unit.terms[0].translation.as_deref(), Some("Otvoriť"));
+    assert!(!unit.terms[0].broken);
+}

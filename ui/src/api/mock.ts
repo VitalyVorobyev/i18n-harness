@@ -9,7 +9,10 @@ import type {
   GlossaryEntry,
   ModelChoice,
   ModelSettings,
+  SharedString,
+  SiblingView,
   StatusCounts,
+  TermHit,
   TranslateScope,
   TranslationEvent,
   UnitFilter,
@@ -57,6 +60,7 @@ function unit(
     status: "to-do",
     state: forms ? "finished" : "untranslated",
     issues: [],
+    terms: [],
     context: { group: context },
     editable: true,
     ...extra,
@@ -288,6 +292,20 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
           );
         });
 
+  const termHits = (u: MockUnit): TermHit[] => {
+    const broken = missingTerms(u);
+    return glossary
+      .filter((g) =>
+        g.keep ? u.source.includes(g.term) : u.source.toLowerCase().includes(g.term.toLowerCase()),
+      )
+      .map((g) => ({
+        term: g.term,
+        keep: g.keep,
+        translation: g.translation,
+        broken: broken.includes(g),
+      }));
+  };
+
   const inScope = (scope: TranslateScope) => {
     const statuses =
       scope.statuses.length > 0
@@ -347,8 +365,13 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       warnings: 0,
       inconsistent: 0,
       only_here: 0,
+      glossary: 0,
+      glossary_broken: 0,
     };
     for (const u of c.units) {
+      const hits = termHits(u);
+      if (hits.length > 0) counts.glossary += 1;
+      if (hits.some((h) => h.broken)) counts.glossary_broken += 1;
       if (u.status === "to-do") counts.to_do += 1;
       if (u.status === "check") counts.check += 1;
       if (u.status === "done") counts.done += 1;
@@ -369,7 +392,19 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
     const { original, ...rest } = u;
     // As the session does: untouched pivot text is input, not a translation.
     const untouched = pivot && original !== null && sameList(u.target, original);
-    return untouched ? { ...rest, target: u.target.map(() => "") } : rest;
+    const terms = termHits(u);
+    return untouched ? { ...rest, terms, target: u.target.map(() => "") } : { ...rest, terms };
+  };
+  const member = (m: { c: MockCatalog; u: MockUnit }): SiblingView => {
+    refresh(m.c);
+    const text = translation(m.c, m.u);
+    return {
+      path: m.c.summary.path,
+      file: m.c.summary.name,
+      target: text === null ? m.u.target.map(() => "") : m.u.target,
+      existing: m.c.summary.pivot !== null ? m.u.original : null,
+      status: m.u.status,
+    };
   };
   const emit = (event: TranslationEvent) => {
     for (const l of listeners) l(event);
@@ -409,13 +444,18 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
           const r = relation(c, u);
           const error = u.issues.some((i) => i.severity === "error");
           const warning = u.issues.some((i) => i.severity === "warning");
-          const shown = {
-            everything: true,
-            problems: error,
-            warnings: warning,
-            inconsistent: r.inconsistent,
-            shared: r.shared,
-          }[filter.show];
+          const glossaryBroken = v.terms.some((t) => t.broken);
+          const shown =
+            {
+              everything: true,
+              problems: error,
+              warnings: warning,
+              inconsistent: r.inconsistent,
+              shared: r.shared,
+              glossary: v.terms.length > 0,
+              "glossary-broken": glossaryBroken,
+            }[filter.show] &&
+            (filter.term === null || v.terms.some((t) => t.term === filter.term));
           const matches =
             needle === "" ||
             [u.source, u.id, ...v.target, ...(u.existing ?? []), u.context.group ?? ""].some((t) =>
@@ -441,6 +481,8 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
               error,
               warning,
               ...r,
+              terms: v.terms.length,
+              glossary_broken: glossaryBroken,
             },
           ];
         });
@@ -450,16 +492,34 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
       const c = find(path);
       const u = c.units.find((x) => x.id === id);
       if (!u) throw new MockError("unknown-unit", id);
-      return siblingsOf(c, u).map((m) => {
-        refresh(m.c);
-        const text = translation(m.c, m.u);
-        return {
-          path: m.c.summary.path,
-          file: m.c.summary.name,
-          target: text === null ? m.u.target.map(() => "") : m.u.target,
-          status: m.u.status,
-        };
-      });
+      return siblingsOf(c, u).map(member);
+    },
+    sharedStrings: async () => {
+      const seen = new Set<string>();
+      const out: SharedString[] = [];
+      for (const c of catalogs ?? []) {
+        for (const u of c.units) {
+          const key = `${c.summary.locale}\u0000${u.id}\u0000${u.source}`;
+          const members = group(c, u);
+          if (members.length < 2 || seen.has(key)) continue;
+          seen.add(key);
+          const texts = members.map((m) => translation(m.c, m.u));
+          const existing = members
+            .filter((m) => m.c.summary.pivot !== null && m.u.original !== null)
+            .map((m) => m.u.original!.join("\u0000"));
+          out.push({
+            id: u.id,
+            source: u.source,
+            group: u.context.group ?? null,
+            language: c.summary.language,
+            members: members.map(member),
+            translations: new Set(texts.filter((t) => t !== null)).size,
+            missing: texts.filter((t) => t === null).length,
+            existing_differs: new Set(existing).size > 1,
+          });
+        }
+      }
+      return out;
     },
     useEverywhere: async (path, id) => {
       const c = find(path);

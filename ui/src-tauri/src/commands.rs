@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use i18n_harness_locales::Locale;
 use i18n_harness_session::{
     CatalogSummary, CheckSettings, FillReport, GlossaryEntry, ModelChoice, ModelSettings,
-    SaveReport, Session, SessionError, SiblingView, TermUsage, TranslateScope, UnitFilter, UnitRow,
-    UnitView,
+    SaveReport, Session, SessionError, SharedString, SiblingView, TermUsage, TranslateScope,
+    UnitFilter, UnitRow, UnitView,
 };
 use serde::Serialize;
 
@@ -114,6 +114,14 @@ pub(crate) fn siblings(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<SiblingView>> {
     state.with(|s| Ok(s.siblings(Path::new(&path), &id)?))
+}
+
+/// Every string that occurs in more than one file of its language.
+#[tauri::command]
+pub(crate) fn shared_strings(
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<SharedString>> {
+    state.with(|s| Ok(s.shared_strings()))
 }
 
 /// Copy a string's translation to the same string in every other file.

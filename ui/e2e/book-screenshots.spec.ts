@@ -120,3 +120,14 @@ test("other files", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Other files" })).toBeVisible();
   await shot(page, "other-files");
 });
+
+test("across files", async ({ page }) => {
+  await openFolder(page);
+  await page.getByRole("radio", { name: "Across files" }).click();
+  const across = page.getByRole("region", { name: "Across files" });
+  await across.getByRole("cell", { name: "Zoom in" }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Shared string" }).getByText("Zväčšiť"),
+  ).toBeVisible();
+  await shot(page, "across-files");
+});

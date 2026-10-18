@@ -187,6 +187,7 @@ fn print_problems(session: &Session) -> Result<()> {
     let filter = UnitFilter {
         statuses: vec![UnitStatus::Check, UnitStatus::Done],
         show: Show::Problems,
+        term: None,
         search: None,
     };
     let mut any = false;
