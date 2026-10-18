@@ -178,7 +178,7 @@ A single dashboard cannot answer both translator and maintainer questions, so th
 
 - **Lab tool — cross-project, cross-backend (maintainer-facing).** Compares `(backend, locale)` quality across projects and against a fixture corpus to answer "is Gemma 4 E2B good enough for German *as a model*?". Ships as a separate binary or CLI + HTML report, **not** inside the translator app. Owned by `roadmap-lab.md` (L1.x).
 
-The **rewrite step** of the prompt-tuning loop lives in neither tool: the local Gemma is the translation engine, not a prompt engineer. The harness exports a tuning bundle (`.i18n-harness/tuning/<ts>/`) that a Claude Code or Copilot skill consumes with a large model; the skill writes a new prompt back into the project and the user re-runs the in-app evaluation to score it.
+*(Retired in October 2026; see `roadmap-product.md` M4.10.)* The **rewrite step** of the prompt-tuning loop lives in neither tool: the local Gemma is the translation engine, not a prompt engineer. The harness exports a tuning bundle (`.i18n-harness/tuning/<ts>/`) that a Claude Code or Copilot skill consumes with a large model; the skill writes a new prompt back into the project and the user re-runs the in-app evaluation to score it.
 
 The gate is the trust boundary. It runs identically for every adapter, locale, and backend.
 

@@ -50,7 +50,10 @@ missing components there rather than writing local look-alikes.
 - Do not introduce XML, ICU, gate, or backend logic in TS/Tauri code.
 - Do not add UI state that should live in the harness's TOML/JSONL
   state files.
-- Do not depend on cloud services for any UI flow.
+- Do not make any UI flow depend on a cloud service: everything works
+  with a local model server and no network. An opt-in cloud server
+  (an OpenAI-compatible endpoint the user configures) is a feature,
+  not a dependency.
 - Do not bundle credentials.
 
 ## Reporting

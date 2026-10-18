@@ -49,7 +49,7 @@ the per-project `.i18n-harness/` state; everything else is split.
 The current shipping surface: the validation gate, all three catalog
 adapters (Qt, PO, ICU-JSON) with byte-stable round-trip, project mode
 (multi-catalog manifests + reference catalogs), the Tauri desktop UI
-for translation and review, quality eval + tuning bundle export, the
+for translation and review, the
 two-phase agent translation CLI plus its skill spec, and deterministic
 reference reuse / remainder split / merge for Qt (CLI + UI; copy expert
 translations by exact unit-id match, carve the leftover, merge it back —
@@ -153,9 +153,6 @@ fixtures get added to the round-trip suite, never carved out.
 - `translate-i18n-batch`: fill `targets.jsonl` for a batch produced by
   `harness export-batch`. Translator-facing; runs in a separate Claude
   Code session pointed at the batch directory.
-- `tune-i18n-prompt`: rewrite a prompt template from a tuning bundle
-  exported by the app. Translator-facing; runs separately from the
-  in-app translation loop.
 
 ## Subagents
 

@@ -36,7 +36,6 @@ pub mod memory;
 pub mod paths;
 pub mod project;
 pub mod review;
-pub mod tuning_bundle;
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
@@ -73,5 +72,3 @@ pub use paths::ProjectPaths;
 pub use project::{CatalogRef, CatalogStatus, Project, ProjectSummary, ReferenceRef};
 
 pub use review::{ReviewEvent, ReviewRecord, ReviewStore};
-
-pub use tuning_bundle::{BundleExample, TuningBundleSummary};

@@ -22,7 +22,7 @@ Fills `targets.jsonl` in an i18n-harness agent translation batch folder.
 
 ## When you do NOT need this skill
 
-- Designing a new prompt template — use `/tune-i18n-prompt` instead.
+- Designing or editing prompt templates.
 - Running the gate, applying targets to the catalog, or writing back
   to the `.ts` / `.po` / `.json` file — that is what `harness
   import-batch` does after you finish; do not attempt it from inside
