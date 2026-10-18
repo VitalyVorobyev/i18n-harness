@@ -19,6 +19,7 @@ export const tauriApi: Api = {
   listRows: (path, filter) => invoke("list_rows", { path, filter }),
   getUnit: (path, id) => invoke("get_unit", { path, id }),
   siblings: (path, id) => invoke("siblings", { path, id }),
+  sharedStrings: () => invoke("shared_strings"),
   useEverywhere: (path, id) => invoke("use_everywhere", { path, id }),
   fillFromOtherFiles: (paths, apply) => invoke("fill_from_other_files", { paths, apply }),
   setTranslation: (path, id, forms, done) => invoke("set_translation", { path, id, forms, done }),

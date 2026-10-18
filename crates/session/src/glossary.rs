@@ -1,16 +1,19 @@
 //! The project glossary as a translator edits it: one list of terms, each
 //! either kept unchanged or with a fixed translation.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use i18n_harness_glossary::{Glossary, Term};
 use i18n_harness_project::{GlossaryConfig, Project};
 use serde::{Deserialize, Serialize};
 
-use i18n_harness_gate::{FindingDetail, term_occurs};
+use i18n_harness_core::Unit;
+use i18n_harness_gate::{FindingDetail, GateReport, term_occurs};
 
 use crate::error::{Result, SessionError};
-use crate::session::{Session, is_active};
+use crate::session::{OpenCatalog, Session, is_active};
+use crate::view::TermHit;
 
 /// What [`Session::import_glossary`] changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -58,42 +61,25 @@ impl Session {
         let Some(glossary) = self.project.glossary() else {
             return Vec::new();
         };
-        let terms: Vec<(&str, bool)> = glossary
+        let mut usage: Vec<TermUsage> = glossary
             .terms()
-            .map(|(source, term)| (source, term.do_not_translate))
-            .collect();
-        let mut usage: Vec<TermUsage> = terms
-            .iter()
             .map(|(term, _)| TermUsage {
-                term: (*term).to_owned(),
+                term: term.to_owned(),
                 strings: 0,
                 breaking: 0,
             })
             .collect();
+        let index: HashMap<String, usize> = usage
+            .iter()
+            .enumerate()
+            .map(|(i, u)| (u.term.clone(), i))
+            .collect();
         for catalog in self.catalogs.iter().filter(|c| c.locale.id == locale) {
             for unit in catalog.doc.units().iter().filter(|u| is_active(u)) {
-                let used: Vec<usize> = terms
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (term, keep))| term_occurs(&unit.source, term, *keep))
-                    .map(|(i, _)| i)
-                    .collect();
-                if used.is_empty() {
-                    continue;
-                }
-                let report = catalog
-                    .is_translation(unit)
-                    .then(|| catalog.gate(unit, Some(glossary)));
-                for i in used {
+                for hit in term_hits(Some(glossary), catalog, unit, None) {
+                    let i = index[&hit.term];
                     usage[i].strings += 1;
-                    let broken = report.as_ref().is_some_and(|r| {
-                        r.findings.iter().any(|f| match &f.detail {
-                            FindingDetail::ProtectedTermMismatch(d) => d.term == usage[i].term,
-                            FindingDetail::TermTranslationMissing(d) => d.term == usage[i].term,
-                            _ => false,
-                        })
-                    });
-                    usage[i].breaking += usize::from(broken);
+                    usage[i].breaking += usize::from(hit.broken);
                 }
             }
         }
@@ -309,6 +295,56 @@ fn parse_table(text: &str) -> std::result::Result<Vec<Vec<String>>, String> {
         rows.remove(0);
     }
     Ok(rows)
+}
+
+/// The glossary terms in `unit`'s original, in glossary order, each marked
+/// broken when the current translation does not follow it. `report` is the
+/// unit's gate report with the glossary, when the caller already has one.
+pub(crate) fn term_hits(
+    glossary: Option<&Glossary>,
+    catalog: &OpenCatalog,
+    unit: &Unit,
+    report: Option<&GateReport>,
+) -> Vec<TermHit> {
+    let Some(glossary) = glossary else {
+        return Vec::new();
+    };
+    let mut hits: Vec<TermHit> = glossary
+        .terms()
+        .filter(|(term, entry)| term_occurs(&unit.source, term, entry.do_not_translate))
+        .map(|(term, entry)| TermHit {
+            term: term.to_owned(),
+            keep: entry.do_not_translate,
+            translation: entry
+                .translations
+                .get(catalog.locale.id)
+                .or_else(|| entry.translations.get(catalog.locale.language))
+                .cloned(),
+            broken: false,
+        })
+        .collect();
+    if hits.is_empty() || !catalog.is_translation(unit) {
+        return hits;
+    }
+    let owned;
+    let report = match report {
+        Some(report) => report,
+        None => {
+            owned = catalog.gate(unit, Some(glossary));
+            &owned
+        }
+    };
+    for finding in &report.findings {
+        let term = match &finding.detail {
+            FindingDetail::ProtectedTermMismatch(d) => &d.term,
+            FindingDetail::TermTranslationMissing(d) => &d.term,
+            _ => continue,
+        };
+        if let Some(hit) = hits.iter_mut().find(|h| &h.term == term) {
+            hit.broken = true;
+        }
+    }
+    hits
 }
 
 #[cfg(test)]

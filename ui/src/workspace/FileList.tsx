@@ -24,6 +24,8 @@ export function allFilesSummary(catalogs: CatalogSummary[]): CatalogSummary | nu
     warnings: 0,
     inconsistent: 0,
     only_here: 0,
+    glossary: 0,
+    glossary_broken: 0,
   };
   for (const c of catalogs) {
     for (const key of Object.keys(counts) as (keyof StatusCounts)[]) {
@@ -55,12 +57,25 @@ function progressText(counts: StatusCounts): string {
 }
 
 /**
+ * "1,079 · 960 · 1,060" under a file's name: strings, unique (or, for
+ * all files, distinct) strings, translated strings. The tooltip names them.
+ */
+function statsLine(counts: StatusCounts, unique: number | null): string {
+  return [counts.total, unique, counts.total - counts.to_do]
+    .map((n) => (n === null ? "…" : n.toLocaleString()))
+    .join(" · ");
+}
+
+/**
  * The catalog files of the open folder, grouped by what they share, each
- * with a bar of how far it is: done, to check, and the rest to do.
+ * with a bar of how far it is (done, to check, and the rest to do) and its
+ * string counts.
  */
 export function FileList(props: {
   catalogs: CatalogSummary[];
   selected: string | null;
+  /** Different strings over every file, once known. */
+  distinct: number | null;
   onSelect: (path: string) => void;
   onSetPivot: (catalog: CatalogSummary) => void;
 }) {
@@ -72,6 +87,8 @@ export function FileList(props: {
           <FileRow
             label="All files"
             title={`All ${props.catalogs.length} files: ${progressText(all.counts)}`}
+            stats={statsLine(all.counts, props.distinct)}
+            statsTitle={`${plural(all.counts.total, "string", "strings")} in ${props.catalogs.length} files · ${props.distinct === null ? "…" : props.distinct.toLocaleString()} distinct (counting a string in several files once) · ${(all.counts.total - all.counts.to_do).toLocaleString()} translated`}
             summary={all}
             active={props.selected === ALL_FILES}
             onSelect={() => props.onSelect(ALL_FILES)}
@@ -88,6 +105,8 @@ export function FileList(props: {
                 key={c.path}
                 label={shortName(c)}
                 title={`${c.relative_path}: ${progressText(c.counts)}`}
+                stats={statsLine(c.counts, c.counts.only_here)}
+                statsTitle={`${plural(c.counts.total, "string", "strings")} · ${c.counts.only_here.toLocaleString()} unique (in no other file) · ${(c.counts.total - c.counts.to_do).toLocaleString()} translated`}
                 summary={c}
                 active={c.path === props.selected}
                 onSelect={() => props.onSelect(c.path)}
@@ -124,6 +143,8 @@ export function FileList(props: {
 function FileRow(props: {
   label: string;
   title: string;
+  stats: string;
+  statsTitle: string;
   summary: CatalogSummary;
   active: boolean;
   onSelect: () => void;
@@ -141,28 +162,36 @@ function FileRow(props: {
       <button
         type="button"
         aria-current={props.active ? "true" : undefined}
-        aria-label={`${props.summary.name}: ${progressText(counts)}${props.summary.dirty ? "; unsaved changes" : ""}`}
+        aria-label={`${props.summary.name}: ${progressText(counts)}; ${props.statsTitle}${props.summary.dirty ? "; unsaved changes" : ""}`}
         title={props.summary.dirty ? `${props.title}; unsaved changes` : props.title}
-        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+        className="flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left"
         onClick={props.onSelect}
       >
-        <span className={cn("min-w-0 flex-1 truncate", props.strong && "font-medium")}>
-          {props.label}
-        </span>
-        {props.summary.dirty && (
-          <span className="size-1.5 shrink-0 rounded-full bg-signal" aria-hidden />
-        )}
-        {counts.errors > 0 && (
-          <span className="shrink-0 font-mono text-xs tabular-nums text-defect" aria-hidden>
-            {counts.errors}
+        <span className="flex w-full min-w-0 items-center gap-2">
+          <span className={cn("min-w-0 flex-1 truncate", props.strong && "font-medium")}>
+            {props.label}
           </span>
-        )}
-        <Breakdown
-          aria-hidden
-          className="w-16 shrink-0"
-          segments={segments(counts)}
-          total={counts.total}
-        />
+          {props.summary.dirty && (
+            <span className="size-1.5 shrink-0 rounded-full bg-signal" aria-hidden />
+          )}
+          {counts.errors > 0 && (
+            <span className="shrink-0 font-mono text-xs tabular-nums text-defect" aria-hidden>
+              {counts.errors}
+            </span>
+          )}
+          <Breakdown
+            aria-hidden
+            className="w-16 shrink-0"
+            segments={segments(counts)}
+            total={counts.total}
+          />
+        </span>
+        <span
+          className="block w-full truncate text-xs tabular-nums text-fg-subtle"
+          title={props.statsTitle}
+        >
+          {props.stats}
+        </span>
       </button>
       {props.menu}
     </li>

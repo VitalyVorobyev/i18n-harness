@@ -32,6 +32,7 @@ pub fn run() {
             commands::list_rows,
             commands::get_unit,
             commands::siblings,
+            commands::shared_strings,
             commands::use_everywhere,
             commands::fill_from_other_files,
             commands::set_translation,

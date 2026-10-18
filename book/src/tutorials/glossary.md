@@ -60,8 +60,17 @@ must stay in English. *Layer* must always be *Ebene* in this product.
 
 For each term the glossary shows **Used in** (how many strings contain
 it) and **Breaks it** (how many translations do not follow it). Click a
-number to see those strings: the strings view opens with the term in the
-search field.
+number to see those strings, over every file: the strings view opens
+with the **Glossary** or **Glossary breaks** chip on, narrowed to that
+term.
+
+In the strings view the same chips are above the list, and while one of
+them is on, a list next to them picks the term. A book icon at the end of a row marks a
+string with a glossary term, amber when its translation does not follow
+it. The editor's **Glossary** section lists the terms of the selected
+string with what the glossary requires (*keep unchanged* or the
+translation) and whether the translation follows it; click a term to list
+every string that uses it.
 
 ## Expected result
 

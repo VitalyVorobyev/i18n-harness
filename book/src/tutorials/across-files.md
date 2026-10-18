@@ -13,16 +13,40 @@ formats reuse a key for different text.
 
 ## See how much the files share
 
-Under the list of strings, the app counts the strings of the selected
-file that occur **only in this file**. Those are the file's own work;
-the rest also appear elsewhere.
+The middle number under each file in the file list counts its **unique**
+strings, the ones that occur in no other file: the file's own work. The
+rest also appear elsewhere. For **All files** it counts the **distinct**
+strings of the folder.
 
-The list next to the search has two entries for shared strings:
+## Compare strings across files
 
-- **Also in other files** — every string that occurs in another file too.
-- **Translated differently in other files** — strings whose translations
-  are not the same in every file. An icon at the end of the row marks
-  them.
+**Across files** in the toolbar lists every string that occurs in more
+than one file, with how many files have it and how they translate it:
+
+![Strings across files](../images/across-files.png)
+
+- **Translated differently**: the files have more than one translation.
+- **Missing in some files**: translated the same way where it is
+  translated, still to do elsewhere.
+- **German differs** (named after the language, for files that arrived
+  filled with another language): the existing text differs between the
+  files, a sign that the earlier translation was not consistent either.
+- **All**.
+
+Click a string to see each version of its translation with the files
+that use it and their status. **Use this in every file** gives every file
+that version, with its status. **Or one new translation for every file**
+writes a new text to all of them, marked done. Click a file name to open
+the string in that file. **Fill N strings from other files** at the top
+does what the menu entry below does.
+
+## Filter the strings of a file
+
+Two chips above the list pick shared strings:
+
+- **Shared**: every string that occurs in another file too.
+- **Differs**: strings whose translations are not the same in every
+  file. An icon at the end of the row marks them.
 
 **All files** at the top of the file list shows the strings of every file
 in one list, with a **File** column. Search, the status tabs and the
@@ -41,13 +65,14 @@ the translation can simply be copied — no model needed.
    **Done** if it is done in one of the other files, otherwise **Check**.
 
 Strings that other files translate *differently* are left to do, and the
-message says how many; choose **Translated differently in other files**
-to see them. Save to write the files.
+message says how many; the **Differs** chip, or **Across files**, lists
+them. Save to write the files.
 
 ## Resolve a string translated differently
 
-Click the string. The editor shows an **Other files** section with each
-file's translation and status:
+Use **Across files** (above), or click the string in the strings view.
+The editor shows an **Other files** section with each file's translation
+and status:
 
 ![The same string in other files](../images/other-files.png)
 

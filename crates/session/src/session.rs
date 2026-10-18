@@ -11,6 +11,7 @@ use i18n_harness_locales::Locale;
 use i18n_harness_project::{CatalogRef, Project, ProjectWarning};
 
 use crate::error::{Result, SessionError};
+use crate::glossary::term_hits;
 use crate::issues::issues;
 use crate::shared::{SharedIndex, SharedInfo};
 use crate::view::{
@@ -230,12 +231,16 @@ impl Session {
                 UnitStatus::Check => counts.check += 1,
                 UnitStatus::Done => counts.done += 1,
             }
-            if c.is_translation(unit) {
-                let found = issues(&c.gate(unit, glossary), unit, c.doc.format());
+            let report = c.is_translation(unit).then(|| c.gate(unit, glossary));
+            if let Some(report) = &report {
+                let found = issues(report, unit, c.doc.format());
                 let has = |s| found.iter().any(|i| i.severity == s);
                 counts.errors += usize::from(has(IssueSeverity::Error));
                 counts.warnings += usize::from(has(IssueSeverity::Warning));
             }
+            let hits = term_hits(glossary, c, unit, report.as_ref());
+            counts.glossary += usize::from(!hits.is_empty());
+            counts.glossary_broken += usize::from(hits.iter().any(|h| h.broken));
             let info = shared.info(&self.catalogs, (slot, index));
             counts.only_here += usize::from(!info.shared);
             counts.inconsistent += usize::from(info.inconsistent);
@@ -304,6 +309,8 @@ impl Session {
                     warning: has(IssueSeverity::Warning),
                     shared: info.shared,
                     inconsistent: info.inconsistent,
+                    terms: view.terms.len(),
+                    glossary_broken: view.terms.iter().any(|t| t.broken),
                     group: view.context.group.clone(),
                     existing: view.existing.and_then(|e| e.into_iter().next()),
                     target: view.target.into_iter().next().unwrap_or_default(),
@@ -344,8 +351,15 @@ impl Session {
                     Show::Warnings => has(IssueSeverity::Warning),
                     Show::Inconsistent => info.inconsistent,
                     Show::Shared => info.shared,
+                    Show::Glossary => !view.terms.is_empty(),
+                    Show::GlossaryBroken => view.terms.iter().any(|t| t.broken),
                 };
                 if !shown {
+                    continue;
+                }
+                if let Some(term) = &filter.term
+                    && !view.terms.iter().any(|t| &t.term == term)
+                {
                     continue;
                 }
                 if let Some(needle) = &needle
@@ -441,6 +455,7 @@ impl Session {
         };
         let report = catalog.gate(unit, self.project.glossary());
         let translation = catalog.is_translation(unit);
+        let terms = term_hits(self.project.glossary(), catalog, unit, Some(&report));
         let issues = if translation {
             issues(&report, unit, format)
         } else {
@@ -462,6 +477,7 @@ impl Session {
             status: status_of(unit, catalog.pivot.is_some()),
             state: unit.state,
             issues,
+            terms,
             context: unit.context.clone(),
             editable: unit.state.is_ui_editable(),
         }

@@ -51,7 +51,7 @@ test("translation in progress and review", async ({ page }) => {
   await expect(page.getByRole("status")).toContainText("Finished. 46 translated", {
     timeout: 20_000,
   });
-  await page.getByRole("radio", { name: /Check/ }).click();
+  await page.getByRole("tab", { name: /^Check/ }).click();
   await page.getByRole("cell", { name: /Filter Size/ }).click();
   await expect(
     page.getByRole("complementary", { name: "Translation" }).getByRole("textbox"),
@@ -65,7 +65,7 @@ test("editor with a problem", async ({ page }) => {
   const editor = page.getByRole("complementary", { name: "Translation" });
   await editor.getByRole("textbox").fill("<b>Ignorovať</b> chyby pod mm");
   await editor.getByRole("button", { name: "Keep as draft" }).click();
-  await page.getByRole("radio", { name: /Check/ }).click();
+  await page.getByRole("tab", { name: /^Check/ }).click();
   await page.getByRole("cell", { name: /Ignore<\/b> defects under/ }).click();
   await expect(
     editor.getByText(/Placeholders do not match the original: missing %1/),
@@ -115,8 +115,19 @@ test("other files", async ({ page }) => {
     .getByRole("navigation", { name: "Files" })
     .getByRole("button", { name: /^Viewer_sk_SK\.ts:/ })
     .click();
-  await page.getByRole("radio", { name: /All/ }).click();
+  await page.getByRole("tab", { name: /^All/ }).click();
   await page.getByRole("cell", { name: "Zoom in", exact: true }).click();
   await expect(page.getByRole("region", { name: "Other files" })).toBeVisible();
   await shot(page, "other-files");
+});
+
+test("across files", async ({ page }) => {
+  await openFolder(page);
+  await page.getByRole("radio", { name: "Across files" }).click();
+  const across = page.getByRole("region", { name: "Across files" });
+  await across.getByRole("cell", { name: "Zoom in" }).click();
+  await expect(
+    page.getByRole("complementary", { name: "Shared string" }).getByText("Zväčšiť"),
+  ).toBeVisible();
+  await shot(page, "across-files");
 });

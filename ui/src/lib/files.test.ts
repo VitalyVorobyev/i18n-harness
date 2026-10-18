@@ -22,6 +22,8 @@ const file = (relative_path: string, extra: Partial<CatalogSummary> = {}): Catal
     warnings: 0,
     inconsistent: 0,
     only_here: 1,
+    glossary: 0,
+    glossary_broken: 0,
   },
   dirty: false,
   ...extra,

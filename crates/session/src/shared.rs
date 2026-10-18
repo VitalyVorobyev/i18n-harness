@@ -51,6 +51,14 @@ impl SharedIndex {
         Self { groups, group_of }
     }
 
+    /// Every string that occurs in more than one place.
+    pub(crate) fn shared_groups(&self) -> impl Iterator<Item = &[At]> {
+        self.groups
+            .iter()
+            .filter(|g| g.len() > 1)
+            .map(Vec::as_slice)
+    }
+
     /// The other places the unit at `at` occurs.
     pub(crate) fn siblings(&self, at: At) -> Vec<At> {
         self.group_of

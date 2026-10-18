@@ -99,31 +99,34 @@ export function SettingsDialog(props: {
             label="Warn when a translation is longer than"
             description="Times the length of the original. Translations often run 20–40% longer than English."
           >
-            <NumberInput
-              className="w-32"
-              value={checks.length_ratio}
-              precision={2}
-              min={0.5}
-              max={10}
-              step={0.1}
-              unit="×"
-              onValueChange={(length_ratio) => setChecks({ ...checks, length_ratio })}
-            />
+            {/* A field with a unit is sized through its container. */}
+            <div className="w-32">
+              <NumberInput
+                value={checks.length_ratio}
+                precision={2}
+                min={0.5}
+                max={10}
+                step={0.1}
+                unit="×"
+                onValueChange={(length_ratio) => setChecks({ ...checks, length_ratio })}
+              />
+            </div>
           </Field>
           <Field
             label="Skip originals shorter than"
             description="Short labels have too little text for a ratio to mean anything."
           >
-            <NumberInput
-              className="w-32"
-              value={checks.length_min_chars}
-              precision={0}
-              min={0}
-              max={1000}
-              step={1}
-              unit="characters"
-              onValueChange={(n) => setChecks({ ...checks, length_min_chars: Math.round(n) })}
-            />
+            <div className="w-48">
+              <NumberInput
+                value={checks.length_min_chars}
+                precision={0}
+                min={0}
+                max={1000}
+                step={1}
+                unit="characters"
+                onValueChange={(n) => setChecks({ ...checks, length_min_chars: Math.round(n) })}
+              />
+            </div>
           </Field>
         </div>
       )}

@@ -22,6 +22,10 @@ export interface StatusCounts {
   inconsistent: number;
   /** Strings that occur in no other file of the same language. */
   only_here: number;
+  /** Strings whose original contains a glossary term. */
+  glossary: number;
+  /** Translations that do not follow a glossary term in their original. */
+  glossary_broken: number;
 }
 
 export interface CatalogSummary {
@@ -59,16 +63,37 @@ export interface UnitView {
   status: UnitStatus;
   state: UnitState;
   issues: Issue[];
+  /** The glossary terms in the original. */
+  terms: TermHit[];
   context: UnitContext;
   editable: boolean;
 }
 
+/** A glossary term found in a string's original. */
+export interface TermHit {
+  term: string;
+  keep: boolean;
+  /** The translation the glossary requires for the string's language. */
+  translation: string | null;
+  /** The current translation does not follow the term. */
+  broken: boolean;
+}
+
 /** Which strings to list beyond their status. */
-export type Show = "everything" | "problems" | "warnings" | "inconsistent" | "shared";
+export type Show =
+  | "everything"
+  | "problems"
+  | "warnings"
+  | "inconsistent"
+  | "shared"
+  | "glossary"
+  | "glossary-broken";
 
 export interface UnitFilter {
   statuses: UnitStatus[];
   show: Show;
+  /** Only strings whose original contains this glossary term. */
+  term: string | null;
   search: string | null;
 }
 
@@ -86,6 +111,9 @@ export interface UnitRow {
   warning: boolean;
   shared: boolean;
   inconsistent: boolean;
+  /** Glossary terms in the original. */
+  terms: number;
+  glossary_broken: boolean;
 }
 
 /** The same string in another file of the same language. */
@@ -94,7 +122,24 @@ export interface SiblingView {
   file: string;
   /** Its translation there, per form (empty: none), in the syntax of the file asked about. */
   target: string[];
+  /** The text the file held when opened, when it is in another language (the file has a pivot). */
+  existing: string[] | null;
   status: UnitStatus;
+}
+
+/** A string that occurs in several files of one language, with each file's translation. */
+export interface SharedString {
+  id: string;
+  source: string;
+  group: string | null;
+  language: string;
+  members: SiblingView[];
+  /** How many different translations the files have (0: none yet). */
+  translations: number;
+  /** Files where it has no translation yet. */
+  missing: number;
+  /** The files' pivot-language texts differ from each other. */
+  existing_differs: boolean;
 }
 
 /** What filling strings from other files did, or would do. */

@@ -5,11 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use i18n_harness_core::{Target, UnitId};
+use i18n_harness_formats::CatalogFormat;
 
 use crate::error::{Result, SessionError};
 use crate::session::{Session, has_complete_text, is_active, status_of};
 use crate::shared::{At, SharedIndex};
-use crate::view::{FillReport, SiblingView, UnitStatus};
+use crate::view::{FillReport, SharedString, SiblingView, UnitStatus};
 
 impl Session {
     /// The same string in the other files of its language.
@@ -20,40 +21,100 @@ impl Session {
     pub fn siblings(&self, path: &Path, id: &str) -> Result<Vec<SiblingView>> {
         let at = self.at(path, id)?;
         let format = self.catalogs[at.0].doc.format();
+        Ok(SharedIndex::build(&self.catalogs)
+            .siblings(at)
+            .into_iter()
+            .map(|other| self.member_view(other, format))
+            .collect())
+    }
+
+    /// Every string that occurs in more than one file of its language, with
+    /// each file's translation, in settings then document order.
+    pub fn shared_strings(&self) -> Vec<SharedString> {
+        SharedIndex::build(&self.catalogs)
+            .shared_groups()
+            .map(|members| {
+                let (slot, index) = members[0];
+                let catalog = &self.catalogs[slot];
+                let unit = &catalog.doc.units()[index];
+                let format = catalog.doc.format();
+                let mut translations: Vec<&Target> = Vec::new();
+                let mut existing: Vec<&Target> = Vec::new();
+                let mut missing = 0;
+                for &(s, i) in members {
+                    let c = &self.catalogs[s];
+                    let u = &c.doc.units()[i];
+                    if c.is_translation(u) {
+                        if !translations.contains(&&u.target) {
+                            translations.push(&u.target);
+                        }
+                    } else {
+                        missing += 1;
+                    }
+                    if c.pivot.is_some()
+                        && let Some(text) = c.existing.get(&u.id)
+                        && !existing.contains(&text)
+                    {
+                        existing.push(text);
+                    }
+                }
+                SharedString {
+                    id: unit.id.0.clone(),
+                    source: format
+                        .placeholders_from_icu(&unit.source)
+                        .unwrap_or_else(|_| unit.source.clone()),
+                    group: unit.context.group.clone(),
+                    language: catalog.locale.name.to_owned(),
+                    members: members
+                        .iter()
+                        .map(|&at| self.member_view(at, self.catalogs[at.0].doc.format()))
+                        .collect(),
+                    translations: translations.len(),
+                    missing,
+                    existing_differs: existing.len() > 1,
+                }
+            })
+            .collect()
+    }
+
+    /// The unit at `at` as seen from a file of `format`: its translation
+    /// there in that format's placeholder syntax.
+    fn member_view(&self, (slot, index): At, format: &dyn CatalogFormat) -> SiblingView {
         let native = |icu: &str| {
             format
                 .placeholders_from_icu(icu)
                 .unwrap_or_else(|_| icu.to_owned())
         };
-        Ok(SharedIndex::build(&self.catalogs)
-            .siblings(at)
-            .into_iter()
-            .map(|(slot, index)| {
-                let catalog = &self.catalogs[slot];
-                let unit = &catalog.doc.units()[index];
-                let translated = catalog.is_translation(unit);
-                let forms: Vec<Option<&str>> = match &unit.target {
-                    Target::Singular { text } => vec![text.as_deref()],
-                    Target::Plural { forms } => forms.iter().map(Option::as_deref).collect(),
-                };
-                SiblingView {
-                    path: catalog.path.display().to_string(),
-                    file: catalog
-                        .path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    target: forms
-                        .into_iter()
-                        .map(|f| match f {
-                            Some(text) if translated => native(text),
-                            _ => String::new(),
-                        })
-                        .collect(),
-                    status: status_of(unit, catalog.pivot.is_some()),
+        let catalog = &self.catalogs[slot];
+        let unit = &catalog.doc.units()[index];
+        let translated = catalog.is_translation(unit);
+        let forms = |target: &Target| -> Vec<Option<String>> {
+            match target {
+                Target::Singular { text } => vec![text.as_deref().map(native)],
+                Target::Plural { forms } => {
+                    forms.iter().map(|f| f.as_deref().map(native)).collect()
                 }
-            })
-            .collect())
+            }
+        };
+        SiblingView {
+            path: catalog.path.display().to_string(),
+            file: catalog
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            target: forms(&unit.target)
+                .into_iter()
+                .map(|f| f.filter(|_| translated).unwrap_or_default())
+                .collect(),
+            existing: catalog.pivot.and(catalog.existing.get(&unit.id)).map(|t| {
+                forms(t)
+                    .into_iter()
+                    .map(Option::unwrap_or_default)
+                    .collect()
+            }),
+            status: status_of(unit, catalog.pivot.is_some()),
+        }
     }
 
     /// Copy the translation of a string to the same string in every other

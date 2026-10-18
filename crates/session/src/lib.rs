@@ -42,8 +42,9 @@ pub use translate::{
     translate_task,
 };
 pub use view::{
-    CatalogSummary, CheckSettings, FillReport, Issue, IssueSeverity, PluralSlot, SaveReport, Show,
-    SiblingView, StatusCounts, UnitFilter, UnitPage, UnitRow, UnitStatus, UnitView,
+    CatalogSummary, CheckSettings, FillReport, Issue, IssueSeverity, PluralSlot, SaveReport,
+    SharedString, Show, SiblingView, StatusCounts, TermHit, UnitFilter, UnitPage, UnitRow,
+    UnitStatus, UnitView,
 };
 
 pub use i18n_harness_backend::discovery::{PromptStyle, ServerKind};
