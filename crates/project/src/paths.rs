@@ -9,9 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-
 use crate::manifest::{PathsConfig, PromptsConfig};
 
 /// All on-disk paths a project resolves. Each accessor returns an absolute
@@ -34,7 +31,6 @@ pub struct ProjectPaths {
     curated: PathBuf,
     review: PathBuf,
     batches: PathBuf,
-    tuning_root: PathBuf,
     evaluations: PathBuf,
     prompts_template_dir: Option<PathBuf>,
 }
@@ -73,7 +69,6 @@ impl ProjectPaths {
         let curated = state_dir.join("curated.toml");
         let review = state_dir.join("review.jsonl");
         let batches = state_dir.join("state").join("batches.jsonl");
-        let tuning_root = state_dir.join("tuning");
         let evaluations = state_dir.join("evaluations.jsonl");
         let prompts_template_dir = prompts_config.map(|pc| root.join(&pc.template_dir));
 
@@ -87,7 +82,6 @@ impl ProjectPaths {
             curated,
             review,
             batches,
-            tuning_root,
             evaluations,
             prompts_template_dir,
         }
@@ -139,40 +133,9 @@ impl ProjectPaths {
         &self.batches
     }
 
-    /// Absolute path to the `<state_dir>/tuning/` root.
-    pub fn tuning_root(&self) -> &Path {
-        &self.tuning_root
-    }
-
     /// Absolute path to `<state_dir>/evaluations.jsonl`.
     pub fn evaluations(&self) -> &Path {
         &self.evaluations
-    }
-
-    /// Generate a fresh timestamped directory for a tuning bundle export.
-    ///
-    /// Format: `<state_dir>/tuning/<YYYY-MM-DDTHH-MM-SS-ffffff>/` where
-    /// colons are replaced with hyphens for cross-platform path safety (as
-    /// established by `docs/roadmap-product.md`). Each call produces a unique
-    /// directory because the timestamp includes microseconds.
-    pub fn new_tuning_bundle_dir(&self) -> PathBuf {
-        // Build the timestamp format: colons replaced with hyphens.
-        // time's format_description does not allow literal colons in the
-        // time portion when targeting path-safe output, so we format using
-        // RFC 3339 and post-process.
-        let now = OffsetDateTime::now_utc();
-        // Format: 2026-05-24T12:34:56.123456Z  (RFC3339 micro-precision)
-        let ts_raw = now.format(&Rfc3339).unwrap_or_else(|_| {
-            // Fallback: use unix timestamp as string (should never fire).
-            format!("{}", now.unix_timestamp())
-        });
-        // Replace colons and the trailing 'Z' / offset to get a safe dir name.
-        // Input looks like: "2026-05-24T12:34:56.123456Z"
-        // Target:            "2026-05-24T12-34-56-123456"
-        // Replace ':' and '.' (fractional-seconds separator) with '-' for
-        // cross-platform path safety; strip the trailing 'Z' / offset first.
-        let ts = ts_raw.trim_end_matches('Z').replace([':', '.'], "-");
-        self.tuning_root.join(ts)
     }
 
     /// Resolve a catalog's manifest-relative path to an absolute path.

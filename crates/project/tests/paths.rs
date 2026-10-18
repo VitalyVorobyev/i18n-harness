@@ -1,5 +1,5 @@
 //! Tests for `ProjectPaths` — path resolution with and without `[paths]
-//! state_dir`, and the uniqueness contract of `new_tuning_bundle_dir`.
+//! state_dir`.
 
 use std::path::{Path, PathBuf};
 
@@ -81,13 +81,6 @@ fn batches_is_under_state_slash_state() {
     );
 }
 
-#[test]
-fn tuning_root_is_under_state_dir() {
-    let root = Path::new("/home/user/my-app");
-    let p = default_paths(root);
-    assert_eq!(p.tuning_root(), root.join(".i18n-harness").join("tuning"));
-}
-
 // ── state_dir override ────────────────────────────────────────────────────────
 
 #[test]
@@ -165,52 +158,4 @@ fn prompt_template_resolves_to_locale_txt() {
     );
     let tmpl = p.prompt_template("de_DE");
     assert_eq!(tmpl, Some(root.join("prompts").join("de_DE.txt")));
-}
-
-// ── new_tuning_bundle_dir() ───────────────────────────────────────────────────
-
-#[test]
-fn new_tuning_bundle_dir_is_under_tuning_root() {
-    let root = Path::new("/home/user/my-app");
-    let p = default_paths(root);
-    let dir = p.new_tuning_bundle_dir();
-    assert!(
-        dir.starts_with(p.tuning_root()),
-        "tuning bundle dir {dir:?} must be under {tuning:?}",
-        tuning = p.tuning_root()
-    );
-}
-
-#[test]
-fn new_tuning_bundle_dir_is_unique_across_calls() {
-    let root = Path::new("/home/user/my-app");
-    let p = default_paths(root);
-    // Two rapid calls must produce different paths (microsecond timestamp).
-    // In practice the OS clock will advance, but we cannot guarantee that in
-    // a tight loop — we produce up to 10 pairs and require at least one to differ.
-    let dirs: Vec<_> = (0..10).map(|_| p.new_tuning_bundle_dir()).collect();
-    let unique: std::collections::HashSet<_> = dirs.iter().collect();
-    // If every call returned the same path, all 10 would be identical.
-    // We only require the set has more than one distinct value OR (pragmatic
-    // fallback) that the path matches the expected format.
-    let first = dirs[0].file_name().and_then(|n| n.to_str()).unwrap_or("");
-    // Format: YYYY-MM-DDTHH-MM-SS-ffffff
-    assert!(
-        first.len() >= 10 && first.contains('-'),
-        "unexpected tuning dir name format: {first}"
-    );
-    // At least one pair differs (or all are fine).
-    let _ = unique; // suppress unused warning if assert above is the only check
-}
-
-#[test]
-fn new_tuning_bundle_dir_has_no_colons() {
-    let root = Path::new("/home/user/my-app");
-    let p = default_paths(root);
-    let dir = p.new_tuning_bundle_dir();
-    let name = dir.to_str().unwrap_or("");
-    assert!(
-        !name.contains(':'),
-        "tuning bundle dir name must not contain colons (cross-platform): {name}"
-    );
 }

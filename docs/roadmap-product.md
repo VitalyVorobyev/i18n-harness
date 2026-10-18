@@ -548,7 +548,11 @@ Deferred to M4.10:
   score).
 - "Estimated runtime before starting" cost hint.
 
-### M4.10 — Tuning-skill contract ✓ shipped
+### M4.10 — Tuning-skill contract ✓ shipped, since retired
+
+Retired in October 2026: the app never got an export or evaluation
+surface for it, so the skill, the bundle export and its README were
+removed. The evaluation store in `crates/project` remains.
 
 Ship the bundle schema as a stable contract and a sibling
 [`skills/tune-i18n-prompt/`](../skills/tune-i18n-prompt/) Claude Code

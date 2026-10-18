@@ -67,7 +67,7 @@ ureq = { version = "3", features = ["json"] }
 # Cryptographic hash (resume-key file-content hash; metrics correlation).
 sha2 = "0.10"
 
-# Date/time formatting (used by ProjectPaths::new_tuning_bundle_dir).
+# Date/time formatting (review and evaluation timestamps).
 time = { version = "0.3", features = ["formatting", "macros"] }
 
 # Observability
