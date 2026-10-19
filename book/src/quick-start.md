@@ -56,7 +56,9 @@ the details.
    lists your model.
 2. Click **Try a sample**. The app copies a small example (an
    application's German, Spanish and Chinese translation files) to the
-   folder *i18n-harness sample* in your Documents and opens it.
+   folder *i18n-harness sample* in your Documents and opens it. (Once
+   you no longer need it, **Don’t show again** under the button hides
+   the offer.)
 3. Pick your model in the toolbar.
 4. Click **Translate N strings**. The first string can take a minute
    while the model loads; the rest follow quickly.

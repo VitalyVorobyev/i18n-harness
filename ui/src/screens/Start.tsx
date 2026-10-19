@@ -6,6 +6,7 @@ import type { AppInfo, ModelChoice } from "../api";
 import { DEFAULT_MODEL_SETTINGS, errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 import { folderName, forgetFolder, recentFolders } from "../lib/recent";
+import { hideSample, sampleHidden } from "../lib/sample";
 
 type ServerState =
   | { kind: "checking" }
@@ -19,6 +20,7 @@ export function Start(props: {
 }) {
   const api = useApi();
   const [recent, setRecent] = useState(recentFolders);
+  const [showSample, setShowSample] = useState(() => !sampleHidden());
   const [server, setServer] = useState<ServerState>({ kind: "checking" });
   const [info, setInfo] = useState<AppInfo | null>(null);
 
@@ -55,7 +57,8 @@ export function Start(props: {
           <h1 className="text-2xl font-semibold">i18n-harness</h1>
           <p className="text-fg-muted">
             Translate your application's text with a language model that runs on this computer. Open
-            the folder that holds the translation files, or try the app on a small sample first.
+            the folder that holds the translation files
+            {showSample ? ", or try the app on a small sample first" : ""}.
           </p>
         </header>
 
@@ -73,18 +76,32 @@ export function Start(props: {
               Qt Linguist (.ts), gettext and Lingui (.po), and message catalog (.json) files are
               found automatically, with their languages.
             </p>
-            <Button
-              variant="secondary"
-              icon={<FlaskConical aria-hidden size={16} />}
-              disabled={props.opening}
-              onClick={props.onSample}
-            >
-              Try a sample
-            </Button>
-            <p className="text-sm text-fg-subtle">
-              Opens a small example app with German, Spanish and Chinese files, copied to the folder
-              “i18n-harness sample” in your Documents.
-            </p>
+            {showSample && (
+              <>
+                <Button
+                  variant="secondary"
+                  icon={<FlaskConical aria-hidden size={16} />}
+                  disabled={props.opening}
+                  onClick={props.onSample}
+                >
+                  Try a sample
+                </Button>
+                <p className="text-sm text-fg-subtle">
+                  Opens a small example app with German, Spanish and Chinese files, copied to the
+                  folder “i18n-harness sample” in your Documents.{" "}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-fg"
+                    onClick={() => {
+                      hideSample();
+                      setShowSample(false);
+                    }}
+                  >
+                    Don’t show again
+                  </button>
+                </p>
+              </>
+            )}
           </div>
         </Panel>
 

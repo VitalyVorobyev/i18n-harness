@@ -70,8 +70,9 @@ The app then appears in your application menu.
 
 ## What you should see
 
-The start screen, with **Open folder…**, **Try a sample**, a box telling
-you whether a model server is running, and a link to this guide:
+The start screen, with **Open folder…**, **Try a sample** (until you
+choose **Don’t show again** under it), a box telling you whether a model
+server is running, and a link to this guide:
 
 ![Start screen](../images/start.png)
 
