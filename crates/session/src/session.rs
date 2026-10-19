@@ -100,18 +100,24 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`SessionError::Project`] when the folder holds no translation files
-    /// or its settings file is invalid; [`SessionError::Catalog`] when a file
-    /// cannot be parsed.
+    /// [`SessionError::NoCatalogs`] when the folder holds no translation
+    /// files, [`SessionError::NoCatalogLanguage`] when the language of none of
+    /// them can be detected, [`SessionError::Project`] when its settings file
+    /// is invalid, or the first failure when no catalog can be opened. A
+    /// catalog that fails while others open is left out with a warning.
     pub fn open_folder(root: &Path) -> Result<Self> {
         let (project, warnings) = if root.join("i18n-harness.toml").is_file() {
             Project::open(root)?
         } else {
             let draft = Project::discover(root)?;
             if draft.catalogs.is_empty() {
-                return Err(SessionError::Io {
-                    context: format!("no translation files found in {}", root.display()),
-                    source: std::io::Error::new(std::io::ErrorKind::NotFound, "no catalogs"),
+                return Err(SessionError::NoCatalogs {
+                    root: root.to_path_buf(),
+                });
+            }
+            if draft.catalogs.iter().all(|c| c.locale.is_none()) {
+                return Err(SessionError::NoCatalogLanguage {
+                    root: root.to_path_buf(),
                 });
             }
             Project::create_from_draft(root, draft)?
@@ -120,15 +126,13 @@ impl Session {
     }
 
     fn from_project(project: Project, warnings: &[ProjectWarning]) -> Result<Self> {
-        let mut catalogs = Vec::new();
-        let refs: Vec<CatalogRef> = project.catalogs().to_vec();
-        for catalog in &refs {
-            catalogs.push(open_catalog(&project, catalog)?);
-        }
+        let (catalogs, skipped) = open_catalogs(&project)?;
+        let mut warnings: Vec<String> = warnings.iter().map(ToString::to_string).collect();
+        warnings.extend(skipped);
         Ok(Self {
             project,
             catalogs,
-            warnings: warnings.iter().map(ToString::to_string).collect(),
+            warnings,
         })
     }
 
@@ -160,12 +164,9 @@ impl Session {
     ///
     /// As [`Self::open_folder`].
     pub fn reload(&mut self) -> Result<()> {
-        let refs: Vec<CatalogRef> = self.project.catalogs().to_vec();
-        let mut catalogs = Vec::new();
-        for catalog in &refs {
-            catalogs.push(open_catalog(&self.project, catalog)?);
-        }
+        let (catalogs, skipped) = open_catalogs(&self.project)?;
         self.catalogs = catalogs;
+        self.warnings = skipped;
         Ok(())
     }
 
@@ -686,6 +687,42 @@ impl Session {
             .ok_or_else(|| SessionError::UnknownCatalog {
                 path: path.to_path_buf(),
             })
+    }
+}
+
+/// Open every catalog of `project`. A catalog that cannot be opened is left
+/// out with a warning, so one bad file does not lock the user out of the
+/// folder; only when none opens is the first failure returned.
+fn open_catalogs(project: &Project) -> Result<(Vec<OpenCatalog>, Vec<String>)> {
+    let mut catalogs = Vec::new();
+    let mut skipped = Vec::new();
+    let mut first_error = None;
+    for catalog in project.catalogs() {
+        match open_catalog(project, catalog) {
+            Ok(open) => catalogs.push(open),
+            Err(e) => {
+                skipped.push(skipped_warning(&catalog.manifest_path, &e));
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    match first_error {
+        Some(e) if catalogs.is_empty() => Err(e),
+        _ => Ok((catalogs, skipped)),
+    }
+}
+
+fn skipped_warning(path: &str, error: &SessionError) -> String {
+    match error {
+        SessionError::UnknownLocale(id) if id.is_empty() => format!(
+            "{path} was not opened: its language could not be detected. \
+             Set `locale` for it in i18n-harness.toml (for example `locale = \"de_DE\"`)."
+        ),
+        SessionError::UnknownLocale(id) => format!(
+            "{path} was not opened: the language `{id}` is not known. \
+             Correct its `locale` in i18n-harness.toml."
+        ),
+        e => format!("{path} was not opened: {e}"),
     }
 }
 

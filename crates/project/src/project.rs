@@ -1075,11 +1075,9 @@ impl Project {
     /// Cached; cleared after each `set_review_status` call. The map key uses
     /// manifest-relative catalog paths.
     ///
-    /// # Panics
-    ///
-    /// Panics if the underlying JSONL file is unreadable (I/O error). This
-    /// matches the `CuratedSet` precedent; callers that need explicit error
-    /// handling can call `self.reviews().read_folded()` directly.
+    /// An unreadable review file yields an empty map rather than an error:
+    /// the catalogs still open, only without their review marks. Callers
+    /// that need the error can call `self.reviews().read_folded()` directly.
     pub fn review_map(&self) -> std::cell::Ref<'_, crate::review::ReviewMap> {
         // Populate cache if empty.
         {
@@ -1092,10 +1090,11 @@ impl Project {
             }
         }
         // Cache is None; fold the file.
-        let (map, _errs) = self
+        let map = self
             .review_store
             .read_folded()
-            .expect("review.jsonl read failed");
+            .map(|(map, _errs)| map)
+            .unwrap_or_default();
         *self.review_map_cache.borrow_mut() = Some(map);
         std::cell::Ref::map(self.review_map_cache.borrow(), |c| {
             c.as_ref().expect("just populated")

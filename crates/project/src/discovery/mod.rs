@@ -189,7 +189,9 @@ impl Project {
     /// Create a new project from a [`DraftManifest`] confirmed by the user.
     ///
     /// 1. Builds a [`crate::manifest::ProjectManifest`] from the draft (skipping
-    ///    `FormatGuess::Unknown` entries).
+    ///    `FormatGuess::Unknown` entries, and entries without a detected
+    ///    locale — each of those yields a
+    ///    [`ProjectWarning::CatalogLanguageUnknown`]).
     /// 2. Serializes it and writes to `<root>/i18n-harness.toml`.
     /// 3. Opens the result via [`Project::open_with_fs`].
     ///
@@ -217,16 +219,22 @@ impl Project {
             BackendBlock, PathsConfig, ProjectManifest, ProjectMeta, SCHEMA_VERSION,
         };
 
-        // Build catalog entries from non-Unknown draft catalogs.
+        // Build catalog entries from non-Unknown draft catalogs. A catalog
+        // whose language was not detected is left out: an entry without a
+        // locale would make every later open of the folder fail.
+        let mut unknown_language: Vec<PathBuf> = Vec::new();
         let catalogs: Vec<CatalogEntry> = draft
             .catalogs
             .iter()
             .filter(|dc| dc.format != FormatGuess::Unknown)
             .filter_map(|dc| {
                 let format = dc.format.format()?.clone();
-                let locale = dc.locale.clone().unwrap_or_default();
                 // Store path as relative to root.
                 let rel = dc.path.strip_prefix(root).unwrap_or(&dc.path).to_path_buf();
+                let Some(locale) = dc.locale.clone() else {
+                    unknown_language.push(rel);
+                    return None;
+                };
                 Some(CatalogEntry {
                     path: rel,
                     format,
@@ -274,6 +282,12 @@ impl Project {
                 source,
             })?;
 
-        Project::open_with_fs(root, fs)
+        let (project, mut warnings) = Project::open_with_fs(root, fs)?;
+        warnings.extend(
+            unknown_language
+                .into_iter()
+                .map(|path| ProjectWarning::CatalogLanguageUnknown { path }),
+        );
+        Ok((project, warnings))
     }
 }

@@ -126,13 +126,13 @@ impl std::fmt::Display for GlossaryWarning {
             Self::UnknownLocale { locale } => {
                 write!(
                     f,
-                    "glossary references locale `{locale}` which is not in the workspace locales table"
+                    "the glossary has translations for `{locale}`, which is not a known language code"
                 )
             }
             Self::TermHasNoTranslations { source } => {
                 write!(
                     f,
-                    "glossary term `{source}` has no translations and is not marked do_not_translate"
+                    "the glossary term `{source}` has no translations and is not marked to keep unchanged"
                 )
             }
         }

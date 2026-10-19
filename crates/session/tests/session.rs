@@ -682,3 +682,72 @@ fn a_dictionary_added_later_finds_and_fixes_the_strings_it_breaks() {
         .unwrap();
     assert!(session.plan(&dictionary).unwrap().is_empty());
 }
+
+#[test]
+fn a_file_of_undetected_language_is_left_out_with_a_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::copy(fixture(), dir.path().join("App_sk_SK.ts")).expect("copy fixture");
+    std::fs::write(
+        dir.path().join("strings.ts"),
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE TS>\n<TS version=\"2.1\">\n\
+         <context><name>Main</name><message><source>Open</source>\
+         <translation type=\"unfinished\"></translation></message></context>\n</TS>\n",
+    )
+    .expect("write catalog");
+    let session = Session::open_folder(dir.path()).expect("open folder");
+    assert_eq!(session.catalogs().len(), 1);
+    assert!(
+        session
+            .warnings()
+            .iter()
+            .any(|w| w.contains("strings.ts") && w.contains("language")),
+        "{:?}",
+        session.warnings()
+    );
+    // The settings file was written without the unknown file, so the folder
+    // keeps opening.
+    let toml = std::fs::read_to_string(dir.path().join("i18n-harness.toml")).unwrap();
+    assert!(!toml.contains("strings.ts"), "{toml}");
+    assert_eq!(Session::open_folder(dir.path()).unwrap().catalogs().len(), 1);
+}
+
+#[test]
+fn an_empty_locale_in_an_existing_settings_file_skips_only_that_file() {
+    let (dir, _session, _) = open();
+    let toml_path = dir.path().join("i18n-harness.toml");
+    std::fs::copy(fixture(), dir.path().join("Other.ts")).expect("copy fixture");
+    let mut toml = std::fs::read_to_string(&toml_path).unwrap();
+    toml.push_str("\n[[catalogs]]\npath = \"Other.ts\"\nformat = \"qt-ts\"\nlocale = \"\"\n");
+    std::fs::write(&toml_path, toml).unwrap();
+    let session = Session::open_folder(dir.path()).expect("open folder");
+    assert_eq!(session.catalogs().len(), 1);
+    assert!(
+        session.warnings().iter().any(|w| w.starts_with("Other.ts was not opened")),
+        "{:?}",
+        session.warnings()
+    );
+}
+
+#[test]
+fn a_folder_without_translation_files_says_so_and_writes_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("notes.txt"), "hello").unwrap();
+    let err = Session::open_folder(dir.path()).expect_err("no catalogs");
+    assert_eq!(err.kind(), "no-catalogs");
+    assert!(!dir.path().join("i18n-harness.toml").exists());
+}
+
+#[test]
+fn a_folder_where_no_language_is_detected_says_so_and_writes_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("strings.ts"),
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE TS>\n<TS version=\"2.1\">\n\
+         <context><name>Main</name><message><source>Open</source>\
+         <translation type=\"unfinished\"></translation></message></context>\n</TS>\n",
+    )
+    .unwrap();
+    let err = Session::open_folder(dir.path()).expect_err("no language");
+    assert_eq!(err.kind(), "no-catalog-language");
+    assert!(!dir.path().join("i18n-harness.toml").exists());
+}
