@@ -42,9 +42,36 @@ pub(crate) fn infer_from_filename(filename: &str) -> Option<String> {
         .map(|m| m.as_str().replace('-', "_"))
 }
 
+/// Attempt to infer a locale id from the name of the folder holding the
+/// file, as in `locales/de/messages.po` or `locales/pt-BR/translation.json`
+/// (the default layouts of Lingui and i18next).
+///
+/// Only a folder name that is a known CLDR locale id counts, so ordinary
+/// folders such as `src` or `app` never pass for a language.
+pub(crate) fn infer_from_dirname(path: &std::path::Path) -> Option<String> {
+    let dir = path.parent()?.file_name()?.to_str()?;
+    let id = dir.replace('-', "_");
+    i18n_harness_locales::Locale::by_id(&id).map(|l| l.id.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn locale_folder() {
+        use std::path::Path;
+        assert_eq!(
+            infer_from_dirname(Path::new("/p/locales/de/messages.po")).as_deref(),
+            Some("de")
+        );
+        assert_eq!(
+            infer_from_dirname(Path::new("/p/locales/pt-BR/translation.json")).as_deref(),
+            Some("pt_BR")
+        );
+        assert_eq!(infer_from_dirname(Path::new("/p/src/messages.po")), None);
+        assert_eq!(infer_from_dirname(Path::new("messages.po")), None);
+    }
 
     #[test]
     fn app_de_ts() {
