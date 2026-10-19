@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
+[Quick start](quick-start.md)
 
 # Getting started
 
@@ -23,6 +24,7 @@
 
 # Reference
 
+- [App settings](reference/app-settings.md)
 - [The settings file](reference/settings-file.md)
 - [The glossary file](reference/glossary-file.md)
 - [Command line: harness](reference/cli.md)

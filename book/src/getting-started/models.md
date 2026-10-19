@@ -19,7 +19,7 @@ installed on a model server. The simplest server is
    An empty table (or a list of models) means Ollama is running.
 
 Ollama listens on `http://localhost:11434`. The app uses that address
-unless you change it (see [Settings → Model server](first-translation.md#settings)).
+unless you change it (see [App settings](../reference/app-settings.md#model-server)).
 
 ## 2. Get a model
 
@@ -44,8 +44,12 @@ Pick a model on [ollama.com/search](https://ollama.com/search) and pull it
 by name, for example:
 
 ```sh
-ollama pull gemma3:12b
+ollama pull gemma3:4b
 ```
+
+Models are large downloads: this one is about 3 GB, and the bigger
+`gemma3:12b` (about 8 GB) translates better if your computer has the
+memory for it (see [Choosing a size](#choosing-a-size)).
 
 ### A GGUF model from Hugging Face
 
@@ -56,9 +60,15 @@ Ollama can pull them directly:
 ollama pull hf.co/<user>/<repository>:<quantization>
 ```
 
-For example `hf.co/someone/SomeModel-GGUF:Q8_0`. The quantization
-(`Q4_K_M`, `Q8_0`, …) is listed on the repository's *Files* page; larger
-numbers mean better quality and more memory.
+For example, a dedicated translation model of about 5 GB that did well
+from English into Slovak in the project's own comparison:
+
+```sh
+ollama pull hf.co/mradermacher/MiLMMT-46-4B-v1.0-GGUF:Q8_0
+```
+
+The quantization (`Q4_K_M`, `Q8_0`, …) is listed on the repository's
+*Files* page; larger numbers mean better quality and more memory.
 
 ### Choosing a size
 

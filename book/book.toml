@@ -1,5 +1,5 @@
 [book]
-title = "i18n-harness"
+title = "i18n-harness user guide"
 description = "Translate application text with a language model that runs on your computer."
 authors = ["i18n-harness contributors"]
 language = "en"

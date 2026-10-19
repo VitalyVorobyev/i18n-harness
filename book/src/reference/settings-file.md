@@ -116,7 +116,7 @@ adds it when a `glossary.toml` exists.
 
 ## `[backend.default]`
 
-The model server, as chosen in **Settings → Model server** and the model
+The model server, as chosen in **Settings → Model server** (see [App settings](app-settings.md#model-server)) and the model
 picker.
 
 | Key | Type | Meaning |
