@@ -26,3 +26,6 @@ ui/coverage/
 
 # Codegraph index (generated, machine-local)
 .codegraph/
+# Local Claude Code state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

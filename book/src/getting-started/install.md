@@ -81,5 +81,6 @@ and edit translations by hand without a model.
 
 ## Build it yourself
 
-To build the app from source instead, see
-[Building and testing](../developers/building.md).
+To build the app from source instead, follow
+[Building and testing](https://github.com/VitalyVorobyev/i18n-harness/blob/main/docs/contributing/building.md)
+in the project's repository.

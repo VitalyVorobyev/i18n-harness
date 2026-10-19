@@ -33,7 +33,7 @@ the shape right matters more than getting it done.
 
 ## Project context
 
-- `docs/initial_design.md` is authoritative for intent; `CLAUDE.md` is
+- `docs/internal/initial_design.md` is authoritative for intent; `CLAUDE.md` is
   the working contract; `docs/implementation_plan.md` is the milestone
   scope.
 - The two invariants (data-driven extension points; deterministic Rust

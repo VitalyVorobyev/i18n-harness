@@ -5,7 +5,7 @@
 //! The draft is **never silently persisted** — the caller (CLI or UI) presents
 //! it for review before calling [`Project::create_from_draft`].
 //!
-//! See `docs/m4.1-project-crate-design.md` §3 for the full heuristic spec.
+//! See `docs/internal/m4.1-project-crate-design.md` §3 for the full heuristic spec.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

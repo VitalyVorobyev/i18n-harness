@@ -83,7 +83,7 @@ Developer note: Shown next to the size field.
 
 For translation models that continue a fixed pattern instead of
 following instructions. They get no notes; glossary terms to keep are
-still enforced by the [checks](checks.md#protected-term).
+still enforced by the [checks](https://vitalyvorobyev.github.io/i18n-harness/reference/checks.html#protected-term).
 
 ```toml
 id = "completion"
@@ -136,4 +136,4 @@ is left untouched. Lines left empty after substitution are removed.
 
 The profiles cannot be replaced from a project folder; changing or
 adding one means changing the program (see
-[Extending the harness](../developers/extending.md#a-prompt-profile)).
+[Extending the harness](extending.md#a-prompt-profile)).

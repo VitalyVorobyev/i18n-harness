@@ -13,8 +13,8 @@ model; it is not part of the desktop app. It works with Ollama.
 
 ## Before you start
 
-- Install the command-line tools (the `i18n-harness-cli-…` archive of a
-  release, or [build them](../developers/building.md)).
+- Install the command-line tools (see
+  [Get the command-line tools](../reference/cli.md#get-the-command-line-tools)).
 - Pull the candidate models into Ollama
   ([Install Ollama and get a model](../getting-started/models.md)).
 - Put the catalogs to test **directly** in one folder. `harness-lab`

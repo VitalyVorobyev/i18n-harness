@@ -35,9 +35,8 @@ handles both:
   instructions.
 
 The app tells them apart from what Ollama reports about each model, not
-from its name, and prompts each kind accordingly (see
-[Prompt profiles](../reference/profiles.md)). In the model picker,
-dedicated translation models carry the note *translation model*.
+from its name, and prompts each kind the way it expects. In the model
+picker, dedicated translation models carry the note *translation model*.
 
 ### A model from the Ollama library
 

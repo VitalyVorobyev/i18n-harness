@@ -10,7 +10,7 @@
   packages, e.g. on Debian/Ubuntu
   `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`.
 - Optionally **Ollama** with a model, to try translation for real.
-- Optionally **mdBook** 0.4 to build this book.
+- Optionally **mdBook** 0.4 to build the user guide.
 
 ## The Rust workspace
 
@@ -73,9 +73,17 @@ cargo app --release       # optimised:   target/release/i18n-harness-ui
 cargo app-run             # build and start (also with --release)
 ```
 
-## The book
+### A blank window
 
-The user guide is this book, in `book/`, built with
+A build without the `custom-protocol` feature loads the interface from the
+Vite development server and shows an empty window when none is running.
+Every default build embeds it; if you build with `--no-default-features`,
+add `--features custom-protocol` back (only `bun tauri:dev` leaves it out,
+on purpose).
+
+## The user guide
+
+The user guide is the book in `book/`, built with
 [mdBook](https://rust-lang.github.io/mdBook/):
 
 ```sh
@@ -107,3 +115,7 @@ request: formatting, Clippy, tests and docs for the workspace; the
 backend feature matrix; type checking, linting, formatting, building and
 the dependency audit of the front end; Vitest; Playwright; and the book
 build. `.github/workflows/book.yml` publishes the book.
+
+The book is for people who use the app and the command-line tools. Keep
+crate names, Rust types and build commands out of it; they belong in
+these contributor pages.

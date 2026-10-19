@@ -65,8 +65,8 @@ model = "your-model-id"
 ## Differences from Ollama
 
 - An OpenAI-compatible server does not say how a model wants to be
-  prompted, so every model gets the chat profile (instructions plus the
-  text; see [Prompt profiles](../reference/profiles.md)). Dedicated
+  prompted, so every model is sent written instructions plus the text,
+  the way chat models expect. Dedicated
   translation models that need their own completion format work best
   through Ollama.
 - The server's list is shown as is; it may include embedding models,

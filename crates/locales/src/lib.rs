@@ -1,6 +1,6 @@
 //! Locale records — languages as **data**, never as `match` arms.
 //!
-//! See `docs/initial_design.md` §4 and `CLAUDE.md` invariant #1.
+//! See `docs/internal/initial_design.md` §4 and `CLAUDE.md` invariant #1.
 //!
 //! # Storage choice
 //!

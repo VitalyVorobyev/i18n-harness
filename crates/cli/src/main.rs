@@ -65,10 +65,8 @@ enum Command {
     /// model, the same way the desktop app does.
     TranslateFolder(folder::TranslateFolderArgs),
 
-    /// Verify the byte-stable round-trip contract on a catalog file:
-    /// extract → apply with zero unit changes must produce byte-identical
-    /// output. Exits non-zero on any diff.
-    #[command(hide = true)]
+    /// Check that a file is written back byte for byte: read it and write it
+    /// with no changes, and compare. Exits non-zero on any difference.
     RoundTrip(RoundTripArgs),
 
     /// Check the translations of a file. Prints each string with a problem or
@@ -2030,7 +2028,7 @@ fn split_remainder(args: SplitRemainderArgs) -> Result<()> {
         .with_context(|| format!("write {}", args.out.display()))?;
 
     println!(
-        "split-remainder: {} → {} ({count} writable-untranslated unit(s))",
+        "split-remainder: {} → {} ({count} string(s) to translate)",
         args.base.display(),
         args.out.display(),
     );

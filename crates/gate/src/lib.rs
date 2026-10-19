@@ -1,7 +1,7 @@
 //! Validation gate: the trust boundary between LLM output and catalog
 //! write-back.
 //!
-//! See `docs/initial_design.md` §8 and `CLAUDE.md` invariant #2. The gate is
+//! See `docs/internal/initial_design.md` §8 and `CLAUDE.md` invariant #2. The gate is
 //! the deterministic Rust component that guarantees a weak model cannot
 //! corrupt catalog structure: every translated unit must pass through the
 //! same rule set before any adapter is allowed to write it back.

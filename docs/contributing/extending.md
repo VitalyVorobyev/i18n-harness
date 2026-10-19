@@ -61,7 +61,7 @@ need no new backend.
 Model discovery is separate: the `ModelProvider` trait in
 `crates/backend/src/discovery.rs` lists a server's models and describes
 one (capabilities, template, context length), from which
-`PromptStyle` — and so the [prompt profile](../reference/profiles.md) — is
+`PromptStyle` — and so the [prompt profile](prompt-profiles.md) — is
 derived.
 
 ## A language
@@ -102,7 +102,7 @@ settings, edit the TOML and run the backend tests
 `PromptStyle` (or another selection rule derived from what the server
 reports — never from the model's name) and an entry in
 `Profile::builtin`. The fields are documented in
-[Prompt profiles](../reference/profiles.md#fields).
+[Prompt profiles](prompt-profiles.md#fields).
 
 To try a profile against a real model on Ollama without the app:
 

@@ -1,6 +1,6 @@
 //! Per-project [`Glossary`] — TOML schema, loader, and validator.
 //!
-//! See `docs/initial_design.md` §10. A glossary is checked into the project
+//! See `docs/internal/initial_design.md` §10. A glossary is checked into the project
 //! root as `glossary.toml`; it captures three things the translation backend
 //! needs at prompt time:
 //!

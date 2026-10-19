@@ -94,15 +94,6 @@ If the file's existing texts are in another language, use **Language of
 the existing text…** instead; see
 [Files pre-filled with another language](../tutorials/pivot.md).
 
-## A blank window after building the app yourself
-
-Older versions of the app opened an empty window when built with a
-plain `cargo build`. Current versions embed the interface in every
-build; update your checkout. If you build with
-`--no-default-features`, add `--features custom-protocol` back (only
-`bun tauri:dev` builds without it, on purpose, to load the interface
-from the development server).
-
 ## The app does not see my API key
 
 The key must be in the environment of the app's process, as

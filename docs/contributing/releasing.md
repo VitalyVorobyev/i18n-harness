@@ -52,7 +52,7 @@ Releases are built by GitHub Actions from a version tag
 - **Windows** builds are unsigned.
 
 For unsigned builds, users follow the steps in
-[Install the app](../getting-started/install.md). Mention in the release
+[Install the app](https://vitalyvorobyev.github.io/i18n-harness/getting-started/install.html). Mention in the release
 notes whether a build is signed.
 
 ## The book

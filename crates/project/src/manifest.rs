@@ -6,7 +6,7 @@
 //! layer* — callers read fields from `ProjectManifest` and write fields
 //! through `Project::set_*` / `Project::add_*`.
 //!
-//! See `docs/m4.1-project-crate-design.md` §1.2 and §2.4 for the
+//! See `docs/internal/m4.1-project-crate-design.md` §1.2 and §2.4 for the
 //! `deny_unknown_fields` strategy: sub-tables use it (typos are the common
 //! failure mode there) but the root manifest does not (so v2-only top-level
 //! tables do not break a v1 binary reading a v2 file).
@@ -80,7 +80,7 @@ pub struct ProjectMeta {
 /// workspace locale record.
 ///
 /// All fields are optional: an absent field means "use the workspace default".
-/// See `docs/m4.1-project-crate-design.md` §4 for the full layering rule.
+/// See `docs/internal/m4.1-project-crate-design.md` §4 for the full layering rule.
 ///
 /// `Eq` is intentionally omitted: `length_warn_ratio` is `f32`, which does
 /// not implement `Eq`. Use `PartialEq` comparisons at callsites.
@@ -241,7 +241,7 @@ pub struct PromptsConfig {
 /// `[paths]` sub-table — optional overrides for state file locations.
 ///
 /// Absent fields fall through to the in-tree defaults
-/// (`<project>/.i18n-harness/<name>`). See `docs/m4.1-project-crate-design.md`
+/// (`<project>/.i18n-harness/<name>`). See `docs/internal/m4.1-project-crate-design.md`
 /// §7 for the full path-resolution policy.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathsConfig {

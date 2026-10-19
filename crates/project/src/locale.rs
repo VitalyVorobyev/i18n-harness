@@ -1,7 +1,7 @@
 //! Resolved locale view — three-layer merge of workspace data, manifest
 //! overrides, and glossary overrides.
 //!
-//! See `docs/m4.1-project-crate-design.md` §1.6 and §4.
+//! See `docs/internal/m4.1-project-crate-design.md` §1.6 and §4.
 
 use i18n_harness_glossary::Glossary;
 use i18n_harness_locales::{Locale, PluralCategory, Register, Script};

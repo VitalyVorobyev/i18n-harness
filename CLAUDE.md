@@ -4,16 +4,16 @@ A local-first, offline-by-default desktop translation harness. The
 default path is a local model server (Ollama, with whatever models the
 user installed — discovered at runtime, never bundled or named in code)
 with no API key and no cloud egress; OpenAI-compatible servers (vLLM,
-LM Studio, cloud LLMs) are an opt-in per-project config (model
-discovery is in, the translation transport is next), and the two-phase
+LM Studio, cloud LLMs) are an opt-in per-project config (discovery
+and translation both work), and the two-phase
 agent CLI (`harness export-batch` /
 `harness import-batch` plus the `translate-i18n-batch` skill) delegates
 to an external Claude Code / Copilot / Codex session on the user's
 machine. Catalogs: Qt `.ts`, gettext PO, Lingui PO/JSON, ICU-JSON. The full design
-lives in [`docs/initial_design.md`](docs/initial_design.md); the
+lives in [`docs/internal/initial_design.md`](docs/internal/initial_design.md); the
 translator-facing milestones in
-[`docs/roadmap-product.md`](docs/roadmap-product.md); the maintainer-facing
-lab work in [`docs/roadmap-lab.md`](docs/roadmap-lab.md). This file is the
+[`docs/internal/roadmap-product.md`](docs/internal/roadmap-product.md); the maintainer-facing
+lab work in [`docs/internal/roadmap-lab.md`](docs/internal/roadmap-lab.md). This file is the
 day-to-day working contract.
 
 ## The two invariants (never violate)
@@ -31,12 +31,12 @@ day-to-day working contract.
 
 The repo runs two roadmaps in parallel, with strictly separate audiences:
 
-- **Product** ([`docs/roadmap-product.md`](docs/roadmap-product.md)) — what a
+- **Product** ([`docs/internal/roadmap-product.md`](docs/internal/roadmap-product.md)) — what a
   translator user does in the Tauri app: open a project, work through
   units across multiple catalogs and locales, accept LLM suggestions,
   triage flagged ones, and feed corrections into a per-project
   prompt-tuning loop.
-- **Lab** ([`docs/roadmap-lab.md`](docs/roadmap-lab.md)) — what the
+- **Lab** ([`docs/internal/roadmap-lab.md`](docs/internal/roadmap-lab.md)) — what the
   maintainer does to evaluate backends and locales empirically across
   projects. Lives in a separate binary / CLI + HTML report; **not**
   shipped inside the translator app.
@@ -56,7 +56,7 @@ translations by exact unit-id match, carve the leftover, merge it back —
 no model). The agent flow is currently a CLI surface; UI integration
 (Settings backend picker + an in-app "Translate via Claude Code"
 affordance) is the next visible step. See
-[`docs/roadmap-product.md`](docs/roadmap-product.md) for the
+[`docs/internal/roadmap-product.md`](docs/internal/roadmap-product.md) for the
 sub-milestone history.
 
 ## Workspace map
@@ -73,7 +73,9 @@ sub-milestone history.
 | `crates/formats` | `FormatRegistry`: every built-in format, ranked sniffing — the only place formats are listed |
 | `crates/project` | Project manifest (multi-catalog + `[[references]]`), path/locale resolution, per-project state |
 | `crates/reuse` | Deterministic reference-reuse / remainder-split / merge over Qt catalogs (no model) |
-| `crates/cli` | `harness` binary; entry point for humans and the Tauri UI |
+| `crates/session` | The translation session shared by the CLI and the Tauri shell (statuses, pivot input, save guard) |
+| `crates/cli` | `harness` binary |
+| `crates/lab` | `harness-lab` binary (model comparison); not part of the app |
 | `ui/` | Tauri 2 + Vite + React + TS desktop shell ([ui/README.md](ui/README.md)) |
 | `ui/src-tauri` | Rust side of the desktop shell — thin wrappers over the library |
 | `xtask` | Maintainer tasks; `cargo run -p xtask -- gen-locales` regenerates the CLDR table |
@@ -114,6 +116,22 @@ CI runs all of the above on push and PR. See `.github/workflows/ci.yml`;
 `.github/workflows/book.yml` publishes the book to GitHub Pages from
 `main`. A user-visible change updates the matching book page (and its
 screenshots) in the same PR.
+
+## Documentation surfaces
+
+Two audiences, kept apart:
+
+- **Users** (translators, developers who run the tools): `README.md`, the
+  mdBook user guide in `book/`, `CHANGELOG.md`, release notes, and the
+  app's own text. No crate names, Rust types, cargo commands, internal
+  design jargon or roadmap labels.
+- **Contributors / maintainers**: `CONTRIBUTING.md`, `docs/contributing/`
+  (architecture, building, extending, prompt profiles, round-trip,
+  releasing), `docs/internal/` (design notes, roadmaps, specs), this
+  file and `.claude/`.
+
+A user-visible change updates the matching book page (and screenshots)
+and adds a user-facing line to `CHANGELOG.md` under *Unreleased*.
 
 ## Conventions
 

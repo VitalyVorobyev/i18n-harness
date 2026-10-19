@@ -2,7 +2,7 @@
 //! glossary, with a `toml_edit`-backed mutation surface that preserves user
 //! comments and key ordering on every write.
 //!
-//! See `docs/m4.1-project-crate-design.md` §1.3, §2, §1.4.
+//! See `docs/internal/m4.1-project-crate-design.md` §1.3, §2, §1.4.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
