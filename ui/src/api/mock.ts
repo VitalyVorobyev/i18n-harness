@@ -417,7 +417,11 @@ export function createMockApi(options: { delayMs?: number; ollamaRunning?: boole
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   return {
-    appInfo: async () => ({ version: "0.1.0-mock", cldr: "48.2.0" }),
+    appInfo: async () => ({ version: "0.2.0", cldr: "48.2.0" }),
+    openUserGuide: async () => {
+      window.open("https://vitalyvorobyev.github.io/i18n-harness/", "_blank");
+    },
+    createSample: async () => "/Users/you/Documents/i18n-harness sample",
     listLanguages: async () => [
       { id: "cs", name: "Czech" },
       { id: "de_DE", name: "German" },

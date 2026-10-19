@@ -24,6 +24,10 @@ import type {
 /** The desktop shell's commands (ui/src-tauri/src/commands.rs, translation.rs). */
 export interface Api {
   appInfo(): Promise<AppInfo>;
+  /** Open the user guide in the browser. */
+  openUserGuide(): Promise<void>;
+  /** Copy the bundled sample folder to the user's Documents; resolves with its path. */
+  createSample(): Promise<string>;
   listLanguages(): Promise<Language[]>;
   /** Ask the user for a folder; `null` when they cancel. */
   pickFolder(): Promise<string | null>;

@@ -69,11 +69,20 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../../examples/sample-project/README.md": "sample/README.md",
+      "../../examples/sample-project/i18n-harness.toml": "sample/i18n-harness.toml",
+      "../../examples/sample-project/glossary.toml": "sample/glossary.toml",
+      "../../examples/sample-project/translations/app_de.ts": "sample/translations/app_de.ts",
+      "../../examples/sample-project/translations/app_es.ts": "sample/translations/app_es.ts",
+      "../../examples/sample-project/translations/app_zh.ts": "sample/translations/app_zh.ts"
+    },
+    "homepage": "https://vitalyvorobyev.github.io/i18n-harness/",
     "category": "Productivity",
     "publisher": "i18n-harness contributors",
     "copyright": "Copyright 2026 i18n-harness contributors. Apache-2.0.",
     "shortDescription": "Translate application text with a local language model.",
-    "longDescription": "i18n-harness translates Qt Linguist, gettext and ICU message catalogs with a language model that runs on your computer, checks every translation for broken placeholders and markup, and writes the files back byte-for-byte outside the translations.",
+    "longDescription": "i18n-harness translates Qt Linguist, gettext, Lingui and ICU message catalogs with a language model that runs on your computer, checks every translation for broken placeholders and markup, and writes the files back byte-for-byte outside the translations.",
     "macOS": {
       "minimumSystemVersion": "11.0"
     },

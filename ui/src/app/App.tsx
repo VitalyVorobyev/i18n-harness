@@ -33,13 +33,27 @@ export function App() {
     }
   };
 
+  const sample = async () => {
+    try {
+      await open(await api.createSample());
+    } catch (error) {
+      toast({
+        tone: "error",
+        title: "Could not create the sample",
+        description: errorMessage(error),
+      });
+    }
+  };
+
   const close = async () => {
     await api.closeFolder();
     setFolder(null);
   };
 
   if (folder === null) {
-    return <Start opening={opening} onOpen={(path) => void open(path)} />;
+    return (
+      <Start opening={opening} onOpen={(path) => void open(path)} onSample={() => void sample()} />
+    );
   }
   return <Workspace folder={folder} onClose={() => void close()} />;
 }

@@ -28,8 +28,12 @@ ollama = ["i18n-harness-session/ollama"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
+# Kept on the minor version of `@tauri-apps/api` in package.json; the Tauri
+# CLI refuses a build where the two differ.
+tauri = { version = "~2.11", features = [] }
+tauri-plugin-dialog = "~2.7"
+# 2.6 and later need tauri 2.12.
+tauri-plugin-opener = "~2.5"
 serde = { workspace = true }
 serde_json = { workspace = true }
 i18n-harness-core = { workspace = true }

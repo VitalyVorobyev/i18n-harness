@@ -7,9 +7,18 @@ import {
   ThemeToggle,
   Tooltip,
 } from "@vitavision/ui";
-import { ChevronDown, FolderClosed, FolderX, Languages, Save, Settings } from "lucide-react";
+import {
+  ChevronDown,
+  CircleHelp,
+  FolderClosed,
+  FolderX,
+  Languages,
+  Save,
+  Settings,
+} from "lucide-react";
 
 import type { ModelChoice } from "../api";
+import { useApi } from "../api";
 import { modelLabel, modelNote, plural } from "../lib/format";
 import { folderName } from "../lib/recent";
 
@@ -45,7 +54,9 @@ export function Toolbar(props: {
     label: modelLabel(m),
     note: modelNote(m),
   }));
+  const api = useApi();
   const canTranslate = props.model !== null && !props.running;
+  const needsModel = props.model === null && props.modelsError === null;
 
   return (
     <div className="flex items-center gap-3 border-b border-line bg-surface px-3 py-2">
@@ -86,17 +97,34 @@ export function Toolbar(props: {
       </div>
 
       <div className="flex">
-        <Button
-          variant="primary"
-          icon={<Languages aria-hidden size={16} />}
-          disabled={!canTranslate || props.toDoInFile === 0}
-          className="rounded-r-none"
-          onClick={props.onTranslateFile}
-        >
-          {props.toDoInFile > 0
-            ? `Translate ${plural(props.toDoInFile, "string", "strings")}`
-            : "Nothing to translate"}
-        </Button>
+        {needsModel ? (
+          <Tooltip content="Choose a model first">
+            <span tabIndex={0} className="inline-flex">
+              <Button
+                variant="primary"
+                icon={<Languages aria-hidden size={16} />}
+                disabled
+                className="pointer-events-none rounded-r-none"
+              >
+                {props.toDoInFile > 0
+                  ? `Translate ${plural(props.toDoInFile, "string", "strings")}`
+                  : "Nothing to translate"}
+              </Button>
+            </span>
+          </Tooltip>
+        ) : (
+          <Button
+            variant="primary"
+            icon={<Languages aria-hidden size={16} />}
+            disabled={!canTranslate || props.toDoInFile === 0}
+            className="rounded-r-none"
+            onClick={props.onTranslateFile}
+          >
+            {props.toDoInFile > 0
+              ? `Translate ${plural(props.toDoInFile, "string", "strings")}`
+              : "Nothing to translate"}
+          </Button>
+        )}
         <DropdownMenu
           align="end"
           trigger={
@@ -145,6 +173,13 @@ export function Toolbar(props: {
         aria-label="Settings"
         icon={<Settings aria-hidden size={16} />}
         onClick={props.onSettings}
+      />
+      <Button
+        variant="ghost"
+        aria-label="User guide"
+        title="User guide"
+        icon={<CircleHelp aria-hidden size={16} />}
+        onClick={() => void api.openUserGuide()}
       />
       <ThemeToggle />
       <Button
