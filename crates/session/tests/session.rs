@@ -708,7 +708,10 @@ fn a_file_of_undetected_language_is_left_out_with_a_warning() {
     // keeps opening.
     let toml = std::fs::read_to_string(dir.path().join("i18n-harness.toml")).unwrap();
     assert!(!toml.contains("strings.ts"), "{toml}");
-    assert_eq!(Session::open_folder(dir.path()).unwrap().catalogs().len(), 1);
+    assert_eq!(
+        Session::open_folder(dir.path()).unwrap().catalogs().len(),
+        1
+    );
 }
 
 #[test]
@@ -722,7 +725,10 @@ fn an_empty_locale_in_an_existing_settings_file_skips_only_that_file() {
     let session = Session::open_folder(dir.path()).expect("open folder");
     assert_eq!(session.catalogs().len(), 1);
     assert!(
-        session.warnings().iter().any(|w| w.starts_with("Other.ts was not opened")),
+        session
+            .warnings()
+            .iter()
+            .any(|w| w.starts_with("Other.ts was not opened")),
         "{:?}",
         session.warnings()
     );

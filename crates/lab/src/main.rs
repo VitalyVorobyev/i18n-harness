@@ -32,8 +32,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Translate a stratified sample with each configuration and write the
-    /// evidence to `--out`.
+    /// Translate a sample of strings (drawn evenly across kinds of string)
+    /// with each configuration and write the evidence to `--out`.
     Bench(BenchArgs),
     /// Score a filled judging sheet: reads `<out>/scores.jsonl` and
     /// `<out>/judge_key.json`, writes `<out>/scores-summary.json`.

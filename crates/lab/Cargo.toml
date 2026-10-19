@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 publish = false
-description = "Maintainer lab: compare translation models and inputs on real catalogs. Not shipped in the translator app."
+description = "harness-lab: compare translation models and inputs on your own catalogs. A separate tool, not part of the desktop app."
 
 [lints]
 workspace = true
