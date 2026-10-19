@@ -1,6 +1,6 @@
 //! [`TranslationBackend`] trait and reference implementations.
 //!
-//! See `docs/initial_design.md` §5 and `CLAUDE.md` invariant #2. The
+//! See `docs/internal/initial_design.md` §5 and `CLAUDE.md` invariant #2. The
 //! translation backend is the **one and only** place an LLM (or any other
 //! engine) participates in the pipeline. Everything else — parsing,
 //! validation, write-back — is deterministic Rust.

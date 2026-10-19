@@ -21,7 +21,7 @@ missing components there rather than writing local look-alikes.
 
 ## Project context
 
-- Read `CLAUDE.md` and `docs/initial_design.md` §10 first.
+- Read `CLAUDE.md` and `docs/internal/initial_design.md` §10 first.
 - The harness stays a headless library. The CLI and the Tauri app are
   both *frontends* over the same crates. If you find yourself reaching
   for `quick-xml` or gate logic from Tauri, you are in the wrong layer.

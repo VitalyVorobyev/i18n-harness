@@ -71,7 +71,6 @@ table means "use the defaults".
 | `register` | `"formal"`, `"informal"`, `"neutral"` | How to address the user. Chat models are told *Address the user formally/informally*. The built-in default is formal for languages that distinguish (German, Spanish, French, …) and neutral otherwise. |
 | `length_warn_ratio` | number | The [length check](checks.md#length) warns when a translation is longer than the original by this factor. Defaults depend on the script (1.3 for Latin, 0.6 for Chinese, …; German 1.4). |
 | `length_warn_min_chars` | integer | Originals shorter than this many characters are not length-checked. Default 8. |
-| `variant` | string | A variant tag such as `es_419`. Recorded; the current translation path does not use it. |
 
 Plural rules, script and the language's name always come from CLDR and
 cannot be overridden.
@@ -83,13 +82,22 @@ One entry per translation file.
 | Key | Type | Meaning |
 |---|---|---|
 | `path` | string | Path relative to the folder. |
-| `format` | string | `qt-ts`, `gettext-po` or `icu-json`. |
-| `locale` | string | The language the file is translated into. Detected from the file (Qt `language` attribute, PO `Language:` header) or its name (`app_de.ts`, `de.po`, `fr.json`). |
+| `format` | string | `qt-ts`, `gettext-po`, `icu-json`, `lingui-po` or `lingui-json`. See [Formats and placeholders](formats.md). |
+| `locale` | string | The language the file is translated into. Detected from the file (Qt `language` attribute, PO `Language:` header), its name (`app_de.ts`, `de.po`, `fr.json`) or its folder's name (`fr/messages.json`). |
 | `pivot` | string, optional | The language the file's existing texts are in, when it is not `locale`. Set by **Language of the existing text…** in the app or `--pivot` on the command line. See [Files pre-filled with another language](../tutorials/pivot.md). |
 
 A folder's files are discovered once, when the settings file is created.
-To add a file later, add a `[[catalogs]]` entry (or delete the settings
-file and reopen the folder, which loses your edits to it).
+A file whose language cannot be detected is left out, with a warning.
+To add a file later, or one that was left out, add a `[[catalogs]]`
+entry (or delete the settings file and reopen the folder, which loses
+your edits to it):
+
+```toml
+[[catalogs]]
+path = "src/translations/messages.json"
+format = "lingui-json"
+locale = "fr"
+```
 
 ## `[[references]]`
 
@@ -108,12 +116,12 @@ adds it when a `glossary.toml` exists.
 
 ## `[backend.default]`
 
-The model server, as chosen in **Settings → Model server** and the model
+The model server, as chosen in **Settings → Model server** (see [App settings](app-settings.md#model-server)) and the model
 picker.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `kind` | `"ollama"`, `"openai-compatible"` | Kind of server. (`"manual"` and `"agent"` are also accepted by the parser; the app treats anything but `openai-compatible` as Ollama.) |
+| `kind` | `"ollama"`, `"openai-compatible"` | Kind of server. |
 | `host` | string | Server address. Ollama: `http://localhost:11434`; OpenAI-compatible: up to `/v1`. |
 | `model` | string | The model, as the server names it. |
 | `num_ctx` | integer | Context window in tokens (Ollama only). Omit for the model's default. |
@@ -126,12 +134,6 @@ table, the app uses Ollama at the address in `OLLAMA_HOST`, or
 
 The command-line tools do not read this table; they take the server and
 model as options.
-
-## `[prompts]`
-
-| Key | Type | Meaning |
-|---|---|---|
-| `template_dir` | string | A folder of per-language prompt templates. Accepted for compatibility; the current translation path uses the built-in [prompt profiles](profiles.md) and does not read it. |
 
 ## `[paths]`
 
@@ -148,4 +150,3 @@ commit it; add it to `.gitignore`.
 | File | Contents |
 |---|---|
 | `review.jsonl` | One line per decision: a string confirmed (*Done*), a machine translation or draft awaiting a check. Each records a fingerprint of the original text; when the original changes, the decision no longer applies and the string is reviewed again. |
-| other `.jsonl` files | Logs of earlier translation runs and evaluations, written by some command-line paths. |

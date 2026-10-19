@@ -47,8 +47,10 @@ such as `de.po`). The number of plural forms comes from `Plural-Forms`.
 
 ## Steps
 
-1. Open `po-demo` in the app. `de.po` shows *German · gettext PO* with
-   *4 to do*.
+1. Open `po-demo` in the app. The file is listed as `de` under the
+   heading *German · gettext PO*, with the numbers *5 · 5 · 1*: five
+   strings, all unique to this file, one translated. The header entry
+   (`msgid ""`) is not a string to translate.
 2. Pick a model and click **Translate 4 strings**.
 3. Review under **Check**. `msgctxt` appears as the string's context
    (here *menu*), and `#.` comments from the developers appear as notes.
@@ -56,7 +58,8 @@ such as `de.po`). The number of plural forms comes from `Plural-Forms`.
 
 ## Expected result
 
-A run with a chat model produced:
+With a chat model the file reads like this (your model's wording will
+differ):
 
 ```po
 #: src/main.py:12
@@ -76,18 +79,18 @@ msgstr "Öffnen"
 msgid "%d new message"
 msgid_plural "%d new messages"
 msgstr[0] "%d neue Nachricht"
-msgstr[1] "%d neue Nachricht"
+msgstr[1] "%d neue Nachrichten"
 ```
 
 Placeholders are kept exactly as written: `%(name)s`, `%s`, `%d`, and
 positional ones such as `%1$s`. The header, comments, references and
 the order of entries are unchanged.
 
-The second plural form is wrong (*Nachricht* instead of
-*Nachrichten*). Each plural form is translated separately with an
-example number in place of `%d`, but the text sent for every form is the
-singular `msgid`, so the model sees *"0 new message"*. **Check the plural
-forms of PO files by hand.**
+Each plural form is translated separately, with an example number in
+place of `%d`. The form whose example number is 1 is translated from
+`msgid` (*"1 new message"*), the other forms from `msgid_plural`
+(*"0 new messages"*). The editor shows one box per form; check that each form
+reads right for its number.
 
 ## Placeholder rules for PO
 

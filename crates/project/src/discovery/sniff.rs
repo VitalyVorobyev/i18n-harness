@@ -42,7 +42,8 @@ pub(crate) fn sniff(path: &Path, bytes: &[u8]) -> DraftCatalog {
     let locale = best
         .hit
         .language
-        .or_else(|| locale_infer::infer_from_filename(filename));
+        .or_else(|| locale_infer::infer_from_filename(filename))
+        .or_else(|| locale_infer::infer_from_dirname(path));
     let mut confidence = classification(best.hit.confidence);
     // A confident format without any locale evidence is one level less sure.
     if !content_locale && locale.is_none() && confidence == ClassificationConfidence::High {

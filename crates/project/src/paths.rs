@@ -4,7 +4,7 @@
 //! project crate (and its consumers) ever open. Callers receive resolved
 //! absolute paths; they never construct `.i18n-harness/` strings by hand.
 //!
-//! See `docs/m4.1-project-crate-design.md` §1.7 and §7 for the full
+//! See `docs/internal/m4.1-project-crate-design.md` §1.7 and §7 for the full
 //! path-resolution policy.
 
 use std::path::{Path, PathBuf};

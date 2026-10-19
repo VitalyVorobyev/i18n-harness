@@ -32,13 +32,20 @@ The command prints the absolute path of the batch folder. It contains:
 | `targets.jsonl` | Empty. The agent writes its answers here. |
 | `meta.json` | Where the batch came from. |
 
-`units.jsonl` holds every string that is not finished yet. Placeholders
-appear in a common notation (ICU), whatever the file format: Qt's `%1`
-becomes `{0}`, `%n` becomes `{count}`:
+`units.jsonl` holds every string that is not finished yet, one per
+line. Placeholders appear in one common notation, whatever the file
+format — Qt's `%1` becomes `{0}`, `%n` becomes `{count}` — so the agent
+needs to know only one set of rules:
 
 ```json
 {"id":"MainWindow::Saved %1 to %2","source":"Saved {0} to {1}","placeholders":[…],"flags_so_far":[]}
 ```
+
+`id` identifies the string and must be copied unchanged into the
+answer; `source` is the text to translate; `placeholders` lists the
+placeholders the translation must keep. A plural string also has
+`plural_arity`, the number of forms the answer must give. `flags_so_far` lists problems
+already known for the string (usually none) and needs no action.
 
 Add `--glossary glossary.toml` to include a glossary in `prompt.md`.
 For a folder with an `i18n-harness.toml`, use `--project <folder>`
@@ -47,10 +54,12 @@ and the folder's glossary is used.
 
 ## 2. Let the agent translate
 
-**Claude Code.** This repository ships a skill for exactly this job,
-`translate-i18n-batch` (in `.claude/skills/translate-i18n-batch/`). Copy
-that folder into your project's `.claude/skills/` (or into
-`~/.claude/skills/` to have it everywhere), start Claude Code and run:
+**Claude Code.** There is a ready-made skill for exactly this job,
+[`translate-i18n-batch`](https://github.com/VitalyVorobyev/i18n-harness/tree/main/.claude/skills/translate-i18n-batch).
+Copy that folder into your project's `.claude/skills/` (or into
+`~/.claude/skills/` to have it everywhere) — or create a folder
+`translate-i18n-batch` there and download its `SKILL.md` into it. Then
+start Claude Code and run:
 
 ```text
 /translate-i18n-batch /absolute/path/to/batch-de
@@ -84,15 +93,22 @@ harness import-batch batch-de --apply app_de.ts
 ```
 
 ```text
-MainWindow::%n file(s) selected
-  [soft] length-warn: 50 chars vs source 24 (ratio 2.08, threshold 1.40)
-
 MainWindow::Saved %1 to %2
   [soft] length-warn: 31 chars vs source 16 (ratio 1.94, threshold 1.40)
 
 dry-run (no --out); skipped write-back
-translate report: app_de.ts → locale=de_DE backend=agent  writable=4 translated=4 skipped=0 failed=0 finished=2 flagged=2 hard=0 soft=2
+translate report: app_de.ts → locale=de_DE backend=agent  writable=4 translated=4 skipped=0 failed=0 finished=3 flagged=1 hard=0 soft=1
 ```
+
+Each string with a finding is listed with its findings. `[HARD]` marks
+an error that blocks writing (such as a lost placeholder); `[soft]`
+marks a warning, here that the translation is much longer than the
+original. The last line sums up: `writable` strings in the batch,
+`translated` answers received, `skipped` and `failed` lines,
+`finished` translations without findings, `flagged` translations with
+at least one finding, and the number of errors (`hard`) and warnings
+(`soft`). See [Checks](../reference/checks.md) for what each finding
+means.
 
 Then write the result — to a new file, or over the original:
 
@@ -105,10 +121,20 @@ Translations without findings are written as finished; those with a
 warning (`[soft]`) are written but stay unfinished (`type="unfinished"`
 in Qt) for review.
 
-If **any** answer has an error (`[hard]`, for example a lost
+If **any** answer has an error (`[HARD]`, for example a lost
 placeholder), `import-batch` writes **nothing** for that catalog, prints
 `blocked: N hard finding(s); not writing …` and exits with a non-zero
-status. Correct those lines in `targets.jsonl` (or ask the agent to) and
+status:
+
+```text
+MainWindow::Saved %1 to %2
+  [HARD] placeholder-mismatch: slot 0: missing=["{1}"] extra=[]
+
+blocked: 1 hard finding(s); not writing app_de.ts (use `harness gate` to inspect)
+```
+
+`slot 0` is the first (or only) form of the string; `{1}` is the second
+placeholder, `%2` in the Qt file. Correct those lines in `targets.jsonl` (or ask the agent to) and
 import again. This is stricter than the app, which holds back only the
 broken strings.
 

@@ -1,8 +1,7 @@
 # Command line: harness
 
-`harness` is the command-line tool. It ships in the `i18n-harness-cli-…`
-archives of each release, next to [`harness-lab`](lab-cli.md); from a
-source checkout run it as `cargo run -p i18n-harness-cli -- <command>`.
+`harness` is the command-line tool, for unattended runs, scripts and CI.
+Everything it does with a folder, the desktop app does too.
 
 ```text
 harness <COMMAND> [OPTIONS]
@@ -22,10 +21,29 @@ harness <COMMAND> --help
 | [`reuse`](#reuse) | Copy translations from reference files by string id. |
 | [`split-remainder`](#split-remainder) | Write the untranslated strings to a separate file. |
 | [`merge`](#merge) | Fold a translated remainder back into its base file. |
-| [`translate`](#translate) | Older single-file translation path. |
 
 Locale ids are CLDR ids with underscores: `de`, `de_DE`, `sk_SK`,
 `zh_Hans`, `pt_BR`. File formats are detected from the content.
+
+## Get the command-line tools
+
+Each [release](https://github.com/VitalyVorobyev/i18n-harness/releases/latest)
+has an archive per system: `i18n-harness-cli-<version>-macos-arm64.tar.gz`
+(Apple silicon), `…-macos-x64.tar.gz` (Intel Mac), `…-linux-x64.tar.gz`
+and `…-windows-x64.zip`. Each holds `harness` and
+[`harness-lab`](lab-cli.md). Unpack it and put the two programs in a
+folder on your `PATH`, for example on macOS and Linux:
+
+```sh
+tar xzf i18n-harness-cli-*-macos-arm64.tar.gz
+mkdir -p ~/.local/bin && cp i18n-harness-cli-*/harness* ~/.local/bin/
+harness --version
+```
+
+On macOS, if the system refuses to run a downloaded program, remove the
+quarantine mark once: `xattr -d com.apple.quarantine ~/.local/bin/harness ~/.local/bin/harness-lab`.
+The `.sha256` file next to each archive holds its checksum
+(`shasum -a 256 -c <file>.sha256`).
 
 ## translate-folder
 
@@ -35,8 +53,8 @@ harness translate-folder [OPTIONS] --model <MODEL> <FOLDER>
 
 Opens `<FOLDER>` (creating `i18n-harness.toml` when missing), translates
 every **To do** string of every file with the model, prints the strings
-whose translation has an error and the counts per file. Uses the same
-session code as the desktop app.
+whose translation has an error and the counts per file. It works
+exactly like **Translate all files** in the desktop app.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -44,7 +62,7 @@ session code as the desktop app.
 | `--pivot <LOCALE>` | — | Language of the existing texts of **every** file; recorded in the settings file. |
 | `--input <auto\|source>` | `auto` | `auto`: from the sound pivot text when there is one, else the original. `source`: always the original. |
 | `--server <ollama\|openai-compatible>` | `ollama` | Kind of server. |
-| `--host <URL>` | `http://localhost:11434` | Server address (up to `/v1` for OpenAI-compatible). |
+| `--host <URL>` | `http://localhost:11434` for Ollama, `http://localhost:1234/v1` for OpenAI-compatible | Server address (up to `/v1` for OpenAI-compatible). |
 | `--deliver` | off | Mark translations without errors as done (finished in the file), also those with a warning. Otherwise they await a check. |
 | `--fix-glossary` | off | Instead of the strings to do, retranslate every translated string that breaks the glossary, whatever its status. Prints how many still break it afterwards. |
 | `--save` | off | Write the files at the end. Translations with errors keep the file's previous text. |
@@ -98,8 +116,9 @@ one section per string with findings, then a summary:
 gate report: app_de.ts  locale=de_DE  units=5  hard=0  soft=0  clean=5
 ```
 
-Exits non-zero if any error (*hard* finding) is present — usable as a CI
-step.
+`hard` counts problems (translations that would break the application),
+`soft` counts warnings. Exits non-zero if there is any problem, so it
+can run as a CI step.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -211,7 +230,7 @@ file `<OUT>` of the same format — typically right after `reuse`, to send
 only the leftover to a translator. `<BASE>` is not changed.
 
 ```text
-split-remainder: app_de.ts → rest_de.ts (2 writable-untranslated unit(s))
+split-remainder: app_de.ts → rest_de.ts (2 string(s) to translate)
 ```
 
 ## merge
@@ -223,23 +242,3 @@ harness merge --with <REMAINDER> --out <OUT> <BASE>
 Folds a translated remainder back into its base and writes the result to
 `<OUT>`. Every id in the remainder must exist in the base; an id that is
 finished in both files is an error (overlap).
-
-## translate
-
-```text
-harness translate [OPTIONS] --locale <LOCALE> <PATH>
-```
-
-The original single-file pipeline: extract, translate in batches, check,
-optionally write. Kept for scripts that use it; for model translation
-prefer [`translate-folder`](#translate-folder), which supports runtime
-model selection, prompt profiles and pivot input.
-
-| Option | Default | Meaning |
-|---|---|---|
-| `--locale <LOCALE>` | — | Required. |
-| `--backend <manual\|ollama>` | `manual` | `manual` copies the original text unchanged (to test the pipeline). `ollama` needs a binary built with `--features ollama` and takes the model from the `OLLAMA_MODEL` environment variable and the address from `OLLAMA_HOST`. |
-| `--glossary <FILE>` | — | Glossary for the prompts. |
-| `--out <FILE>` | — | Write the result here. Without it, a dry run. Nothing is written if any translation has an error. |
-| `--batch-size <N>` | `32` | Strings per batch. |
-| `--metrics <FILE>` | — | Append findings as JSON lines. |

@@ -10,6 +10,10 @@ use crate::error::{Result, SessionError};
 /// Default address of a local Ollama server.
 pub const DEFAULT_OLLAMA_HOST: &str = "http://localhost:11434";
 
+/// Where an OpenAI-compatible server is assumed to listen when no address is
+/// given (LM Studio's default).
+pub const DEFAULT_OPENAI_COMPATIBLE_HOST: &str = "http://localhost:1234/v1";
+
 /// Where models come from and which one to use.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSettings {

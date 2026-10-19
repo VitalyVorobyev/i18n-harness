@@ -1,8 +1,8 @@
 # Command line: harness-lab
 
 `harness-lab` compares models (and inputs) on real catalogs. It ships in
-the same `i18n-harness-cli-…` archives as `harness`; from a source
-checkout run `cargo run -p i18n-harness-lab -- <command>`. The
+the same archives as `harness`; see
+[Get the command-line tools](cli.md#get-the-command-line-tools). The
 [tutorial](../tutorials/lab.md) shows a complete session.
 
 ## bench
@@ -12,9 +12,11 @@ harness-lab bench [OPTIONS] --config <CONFIG>… --out <OUT> <FOLDER>
 ```
 
 Copies the `.ts`, `.po`, `.pot` and `.json` files at the top level of
-`<FOLDER>` (not in sub-folders) into `<OUT>/work`, draws a stratified
-sample of strings, translates it with each configuration through the
-same session code as the app, and writes the evidence to `<OUT>`. The
+`<FOLDER>` (not in sub-folders) into `<OUT>/work`, draws a sample of
+strings spread over the kinds of string (the *strata*: markup,
+placeholders, plurals, long, short, …), translates it with each
+configuration exactly as the app would, and writes the evidence to
+`<OUT>`. The
 copy is deleted at the end; `<FOLDER>` is never modified.
 
 | Option | Default | Meaning |

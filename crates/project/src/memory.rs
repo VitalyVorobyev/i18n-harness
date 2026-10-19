@@ -12,7 +12,7 @@
 //!   human notes. Written by `Project::promote_to_curated` /
 //!   `Project::un_curate`.
 //!
-//! See `docs/m4.1-project-crate-design.md` §1.8, §6.
+//! See `docs/internal/m4.1-project-crate-design.md` §1.8, §6.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

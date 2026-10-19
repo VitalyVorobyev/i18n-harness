@@ -31,9 +31,10 @@ pub(crate) struct TranslateFolderArgs {
     /// Kind of model server.
     #[arg(long, value_enum, default_value_t = Server::Ollama)]
     server: Server,
-    /// Server address.
-    #[arg(long, default_value = i18n_harness_session::DEFAULT_OLLAMA_HOST)]
-    host: String,
+    /// Server address. Defaults to `http://localhost:11434` for Ollama and
+    /// `http://localhost:1234/v1` (LM Studio) for an OpenAI-compatible server.
+    #[arg(long)]
+    host: Option<String>,
     /// Mark translations without errors as done (finished in the file)
     /// instead of leaving them to check. For output that is delivered as is.
     #[arg(long)]
@@ -85,7 +86,13 @@ pub(crate) fn translate_folder(args: TranslateFolderArgs) -> Result<()> {
             Server::Ollama => ServerKind::Ollama,
             Server::OpenaiCompatible => ServerKind::OpenAiCompatible,
         },
-        host: args.host.clone(),
+        host: args.host.clone().unwrap_or_else(|| {
+            match args.server {
+                Server::Ollama => i18n_harness_session::DEFAULT_OLLAMA_HOST,
+                Server::OpenaiCompatible => i18n_harness_session::DEFAULT_OPENAI_COMPATIBLE_HOST,
+            }
+            .to_owned()
+        }),
         model: Some(args.model.clone()),
         num_ctx: None,
     };

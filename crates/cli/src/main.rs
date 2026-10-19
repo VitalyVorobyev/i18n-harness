@@ -1,6 +1,6 @@
 //! `harness` — the headless CLI entry point for `i18n-harness`.
 //!
-//! See `docs/initial_design.md`. Subcommands:
+//! See `docs/internal/initial_design.md`. Subcommands:
 //! - `round-trip` — proves the byte-stability contract for a catalog.
 //! - `gate` — runs the validation gate against a target locale and
 //!   optionally writes JSONL metrics.
@@ -47,9 +47,11 @@ use i18n_harness_reuse::{
 #[command(
     name = "harness",
     version,
-    about = "i18n-harness CLI",
-    long_about = "Local-first translation harness. See docs/initial_design.md for the design \
-                  intent. Subcommands land milestone by milestone."
+    about = "Translate and check software translation files (Qt .ts, gettext .po, Lingui, ICU JSON)",
+    long_about = "Translate and check software translation files (Qt .ts, gettext .po, Lingui, \
+                  ICU JSON) with a local or OpenAI-compatible model, or hand them to an AI coding \
+                  agent. Translations that would break the application are never written.\n\n\
+                  User guide: https://vitalyvorobyev.github.io/i18n-harness/"
 )]
 struct Cli {
     /// Subcommand to run.
@@ -59,40 +61,42 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Verify the byte-stable round-trip contract on a catalog file:
-    /// extract → apply with zero unit changes must produce byte-identical
-    /// output. Exits non-zero on any diff.
+    /// Translate every string still to do in a folder of catalogs with a
+    /// model, the same way the desktop app does.
+    TranslateFolder(folder::TranslateFolderArgs),
+
+    /// Check that a file is written back byte for byte: read it and write it
+    /// with no changes, and compare. Exits non-zero on any difference.
     RoundTrip(RoundTripArgs),
 
-    /// Run the validation gate against a target locale. Prints one section
-    /// per unit with findings; exits non-zero if any hard flag fires.
+    /// Check the translations of a file. Prints each string with a problem or
+    /// warning; exits non-zero if any translation would break the application.
     Gate(GateArgs),
 
-    /// Translate a catalog end-to-end: extract → batch → backend → gate.
+    /// Translate a single catalog file. Superseded by `translate-folder`.
     /// Without `--out`, runs as dry-run (metrics only). With `--out`, writes
-    /// the post-translation catalog atomically. Gate-clean units are promoted
-    /// to Finished; flagged units stay Proposed.
+    /// the post-translation catalog atomically.
+    #[command(hide = true)]
     Translate(TranslateArgs),
 
-    /// Discover catalogs under `<dir>`, build a draft manifest, and write it
-    /// to `<dir>/i18n-harness.toml`. Refuses to overwrite an existing manifest
-    /// unless `--force` is passed.
+    /// Find the translation files under `<DIR>` and write the settings file
+    /// `<DIR>/i18n-harness.toml`. Refuses to overwrite an existing one unless
+    /// `--force` is passed.
     Init(InitArgs),
 
-    /// Open the project at `<dir>` (loads and validates
-    /// `<dir>/i18n-harness.toml`) and print its summary. Exits non-zero if
-    /// the manifest is missing or invalid.
+    /// Check the settings file `<DIR>/i18n-harness.toml` and list the files,
+    /// languages and glossary it names. Exits non-zero if it is missing or
+    /// invalid.
     Open(OpenArgs),
 
-    /// Phase 1 of the two-phase agent flow: extract writable units from a
-    /// catalog, build a prompt, and write the export folder an external agent
-    /// fills in. Prints the absolute path of the output directory on stdout.
-    /// Fully deterministic — no model, no network.
+    /// Write the strings still to translate, with instructions, into a batch
+    /// folder for an AI coding agent (Claude Code, Copilot, Codex) to fill.
+    /// Prints the folder's path. No model, no network.
     ExportBatch(ExportBatchArgs),
 
-    /// Phase 2 of the two-phase agent flow: read the agent-filled
-    /// `targets.jsonl` from an export folder, run the gate, and optionally
-    /// write the post-translation catalog. Without `--out`, runs as dry-run.
+    /// Read the translations an agent wrote into a batch folder, check them,
+    /// and write them into the catalog. Without `--out` / `--out-dir`, only
+    /// reports what would be written.
     ImportBatch(ImportBatchArgs),
 
     /// Copy expert translations from one or more reference catalogs into a
@@ -101,19 +105,15 @@ enum Command {
     /// result back in place unless `--out` is given (ad-hoc single-base mode).
     Reuse(ReuseArgs),
 
-    /// Extract the writable-untranslated unit ids from a base catalog and
-    /// write them as a standalone remainder catalog. Run this right
-    /// after `reuse` to get the post-reuse leftover that needs translation.
+    /// Write the strings of a catalog that still need a translation into a
+    /// separate, smaller catalog. Run this right after `reuse` to get what is
+    /// left to translate.
     SplitRemainder(SplitRemainderArgs),
 
-    /// Fold a translated remainder back into its base catalog. The remainder
-    /// must be a subset of the base (ids present in base); ids that are
-    /// finished-and-complete in both files are treated as an overlap error.
+    /// Fold a translated remainder (from `split-remainder`) back into its base
+    /// catalog. Every string of the remainder must exist in the base, and must
+    /// not already be finished there.
     Merge(MergeArgs),
-
-    /// Translate every string still to do in a folder of catalogs with a
-    /// model, through the same session the desktop app uses.
-    TranslateFolder(folder::TranslateFolderArgs),
 
     /// Merge a term table (`term, translation, note` rows, as a spreadsheet
     /// saves them) into a folder's glossary. Rows without a translation keep
@@ -148,17 +148,17 @@ struct GateArgs {
 
 #[derive(Parser, Debug)]
 struct InitArgs {
-    /// Directory to scan and write a manifest into.
+    /// Folder to scan and write the settings file into.
     dir: PathBuf,
 
-    /// Overwrite an existing `i18n-harness.toml` if present.
+    /// Overwrite an existing `i18n-harness.toml`.
     #[arg(long)]
     force: bool,
 }
 
 #[derive(Parser, Debug)]
 struct OpenArgs {
-    /// Project root containing `i18n-harness.toml`.
+    /// Folder containing `i18n-harness.toml`.
     dir: PathBuf,
 }
 
@@ -172,8 +172,8 @@ struct TranslateArgs {
     locale: String,
 
     /// Which backend to use. `manual` echoes the source verbatim (useful
-    /// for smoke-testing the loop without a model); `ollama` requires the
-    /// CLI to be built with --features ollama.
+    /// for testing without a model); `ollama` uses the model named by the
+    /// `OLLAMA_MODEL` environment variable.
     #[arg(long, value_enum, default_value_t = BackendChoice::Manual)]
     backend: BackendChoice,
 
@@ -190,7 +190,7 @@ struct TranslateArgs {
     #[arg(long)]
     out: Option<PathBuf>,
 
-    /// Batch size; defaults to the workspace constant (32).
+    /// Strings per batch.
     #[arg(long, default_value_t = DEFAULT_BATCH_SIZE)]
     batch_size: usize,
 }
@@ -203,7 +203,7 @@ struct ExportBatchArgs {
     #[arg(group = "source", required_unless_present = "project")]
     path: Option<PathBuf>,
 
-    /// Project mode: project root directory containing `i18n-harness.toml`.
+    /// Folder mode: a folder with an `i18n-harness.toml`.
     ///
     /// Mutually exclusive with the positional `<PATH>` argument.
     #[arg(long, group = "source")]
@@ -221,7 +221,7 @@ struct ExportBatchArgs {
 
     /// Single-catalog mode only: optional glossary TOML file. Terms are
     /// inlined into `prompt.md`; load failures abort. Ignored in project
-    /// mode — the manifest glossary is used instead.
+    /// mode — the folder's glossary is used instead.
     #[arg(long, conflicts_with = "project")]
     glossary: Option<PathBuf>,
 }
@@ -238,7 +238,7 @@ struct ImportBatchArgs {
     #[arg(long, group = "target")]
     apply: Option<PathBuf>,
 
-    /// Project mode: project root directory containing `i18n-harness.toml`.
+    /// Folder mode: a folder with an `i18n-harness.toml`.
     ///
     /// Mutually exclusive with `--apply`.
     #[arg(long, group = "target")]
@@ -254,7 +254,7 @@ struct ImportBatchArgs {
     out: Option<PathBuf>,
 
     /// Project mode only: write each post-translation catalog under this
-    /// directory, preserving the manifest-relative directory structure.
+    /// directory, preserving the folder structure.
     /// Without `--out-dir`, runs as dry-run.
     #[arg(long, conflicts_with = "apply")]
     out_dir: Option<PathBuf>,
@@ -269,10 +269,10 @@ struct ReuseArgs {
     #[arg(group = "source", required_unless_present = "project")]
     path: Option<PathBuf>,
 
-    /// Project mode: project root directory containing `i18n-harness.toml`.
+    /// Folder mode: a folder with an `i18n-harness.toml`.
     ///
     /// Mutually exclusive with the positional `<PATH>` argument. The project
-    /// manifest determines both the base catalogs (filtered to `--locale`) and
+    /// settings file determines both the base catalogs (filtered to `--locale`) and
     /// the reference set for that locale; each matching base is written in
     /// place, using the references in the same format as the base.
     #[arg(long, group = "source")]
@@ -284,7 +284,7 @@ struct ReuseArgs {
 
     /// Ad-hoc mode only: one or more reference catalogs (same format as the base) to pull
     /// translations from. Repeated: `--reference a.ts --reference b.ts`.
-    /// Required in ad-hoc mode; ignored in project mode (the manifest
+    /// Required in ad-hoc mode; ignored in project mode (the settings file's
     /// `[[references]]` for the locale are used instead).
     #[arg(long = "reference", conflicts_with = "project")]
     references: Vec<PathBuf>,
@@ -296,7 +296,7 @@ struct ReuseArgs {
 
     /// Ad-hoc mode only: optional glossary TOML file. Threaded into the gate
     /// so glossary-aware checks run on copied translations. Ignored in project
-    /// mode — the manifest glossary is used instead.
+    /// mode — the folder's glossary is used instead.
     #[arg(long, conflicts_with = "project")]
     glossary: Option<PathBuf>,
 }
@@ -338,14 +338,9 @@ struct MergeArgs {
 /// returns a configuration error at translate time.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum BackendChoice {
-    /// The closure-driven `ManualBackend`. The CLI wires an identity-echo
-    /// closure (returns source verbatim) so the loop is testable end-to-end
-    /// without a model. The same backend powers the two-phase agent CLI
-    /// (`harness import-batch`).
+    /// No model: copies the original text as the translation.
     Manual,
-    /// Local Ollama server at `http://localhost:11434`. Requires the CLI to
-    /// be built with `--features ollama` (forwards to the backend crate's
-    /// matching feature).
+    /// A local Ollama server (`OLLAMA_HOST`, default `http://localhost:11434`).
     Ollama,
 }
 
@@ -2033,7 +2028,7 @@ fn split_remainder(args: SplitRemainderArgs) -> Result<()> {
         .with_context(|| format!("write {}", args.out.display()))?;
 
     println!(
-        "split-remainder: {} → {} ({count} writable-untranslated unit(s))",
+        "split-remainder: {} → {} ({count} string(s) to translate)",
         args.base.display(),
         args.out.display(),
     );

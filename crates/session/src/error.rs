@@ -15,6 +15,30 @@ pub enum SessionError {
     #[error("{0}")]
     Project(#[from] i18n_harness_project::ProjectError),
 
+    /// The folder (and its sub-folders) holds no file in a supported format.
+    #[error(
+        "No translation files found in {}. The app looks for Qt Linguist (.ts), \
+         gettext (.po) and message catalog (.json) files.",
+        root.display()
+    )]
+    NoCatalogs {
+        /// The folder that was opened.
+        root: PathBuf,
+    },
+
+    /// Translation files were found, but the language of none of them could
+    /// be detected.
+    #[error(
+        "Found translation files in {}, but could not tell their language. \
+         Name each file after its language (for example `app_de.ts` or `de/messages.po`), \
+         or set the language inside the file, then open the folder again.",
+        root.display()
+    )]
+    NoCatalogLanguage {
+        /// The folder that was opened.
+        root: PathBuf,
+    },
+
     /// A catalog file could not be read, parsed or written.
     #[error("{0}")]
     Catalog(#[from] i18n_harness_formats::CatalogError),
@@ -83,6 +107,8 @@ impl SessionError {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Project(_) => "project",
+            Self::NoCatalogs { .. } => "no-catalogs",
+            Self::NoCatalogLanguage { .. } => "no-catalog-language",
             Self::Catalog(_) => "catalog",
             Self::UnknownCatalog { .. } => "unknown-catalog",
             Self::UnknownUnit { .. } => "unknown-unit",

@@ -11,8 +11,9 @@ suggestions, fix what needs fixing, and save.
 ## What it does
 
 - **Reads the translation files you already have.** Qt Linguist (`.ts`),
-  gettext (`.po`) and ICU message JSON (`.json`) files are found in the
-  folder automatically, together with their languages. Every language in
+  gettext (`.po`), Lingui (`.po`, `.json`) and ICU message JSON (`.json`)
+  files are found in the folder automatically, together with their
+  languages. Every language in
   the Unicode CLDR database is supported.
 - **Translates with a model of your choice.** The app lists the models
   installed on a local [Ollama](https://ollama.com) server, or on any
@@ -51,13 +52,17 @@ variable and never stored.
 - It does not download models. You install them in Ollama (or your other
   server) yourself; see [Install Ollama and get a model](getting-started/models.md).
 
-## How this book is organised
+## How this guide is organised
 
-- **Getting started** installs the app and a model and walks through a
-  first translation.
+- **[Quick start](quick-start.md)** gets you from download to translated
+  strings in a few steps. Start here.
+- **Getting started** covers installing the app and a model, and a first
+  translation, in detail.
 - **Tutorials** are step-by-step recipes for common situations, each
   with a small example you can reproduce.
-- **Reference** describes the settings file, the command-line tools,
-  the file formats, the checks and the prompt profiles precisely.
-- **For developers** explains the architecture and how to extend, build
-  and release the project.
+- **Reference** describes the settings, the command-line tools, the file
+  formats and the checks precisely.
+
+Want to build i18n-harness yourself or contribute? See
+[Contributing](https://github.com/VitalyVorobyev/i18n-harness/blob/main/CONTRIBUTING.md)
+in the project's repository.

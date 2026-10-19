@@ -28,6 +28,58 @@ pub(crate) fn app_info() -> AppInfo {
     }
 }
 
+/// Where the user guide is published.
+const USER_GUIDE_URL: &str = "https://vitalyvorobyev.github.io/i18n-harness/";
+
+/// Open the user guide in the default browser.
+#[tauri::command]
+pub(crate) fn open_user_guide() -> CommandResult<()> {
+    tauri_plugin_opener::open_url(USER_GUIDE_URL, None::<&str>)
+        .map_err(|e| crate::error::CommandError::internal(e.to_string()))
+}
+
+/// Name of the folder the bundled sample is copied to.
+const SAMPLE_FOLDER: &str = "i18n-harness sample";
+
+/// Copy the bundled sample project into the user's Documents folder (their
+/// home folder when there is none) and return its path. A copy made earlier
+/// is reused as it is, with whatever work was done in it.
+#[tauri::command]
+pub(crate) fn create_sample(app: tauri::AppHandle) -> CommandResult<String> {
+    use tauri::Manager;
+    use tauri::path::BaseDirectory;
+
+    let internal = |e: &dyn std::fmt::Display| crate::error::CommandError::internal(e.to_string());
+    let paths = app.path();
+    let source = paths
+        .resolve("sample", BaseDirectory::Resource)
+        .map_err(|e| internal(&e))?;
+    let parent = paths
+        .document_dir()
+        .or_else(|_| paths.home_dir())
+        .map_err(|e| internal(&e))?;
+    let dest = parent.join(SAMPLE_FOLDER);
+    if !dest.exists() {
+        copy_dir(&source, &dest)
+            .map_err(|e| internal(&format_args!("could not create {}: {e}", dest.display())))?;
+    }
+    Ok(dest.display().to_string())
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 /// A language a user can pick.
 #[derive(Debug, Serialize)]
 pub(crate) struct Language {

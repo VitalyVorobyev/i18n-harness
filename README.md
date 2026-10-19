@@ -1,166 +1,81 @@
 # i18n-harness
 
-[![CI](https://github.com/VitalyVorobyev/i18n-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/VitalyVorobyev/i18n-harness/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/VitalyVorobyev/i18n-harness)](https://github.com/VitalyVorobyev/i18n-harness/releases/latest)
+[![User guide](https://img.shields.io/badge/docs-user_guide-blue)](https://vitalyvorobyev.github.io/i18n-harness/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
-[![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
-[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-red.svg)](#status)
 
-Local-first, offline-by-default translation harness for UI strings.
-Point it at your translation catalogs, let a model fill in untranslated
-entries, and write back a byte-stable result. The default path is fully
-offline (Ollama running on your laptop, no API key, no cloud egress).
-Cloud LLM backends are supported as an opt-in via per-project config,
-and the two-phase CLI lets you delegate translation to an external
-agent (Claude Code / Copilot / Codex) when you want to.
+**Translate your application's text with a language model that runs on
+your own computer.** Open the folder that holds your translation files,
+pick a model, and i18n-harness fills in what is missing. You review the
+suggestions, fix what needs fixing, and save. Every other byte of your
+files stays exactly as it was.
 
-> **The two invariants this project rests on**
->
-> 1. **Languages, translation engines, and catalog formats are data or
->    plugins behind stable extension points.** A new language is a config
->    row. A new engine is a trait impl. A new format is a serializer.
-> 2. **The model translates text; deterministic Rust does everything
->    else.** Parsing, validation, and write-back never go through the LLM.
->    A weak model can produce worse *text*. It cannot corrupt *structure*.
+![The i18n-harness workspace](book/src/images/workspace.png)
 
-## Why
+## Quick start
 
-Most translation tools either (a) require a paid cloud API account to
-do anything at all, or (b) demand you hand-edit catalogs in formats
-built for translators, not developers. `i18n-harness` flips both.
+1. **Install the app.** Download the installer for your system from the
+   [latest release](https://github.com/VitalyVorobyev/i18n-harness/releases/latest)
+   (macOS `.dmg`, Windows `-setup.exe`, Linux `.deb` or `.AppImage`).
+   The builds are not signed yet; [Install the app](https://vitalyvorobyev.github.io/i18n-harness/getting-started/install.html)
+   shows how to open it the first time.
+2. **Get a model.** Install [Ollama](https://ollama.com/download), then
+   download a model in a terminal, for example:
 
-- The **default path** runs entirely on your laptop against a local
-  model server (Ollama). No API key needed, no cloud egress, free to
-  evaluate. Cloud LLMs are an opt-in per-project backend when you
-  want them, not a gate to clear before getting started.
-- A CLDR-driven validation gate guarantees the catalog round-trips
-  byte-stably regardless of which backend produced the translation,
-  so weak models can produce *worse text* but never *broken files*.
-- A per-`(backend, locale)` quality metric tells you empirically how
-  well each engine is doing for each language pair, so you can pick
-  your trade-off (local-and-free vs. cloud-and-strong vs.
-  external-agent) on evidence, not vendor pitch.
+   ```sh
+   ollama pull gemma3:4b
+   ```
+
+   Any model that writes text works; see [Install Ollama and get a model](https://vitalyvorobyev.github.io/i18n-harness/getting-started/models.html)
+   for how to choose.
+3. **Translate.** Start the app and click **Try a sample** (or
+   **Open folder…** for your own files). Choose the model in the toolbar,
+   click **Translate**, check the suggestions under **Check**, and
+   **Save**.
+
+The [Quick start](https://vitalyvorobyev.github.io/i18n-harness/quick-start.html)
+page of the user guide walks through the same steps with screenshots.
+
+## What it does
+
+- **Reads the files you already have:** Qt Linguist (`.ts`), gettext
+  (`.po`), Lingui (`.po` and `.json`) and ICU message JSON (react-intl,
+  i18next). Files and their languages are found automatically, and every
+  language in the Unicode CLDR database is supported.
+- **Translates with the model you choose:** any model on a local Ollama
+  server, or on a server that speaks the OpenAI API (LM Studio, vLLM,
+  llama.cpp, a cloud provider). No model is bundled or preferred.
+- **Never writes a broken translation.** A lost placeholder (`%1`,
+  `{name}`), changed markup, a missing plural form or a glossary term
+  translated against your wishes is marked as a problem and held back
+  from the file.
+- **Keeps track of your review:** each string is *To do*, *Check* or
+  *Done*, and a glossary keeps terms consistent across files.
+- **Stays on your computer.** By default nothing leaves your machine: no
+  account, no API key, no telemetry. A cloud model is an option you turn
+  on per folder.
+
+For unattended runs and automation there are command-line tools
+(`harness`, `harness-lab`) in the same release, and a way to hand a batch
+of strings to an AI coding agent such as Claude Code. See the
+[user guide](https://vitalyvorobyev.github.io/i18n-harness/).
+
+## What it does not do
+
+It does not extract strings from source code (use `lupdate`, `xgettext`,
+`lingui extract`, `formatjs extract`, …) or compile translations
+(`lrelease`, `msgfmt`). It translates the files those tools produce. It
+catches *broken* translations, not *bad* ones: a person who knows the
+language should check the suggestions before they ship.
 
 ## Documentation
 
-The user guide — installing the app, getting a model, step-by-step
-tutorials for each file format, and the reference for the settings file,
-the command-line tools and the checks — is published at
-**<https://vitalyvorobyev.github.io/i18n-harness/>**. Its source is in
-[`book/`](book/) (build it with `mdbook build book`).
-
-## Status
-
-**Pre-alpha.** Core, multi-catalog project mode (with reference
-catalogs), all three target catalog formats (Qt `.ts`, PO, ICU-JSON)
-behind one format registry, every CLDR language, the validation gate,
-the local Ollama backend, runtime model discovery for Ollama and
-OpenAI-compatible servers, the Tauri desktop UI, quality evaluation,
-the two-phase agent translation CLI, and deterministic reference reuse /
-remainder split / merge (copy expert translations by exact unit-id
-match, carve the leftover, merge it back — no model) are all in. UI integration of
-the agent flow is the next visible step. See
-[`docs/roadmap-product.md`](docs/roadmap-product.md) for the
-translator-facing milestone log and
-[`docs/initial_design.md`](docs/initial_design.md) for the full design.
-
-## Scope
-
-**Catalog formats:** Qt Linguist `.ts`, gettext PO, Lingui (PO and JSON
-catalogs), ICU-JSON for react-intl / i18next. Each is a `CatalogFormat` plugin listed in one
-registry (`crates/formats`) — new formats land as plugins, not parser
-rewrites, and nothing outside the plugin names them.
-
-**Translation engines:**
-
-- `manual` — closure-driven, no model. The trait substrate; also the
-  engine the agent-translation CLI routes through.
-- `ollama` — any model on a local Ollama server; the
-  offline-by-default path. The harness ships and names no models: the
-  installed ones are discovered at runtime (`/api/tags`, `/api/show`),
-  and how each wants to be prompted (chat or raw completion) is read
-  from what the server reports.
-- OpenAI-compatible servers (vLLM, LM Studio, llama.cpp server, cloud
-  APIs) — model discovery is in; the translation transport is next.
-  Endpoint and API key per project; the harness stores no credentials.
-- **Two-phase agent CLI** (`harness export-batch` /
-  `harness import-batch` + the
-  [`translate-i18n-batch`](skills/translate-i18n-batch/) skill) for
-  delegating translation to an external Claude Code, Copilot, or
-  Codex session running on the user's machine. The harness writes a
-  self-contained batch folder; the agent fills `targets.jsonl`; the
-  harness ingests the result and runs the validation gate. No
-  in-process model dependency.
-
-**Locales:** every language in Unicode CLDR (plural categories, script
-and display name are generated from pinned CLDR data), with harness
-defaults for register and length in `crates/locales/data/defaults.toml`.
-A new target language needs no code; a project tunes it in its
-`[locales.<id>]` table.
-
-## Quick check
-
-```sh
-cargo build --workspace
-cargo test  --workspace --all-targets
-cargo run   -p i18n-harness-cli -- --help
-cargo app-run                   # build and start the desktop app (add --release)
-```
-
-The first app build needs `bun install` in `ui/` once.
-
-## Architecture (one paragraph)
-
-```
-catalog ─► adapter ─► intermediate (ICU JSONL) ─► backend ─► gate ─► adapter ─► catalog'
-           extract                                translate           write-back
-```
-
-The catalog is the source of truth. The intermediate (per-`Unit` JSONL,
-all placeholders normalized to ICU MessageFormat) is transient and
-regenerable. Adapters know about file formats and placeholders; backends
-know about text; the validation gate knows about CLDR plural arity and
-placeholder integrity. The three never overlap.
-
-## Repository layout
-
-```
-i18n-harness/
-├── crates/
-│   ├── core/           # Unit, intermediate (ICU), batches
-│   ├── locales/        # generated CLDR table + harness defaults (data)
-│   ├── gate/           # validation gate (CLDR-driven, format-agnostic)
-│   ├── glossary/       # per-project TOML glossary
-│   ├── backend/        # TranslationBackend trait + impls
-│   ├── catalog/        # CatalogFormat / FormatDoc traits + PO/ICU-JSON
-│   ├── adapter-qt/     # Qt .ts format (XML round-trip) + subset writer
-│   ├── formats/        # the registry of every built-in format
-│   ├── project/        # project manifest (multi-catalog + references), state
-│   ├── reuse/          # reference reuse / remainder split / merge (no model)
-│   └── cli/            # `harness` binary
-├── xtask/              # maintainer tasks (CLDR data generation)
-├── ui/                 # Tauri 2 + Vite + React desktop shell
-├── docs/               # design + plan
-├── fixtures/           # round-trip + gate test inputs
-└── .claude/            # subagents + project skills
-```
-
-## Contributing
-
-The project is in early scaffolding; the design lives in
-[`docs/initial_design.md`](docs/initial_design.md) and the working
-agreement in [`CLAUDE.md`](CLAUDE.md). Three kinds of contribution land
-without touching the core, each guided by a project skill under
-[`.claude/skills/`](.claude/skills/):
-
-- **`add-locale`** — a new locale is a config row + CLDR arity + a
-  round-trip fixture.
-- **`add-backend`** — a new `TranslationBackend` is a feature-gated
-  trait impl + a prompt template + a smoke test.
-- **`add-format`** — a new `CatalogFormat` is a feature-gated serializer
-  with an ICU placeholder converter and a round-trip property test.
-
-The round-trip contract (byte-identical `extract → apply` on every
-fixture) is non-negotiable and enforced in CI.
+- **[User guide](https://vitalyvorobyev.github.io/i18n-harness/)**:
+  installing, getting a model, tutorials for each file format, and the
+  reference for settings, checks and the command-line tools.
+- **[Changelog](CHANGELOG.md)**: what changed in each release.
+- **[Contributing](CONTRIBUTING.md)**: building from source, the
+  architecture and how to extend it.
 
 ## License
 

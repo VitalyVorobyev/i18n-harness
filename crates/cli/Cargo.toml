@@ -6,14 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Headless `harness` CLI — the entry point for both human and (later) Tauri UI use."
+description = "The `harness` command-line tool: translate, check and hand off translation catalogs without the desktop app."
 
 [[bin]]
 name = "harness"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["ollama"]
 # Forwards to backend crate's `ollama` feature. Enables `--backend ollama` in
 # `harness translate` against a local Ollama server.
 ollama = ["i18n-harness-backend/ollama"]

@@ -70,8 +70,9 @@ The app then appears in your application menu.
 
 ## What you should see
 
-The start screen, with an **Open folder…** button and a box telling you
-whether a model server is running:
+The start screen, with **Open folder…**, **Try a sample** (until you
+choose **Don’t show again** under it), a box telling you whether a model
+server is running, and a link to this guide:
 
 ![Start screen](../images/start.png)
 
@@ -81,5 +82,6 @@ and edit translations by hand without a model.
 
 ## Build it yourself
 
-To build the app from source instead, see
-[Building and testing](../developers/building.md).
+To build the app from source instead, follow
+[Building and testing](https://github.com/VitalyVorobyev/i18n-harness/blob/main/docs/contributing/building.md)
+in the project's repository.

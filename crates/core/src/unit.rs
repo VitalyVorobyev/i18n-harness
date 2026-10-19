@@ -411,7 +411,7 @@ impl Unit {
 /// result = "sha256:" + hex(digest)[..12]
 /// ```
 ///
-/// See `docs/m4.1.5-source-hash-review-status-design.md` §2 for the rationale.
+/// See `docs/internal/m4.1.5-source-hash-review-status-design.md` §2 for the rationale.
 pub fn compute_source_hash(
     source: &str,
     disambiguation: &str,

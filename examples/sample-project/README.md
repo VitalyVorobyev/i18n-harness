@@ -1,36 +1,21 @@
-# Sample project
+# i18n-harness sample
 
-A minimal `i18n-harness` project for exercising the desktop app and the
-CLI end-to-end. Three Qt `.ts` catalogs (`de_DE`, `es_ES`, `zh_Hans`),
-one glossary, no external dependencies.
+A small example to try i18n-harness on: the translation files of an
+imaginary application, in German, Spanish and Chinese (Qt Linguist `.ts`
+files under `translations/`), and a glossary with three terms.
 
-## Try it in the CLI
+Most strings are not translated yet. A few things to look at:
 
-```sh
-cargo run -p i18n-harness-cli -- open examples/sample-project
-```
+- **Translate** fills them in with the model you choose.
+- *%n unread message(s)* has plural forms: German has two, Chinese one.
+- *Open %1 from %2* has placeholders the translation must keep; delete
+  one in the editor and the string is marked as a problem.
+- **Glossary** in the toolbar lists the terms: *Cancel*, *Save* and
+  *Theme* must be translated the same way everywhere.
+- **Save** writes the translations into the files in `translations/`.
 
-Prints the manifest summary: 3 catalogs, 3 locales, glossary loaded.
+The app keeps its own bookkeeping in a hidden `.i18n-harness` folder next
+to this file. To start over, delete this folder; **Try a sample** on the
+start screen makes a fresh copy.
 
-## Try it in the desktop app
-
-```sh
-cd ui && bun tauri:dev
-```
-
-In the app's home screen, click **Open project folder** and pick
-`examples/sample-project`. You should see:
-
-- Sidebar with three catalogs.
-- Triptych editor when you click one.
-- Glossary tab with the three terms.
-- Topbar's **Close project** returns to the home screen.
-
-Most units start untranslated so you can exercise the editor and (if you
-have a local Ollama server with a Gemma model) the Translate button.
-
-## Runtime state
-
-`.i18n-harness/` is created next to the manifest the first time you open
-the project. It holds metrics, corrections, and review status — all
-gitignored.
+The user guide: <https://vitalyvorobyev.github.io/i18n-harness/>

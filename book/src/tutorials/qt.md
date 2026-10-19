@@ -57,9 +57,10 @@ It has the usual ingredients of a Qt UI file:
 
 ## Steps
 
-1. Open the app, click **Open folder…** and choose `qt-demo`.
-   **Files** shows `app_de.ts` with *German · Qt Linguist* and
-   *4 to do*.
+1. Open the app, click **Open folder…** and choose `qt-demo`. The file
+   list shows the heading *German · Qt Linguist* and under it the file
+   by its short name, `app`, with a mostly grey bar and the numbers
+   *5 · 5 · 1*: five strings, all unique to this file, one translated.
 2. Pick a model in the toolbar.
 3. Click **Translate 4 strings**. Wait for *Finished. 4 translated*.
 4. Click **Check** and go through the four suggestions.

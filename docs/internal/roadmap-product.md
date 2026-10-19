@@ -6,7 +6,7 @@ backend benchmarking or maintainer research (that lives in
 [`roadmap-lab.md`](roadmap-lab.md)).
 
 For the architectural intent, see [`initial_design.md`](initial_design.md).
-For the day-to-day working contract, see [`../CLAUDE.md`](../CLAUDE.md).
+For the day-to-day working contract, see [`../CLAUDE.md`](../../CLAUDE.md).
 
 ## What a translator can do today
 
@@ -555,8 +555,8 @@ surface for it, so the skill, the bundle export and its README were
 removed. The evaluation store in `crates/project` remains.
 
 Ship the bundle schema as a stable contract and a sibling
-[`skills/tune-i18n-prompt/`](../skills/tune-i18n-prompt/) Claude Code
-skill that consumes it:
+`tune-i18n-prompt` Claude Code
+skill (retired) that consumes it:
 
 - Reads a tuning bundle path.
 - Diffs `mt_proposal` vs `human_target` across examples; identifies
@@ -638,12 +638,12 @@ CLI dispatch (separate milestone).
 
 Two-file skill spec for external Claude Code sessions:
 
-- [`skills/translate-i18n-batch/README.md`](../skills/translate-i18n-batch/README.md)
+- [`skills/translate-i18n-batch/README.md`](translate-i18n-batch-spec.md)
   — the procedural body: bundle layout, `units.jsonl` /
   `targets.jsonl` schemas, ICU placeholder rules, plural CLDR forms,
   glossary precedence, register handling, markup tag rules,
   failure modes.
-- [`.claude/skills/translate-i18n-batch/SKILL.md`](../.claude/skills/translate-i18n-batch/SKILL.md)
+- [`.claude/skills/translate-i18n-batch/SKILL.md`](../../.claude/skills/translate-i18n-batch/SKILL.md)
   — frontmatter + slash-command surface (`/translate-i18n-batch
   <path>`); body delegates to the README.
 

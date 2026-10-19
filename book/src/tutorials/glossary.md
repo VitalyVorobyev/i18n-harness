@@ -42,7 +42,7 @@ must stay in English. *Layer* must always be *Ebene* in this product.
 ## Steps
 
 1. Open `glossary-demo` in the app and click **Glossary** in the toolbar
-   (next to **Strings**).
+   (next to **Strings** and **Across files**).
 2. Click **Add term** and type `ParamsManager`. **Keep unchanged** is
    ticked for a new term. In **Note** write *Class name*.
 3. Add `PhotoVault` the same way, with the note *Product name*.
@@ -105,9 +105,10 @@ Matching details:
   differently in its last two letters when it is longer than four letters,
   so *Ebenen* or *súboru* count as *Ebene* or *súbor*.
 - **Note** is for people; it is not sent to the model.
-- Fixed translations belong to one language. The column header shows
-  which: the language of the file selected when you opened Settings. Open
-  Settings from a file of another language to fill in that language.
+- Fixed translations belong to one language, named in the header of
+  the translation column. It starts as the language of the selected
+  file. When the folder has files in several languages, a **Language**
+  picker at the top left of the glossary switches to another one.
   *Keep unchanged* applies to all languages.
 
 ## The term table
@@ -146,8 +147,9 @@ checks find them: a changed *keep unchanged* term is a red problem, a
 missing fixed translation a yellow warning.
 
 1. Open **Glossary**. The button at the top reads
-   **Apply to N strings**, counting every file of the folder, whatever
-   the strings' status. (The same command is in the menu next to
+   **Apply to N strings**, counting the translations that break the
+   glossary in every file of the folder, whatever their status. When
+   there are none it reads *Every translation follows it*. (The same command is in the menu next to
    **Translate**, as *Apply the glossary*.)
 2. Click it. Those strings are translated again with the glossary in the
    prompt and land under **Check** for review.
@@ -157,8 +159,9 @@ missing fixed translation a yellow warning.
 The command-line equivalent is
 `harness translate-folder <folder> --model <model> --fix-glossary --save`.
 
-> **Dedicated translation models do not read the glossary.** A model
-> without a chat template (such as MiLMMT) is given only the text, so
+> **Dedicated translation models do not read the glossary.** Such a
+> model (marked *translation model* in the model picker) is given only
+> the text, so
 > retranslating with it cannot fix a glossary term. Apply the glossary
 > with a chat model, fix the remaining strings by hand, or hand them to an
 > agent ([Hand a batch to an AI coding agent](agent.md)).

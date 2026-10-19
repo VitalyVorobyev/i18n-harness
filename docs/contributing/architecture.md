@@ -45,7 +45,7 @@ catalog ─► format (read) ─► units (ICU form) ─► backend ─► gate 
 | `crates/gate` | The checks. Format- and backend-agnostic. |
 | `crates/glossary` | The glossary TOML: load, validate, edit, save. |
 | `crates/backend` | The `TranslationBackend` trait; `ModelBackend` (Ollama and OpenAI-compatible, driven by prompt profiles in `profiles/`); model discovery; the manual backend; the agent batch format. |
-| `crates/catalog` | The `CatalogFormat` / `FormatDoc` traits and the gettext PO and ICU-JSON formats. |
+| `crates/catalog` | The `CatalogFormat` / `FormatDoc` traits and the gettext PO, Lingui (PO and JSON) and ICU-JSON formats. |
 | `crates/adapter-qt` | The Qt Linguist `.ts` format (its XML handling is large enough for its own crate) and the subset writer used by split-remainder. |
 | `crates/formats` | `FormatRegistry`: the one list of built-in formats; detection by sniffing. |
 | `crates/project` | `i18n-harness.toml`: parsing, editing with comments preserved, discovery of catalogs in a folder, locale resolution, the review store and other state under `.i18n-harness/`. |

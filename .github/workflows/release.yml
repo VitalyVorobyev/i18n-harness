@@ -57,10 +57,21 @@ jobs:
           # The id comes from the create call itself: a new draft is not in
           # the release list straight away, and without an id the desktop
           # jobs build but upload nothing.
+          # The notes are the version's section of CHANGELOG.md, written for
+          # users; GitHub's generated list of pull requests only stands in
+          # when there is no such section.
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            index($0, "## " v) == 1 && (length($0) == length(v) + 3 || substr($0, length(v) + 4, 1) == " ") { f = 1; next }
+            /^## / { f = 0 }
+            f
+          ' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then notes=(-f body="$(cat notes.md)" -F generate_release_notes=false)
+          else notes=(-F generate_release_notes=true); fi
           id=$(gh release view "$GITHUB_REF_NAME" --json databaseId --jq .databaseId 2>/dev/null) || \
             id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
-              -f tag_name="$GITHUB_REF_NAME" -f name="i18n-harness $GITHUB_REF_NAME" \
-              -F draft=true -F prerelease=$prerelease -F generate_release_notes=true --jq .id)
+              -f tag_name="$GITHUB_REF_NAME" -f name="i18n-harness $version" \
+              -F draft=true -F prerelease=$prerelease "${notes[@]}" --jq .id)
           if [ -z "$id" ]; then
             echo "::error::no release id for $GITHUB_REF_NAME"
             exit 1

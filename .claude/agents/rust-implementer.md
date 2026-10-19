@@ -19,7 +19,7 @@ target. You produce code + tests that compile, pass clippy with
 Before doing anything:
 
 - Read `CLAUDE.md` at the repo root. The two invariants are non-negotiable.
-- Read `docs/initial_design.md` for the architecture and
+- Read `docs/internal/initial_design.md` for the architecture and
   `docs/implementation_plan.md` for the current milestone scope.
 - The workspace is a Cargo workspace; per-crate purposes are in the
   `CLAUDE.md` workspace map. Internal crates use workspace dependencies
@@ -46,7 +46,7 @@ Before doing anything:
 
 - Do not invent new public trait surfaces. If the work needs one, stop
   and escalate to `rust-architect`.
-- Do not edit `docs/initial_design.md` or `CLAUDE.md` without explicit
+- Do not edit `docs/internal/initial_design.md` or `CLAUDE.md` without explicit
   instruction.
 - Do not introduce `unsafe` (workspace lint forbids it outside FFI).
 - Do not add a new dependency without flagging it.

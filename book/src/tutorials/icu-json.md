@@ -1,10 +1,18 @@
 # Translate ICU message JSON
 
-Web applications using react-intl / FormatJS, i18next (with its ICU
-plugin) or Lingui keep one JSON file per language. Each value is an ICU
-message: `Hello, {name}!`, `{count, plural, one {# photo} other {# photos}}`.
+Web applications using react-intl / FormatJS or i18next (with its ICU
+plugin) keep one JSON file per language. Each value is an ICU message:
+`Hello, {name}!`, `{count, plural, one {# photo} other {# photos}}`.
 
-Unlike Qt and PO files, such a file holds **only one language**: there is
+Lingui projects are different: their PO and JSON catalogs keep the
+original next to each translation, so they are translated like a
+[gettext PO file](po.md), without the copy step below. See
+[Lingui catalogs](../reference/formats.md#lingui) for how they are
+recognised. (Lingui's *minimal* JSON style, a plain map of ids to
+translations, is read as ICU message JSON and follows this tutorial.)
+
+Unlike Qt, PO and Lingui files, an ICU message JSON file holds **only
+one language**: there is
 no separate "original" text next to each translation. The way to
 translate one with i18n-harness is therefore to start the new language
 as a **copy of the English file** and tell the app that its texts are
@@ -35,8 +43,9 @@ A folder `json-demo` with `locales/en.json`:
 ## Steps
 
 1. Copy `locales/en.json` to `locales/fr.json`.
-2. Open `json-demo` in the app. The files `en` (under *English*) and `fr`
-   (under *French*) both have a full green bar: the French file still
+2. Open `json-demo` in the app. The files `en` (under *English · ICU
+   MessageFormat JSON*) and `fr` (under *French · ICU MessageFormat
+   JSON*) both have a full green bar: the French file still
    contains English, and the app cannot know that yet.
 3. Click **⋯** next to `fr.json`, choose **Language of the existing
    text…**, pick **English** and click **Apply**. All five French strings
@@ -59,20 +68,25 @@ A run with a dedicated translation model gave:
 |---|---|---|
 | `app.title` | `Bibliothèque de photos` | clean |
 | `app.greeting` | `Bonjour, {nom}!` | red: *Placeholders do not match the original: missing {name}; unexpected {nom}* |
-| `app.photos` | `{count, pluriel, un {# photo} les autres {# photos}}` | **clean — but broken** |
+| `app.photos` | `{count, pluriel, un {# photo} les autres {# photos}}` | red: *Placeholders do not match the original: missing {count, plural}; unexpected {count, pluriel}* |
 | `actions.delete` | `Supprimer` | clean |
 | `actions.share` | `Partager avec {personne}` | red: missing `{person}` |
 
-The two red ones are held back on save: `fr.json` keeps `Hello, {name}!`
-there until you type `Bonjour, {name} !` and `Partager avec {person}`.
+The three red ones are held back on save: `fr.json` keeps the English
+text there until you correct them — `Bonjour, {name} !`,
+`Partager avec {person}`, and the plural message below.
 
-The plural message shows a current gap: the whole ICU message is sent to
-the model as one text, and the model translated the keywords `plural`,
-`one` and `other`, which must stay English. The checks do not yet catch
-this, so the broken message would be saved. **Check every message with
-`plural`, `select` or `selectordinal` by hand**: only the text inside the
-inner braces may change —
-`{count, plural, one {# photo} other {# photos}}`.
+In the plural message the model translated the keywords `plural`, `one`
+and `other`, which must stay English: the application would no longer
+recognise the message. The check catches a changed `plural`, `select` or
+`selectordinal`. Only the text inside the inner braces may change:
+
+```text
+{count, plural, one {# photo} other {# photos}}
+```
+
+The category names (`one`, `few`, `other`, …) are not checked, so still
+look at every plural or select message yourself.
 
 ## Notes
 

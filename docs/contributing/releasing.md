@@ -16,9 +16,13 @@ Releases are built by GitHub Actions from a version tag
    same version on the internal crates under `[workspace.dependencies]`
    and in `ui/package.json`; Cargo matches a pre-release such as
    `0.2.0-rc.1` only when it is named exactly.
-2. Run the full checks locally ([Building and testing](building.md)),
+2. Move the *Unreleased* section of `CHANGELOG.md` under a heading
+   `## <version> — <date>` and write it for users: what they can do now,
+   what changed, known limitations, and the download table. This section
+   becomes the release notes.
+3. Run the full checks locally ([Building and testing](building.md)),
    commit, and merge to `main`.
-3. Tag the commit and push the tag:
+4. Tag the commit and push the tag:
 
    ```sh
    git tag v0.2.0
@@ -28,8 +32,10 @@ Releases are built by GitHub Actions from a version tag
    A tag with a suffix, such as `v0.2.0-rc.1`, makes a pre-release.
    Windows installers need a numeric version, so the workflow builds the
    MSI of `0.2.0-rc.1` as `0.2.0.1`.
-4. The workflow checks that the tag matches the workspace version, then
-   creates a **draft** release with generated notes and attaches:
+5. The workflow checks that the tag matches the workspace version, then
+   creates a **draft** release with the `CHANGELOG.md` section as its notes
+   (GitHub's generated list of pull requests when there is none) and
+   attaches:
 
    | Platform | Desktop app | Command-line tools |
    |---|---|---|
@@ -39,9 +45,9 @@ Releases are built by GitHub Actions from a version tag
    | Linux x64 | `.deb`, `.AppImage` | `…-linux-x64.tar.gz` |
 
    Each command-line archive contains `harness`, `harness-lab`, the
-   licence files and the README, with a `.sha256` checksum next to it.
-5. Download and try the installers, edit the notes, and **publish the
-   draft** by hand.
+   licence files and the README (which is written for users), with a `.sha256` checksum next to it.
+6. Download and try the installers (at least: **Try a sample**, translate,
+   save), and **publish the draft** by hand.
 
 ## Signing
 
@@ -52,7 +58,7 @@ Releases are built by GitHub Actions from a version tag
 - **Windows** builds are unsigned.
 
 For unsigned builds, users follow the steps in
-[Install the app](../getting-started/install.md). Mention in the release
+[Install the app](https://vitalyvorobyev.github.io/i18n-harness/getting-started/install.html). Mention in the release
 notes whether a build is signed.
 
 ## The book

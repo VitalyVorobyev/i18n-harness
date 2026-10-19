@@ -8,6 +8,8 @@ import type { TranslationEvent } from "./types";
 /** The real backend: Tauri commands. */
 export const tauriApi: Api = {
   appInfo: () => invoke("app_info"),
+  openUserGuide: () => invoke("open_user_guide"),
+  createSample: () => invoke("create_sample"),
   listLanguages: () => invoke("list_languages"),
   pickFolder: async () => {
     const picked = await open({ directory: true, multiple: false });

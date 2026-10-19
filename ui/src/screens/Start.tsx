@@ -1,21 +1,35 @@
 import { Button, Callout, Panel, Skeleton, ThemeToggle } from "@vitavision/ui";
-import { FolderOpen, X } from "lucide-react";
+import { BookOpen, FlaskConical, FolderOpen, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import type { ModelChoice } from "../api";
+import type { AppInfo, ModelChoice } from "../api";
 import { DEFAULT_MODEL_SETTINGS, errorMessage, useApi } from "../api";
 import { plural } from "../lib/format";
 import { folderName, forgetFolder, recentFolders } from "../lib/recent";
+import { hideSample, sampleHidden } from "../lib/sample";
 
 type ServerState =
   | { kind: "checking" }
   | { kind: "ready"; models: ModelChoice[] }
   | { kind: "down"; message: string };
 
-export function Start(props: { opening: boolean; onOpen: (path: string) => void }) {
+export function Start(props: {
+  opening: boolean;
+  onOpen: (path: string) => void;
+  onSample: () => void;
+}) {
   const api = useApi();
   const [recent, setRecent] = useState(recentFolders);
+  const [showSample, setShowSample] = useState(() => !sampleHidden());
   const [server, setServer] = useState<ServerState>({ kind: "checking" });
+  const [info, setInfo] = useState<AppInfo | null>(null);
+
+  useEffect(() => {
+    api
+      .appInfo()
+      .then(setInfo)
+      .catch(() => setInfo(null));
+  }, [api]);
 
   useEffect(() => {
     let live = true;
@@ -43,7 +57,8 @@ export function Start(props: { opening: boolean; onOpen: (path: string) => void 
           <h1 className="text-2xl font-semibold">i18n-harness</h1>
           <p className="text-fg-muted">
             Translate your application's text with a language model that runs on this computer. Open
-            the folder that holds the translation files.
+            the folder that holds the translation files
+            {showSample ? ", or try the app on a small sample first" : ""}.
           </p>
         </header>
 
@@ -58,9 +73,35 @@ export function Start(props: { opening: boolean; onOpen: (path: string) => void 
               Open folder…
             </Button>
             <p className="text-sm text-fg-subtle">
-              Qt Linguist (.ts), gettext (.po) and ICU message (.json) files are found
-              automatically, with their languages.
+              Qt Linguist (.ts), gettext and Lingui (.po), and message catalog (.json) files are
+              found automatically, with their languages.
             </p>
+            {showSample && (
+              <>
+                <Button
+                  variant="secondary"
+                  icon={<FlaskConical aria-hidden size={16} />}
+                  disabled={props.opening}
+                  onClick={props.onSample}
+                >
+                  Try a sample
+                </Button>
+                <p className="text-sm text-fg-subtle">
+                  Opens a small example app with German, Spanish and Chinese files, copied to the
+                  folder “i18n-harness sample” in your Documents.{" "}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-fg"
+                    onClick={() => {
+                      hideSample();
+                      setShowSample(false);
+                    }}
+                  >
+                    Don’t show again
+                  </button>
+                </p>
+              </>
+            )}
           </div>
         </Panel>
 
@@ -107,18 +148,35 @@ export function Start(props: { opening: boolean; onOpen: (path: string) => void 
           )}
           {server.kind === "ready" && server.models.length === 0 && (
             <Callout tone="warning" title="Ollama has no models">
-              Download a model in Ollama to translate (for example a translation model from Hugging
-              Face). You can still open files and edit translations.
+              Download a model to translate: in a terminal, run <code>ollama pull</code> followed by
+              a model name. The user guide suggests where to start. You can still open files and
+              edit translations.
             </Callout>
           )}
           {server.kind === "down" && (
             <Callout tone="warning" title="Ollama is not running">
-              Start Ollama to translate with a local model. You can still open files and edit
-              translations by hand.
-              <span className="mt-1 block text-xs text-fg-subtle">{server.message}</span>
+              Start Ollama to translate with a local model, or choose another server (LM Studio,
+              vLLM, a cloud API) in Settings once a folder is open. You can still open files and
+              edit translations by hand.
+              <details className="mt-1 text-xs text-fg-subtle">
+                <summary className="cursor-pointer">Details</summary>
+                {server.message}
+              </details>
             </Callout>
           )}
         </section>
+
+        <footer className="flex items-center justify-between text-sm text-fg-subtle">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<BookOpen aria-hidden size={14} />}
+            onClick={() => void api.openUserGuide()}
+          >
+            User guide
+          </Button>
+          {info && <span>Version {info.version}</span>}
+        </footer>
       </main>
     </div>
   );

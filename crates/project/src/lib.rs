@@ -21,7 +21,7 @@
 //!
 //! # Design contract
 //!
-//! See `docs/m4.1-project-crate-design.md` for the full architecture,
+//! See `docs/internal/m4.1-project-crate-design.md` for the full architecture,
 //! extension points, and the slice-by-slice implementation plan.
 
 #![forbid(unsafe_code)]

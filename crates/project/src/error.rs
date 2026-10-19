@@ -207,6 +207,13 @@ pub enum ProjectWarning {
         locale: String,
     },
 
+    /// Discovery found a catalog but could not detect its language, so it
+    /// was not added to the manifest.
+    CatalogLanguageUnknown {
+        /// Root-relative path of the catalog.
+        path: PathBuf,
+    },
+
     /// A `[[references]]` entry points at a file that does not exist on disk.
     /// The entry is still listed with `Missing` status; operations that require
     /// the file will fail when they attempt to read it.
@@ -236,18 +243,28 @@ impl std::fmt::Display for ProjectWarning {
             Self::UnknownLocale { locale } => {
                 write!(
                     f,
-                    "manifest references locale `{locale}` which is not in the workspace locales table"
+                    "i18n-harness.toml has settings for the language `{locale}`, which is not a known language code"
                 )
             }
             Self::UnknownCatalogLocale { path, locale } => {
                 write!(
                     f,
-                    "catalog `{}` declares locale `{locale}` which is not in the workspace locales table",
+                    "{} is set to the language `{locale}`, which is not a known language code; \
+                     correct its `locale` in i18n-harness.toml",
+                    path.display()
+                )
+            }
+            Self::CatalogLanguageUnknown { path } => {
+                write!(
+                    f,
+                    "{} was left out: its language could not be detected. Name the file after \
+                     its language (for example `app_de.ts`) and remove i18n-harness.toml, or add \
+                     it to i18n-harness.toml with a `locale`",
                     path.display()
                 )
             }
             Self::ReferenceNotFound { path } => {
-                write!(f, "reference `{}` not found on disk", path.display())
+                write!(f, "the reference file {} does not exist", path.display())
             }
             Self::ReferenceFormatMismatch {
                 path,
@@ -256,7 +273,7 @@ impl std::fmt::Display for ProjectWarning {
             } => {
                 write!(
                     f,
-                    "reference `{}` declared {declared:?} but content looks like {sniffed:?}",
+                    "the reference file {} is set to the format `{declared}`, but its content looks like {sniffed}",
                     path.display()
                 )
             }

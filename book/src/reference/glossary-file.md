@@ -8,8 +8,9 @@ The glossary is a TOML file, by default `glossary.toml` next to
 path = "glossary.toml"
 ```
 
-The app's **Settings → Glossary** tab edits it; you can also edit it by
-hand. The app writes terms in alphabetical order.
+The app's **Glossary** view (in the toolbar, next to **Strings** and
+**Across files**) edits it; you can also edit it by hand. The app writes
+terms in alphabetical order.
 
 ## Example
 
@@ -62,7 +63,6 @@ file's `[locales.<id>]`:
 | Key | Type | Meaning |
 |---|---|---|
 | `register` | `"formal"`, `"informal"`, `"neutral"` | How to address the user. |
-| `variant` | string | Variant tag. Recorded; not used by the current translation path. |
 
 ## How each entry is used
 

@@ -1,6 +1,6 @@
 //! `CatalogFormat` trait and non-Qt serializers (PO; ICU-JSON).
 //!
-//! See `docs/initial_design.md` §6 and `CLAUDE.md` invariant #1 — catalog
+//! See `docs/internal/initial_design.md` §6 and `CLAUDE.md` invariant #1 — catalog
 //! formats are plugins behind a stable extension point. This crate hosts the
 //! trait surface and every implementation except Qt (which lives in
 //! `adapter-qt` because its XML parser dominates).

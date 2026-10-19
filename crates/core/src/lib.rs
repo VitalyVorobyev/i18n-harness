@@ -7,7 +7,7 @@
 //! processes (export-batch / import-batch). Nothing in this crate names
 //! a specific catalog format, locale, or translation engine — those concerns
 //! belong to adapters, locale records, and backend implementations
-//! respectively (see `docs/initial_design.md` §1).
+//! respectively (see `docs/internal/initial_design.md` §1).
 //!
 //! # Stability
 //!

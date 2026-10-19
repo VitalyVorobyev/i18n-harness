@@ -5,7 +5,7 @@
 //! `insta::assert_json_snapshot!`. Snapshots live under
 //! `tests/snapshots/discovery_snapshot__<scenario>.snap`.
 //!
-//! Scenarios mirror design `docs/m4.1-project-crate-design.md` §11.
+//! Scenarios mirror design `docs/internal/m4.1-project-crate-design.md` §11.
 //! The walker's depth, skip-list, and per-format sniff behavior are all
 //! locked here as observable contracts.
 

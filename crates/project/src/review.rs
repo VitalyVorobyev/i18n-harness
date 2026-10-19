@@ -5,7 +5,7 @@
 //! `(catalog, unit_id)` pair. [`ReviewStore::append`] adds a new event.
 //!
 //! This module mirrors the pattern of `crates/project/src/memory.rs`
-//! (`CorrectionStore`). See `docs/m4.1.5-source-hash-review-status-design.md`
+//! (`CorrectionStore`). See `docs/internal/m4.1.5-source-hash-review-status-design.md`
 //! §5 for the design rationale.
 
 use std::collections::BTreeMap;

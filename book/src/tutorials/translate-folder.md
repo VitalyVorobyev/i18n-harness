@@ -7,8 +7,9 @@ identical, and you can open the folder in the app afterwards to review.
 
 ## Before you start
 
-Install the command-line tools (the `i18n-harness-cli-…` archive of a
-release, or [build them](../developers/building.md)) and make sure the
+Install the command-line tools (see
+[Get the command-line tools](../reference/cli.md#get-the-command-line-tools))
+and make sure the
 model is available on the server (`ollama list`).
 
 ## 1. A trial run

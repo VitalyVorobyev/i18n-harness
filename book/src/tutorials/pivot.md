@@ -59,9 +59,11 @@ Create a folder `pivot-demo` with `app_sk_SK.ts`:
 
 ## Steps
 
-1. Open `pivot-demo` in the app. `app` is listed under *Slovak · Qt
-   Linguist*, and only the two empty strings count as *to do* — the app
-   believes the German texts are Slovak.
+1. Open `pivot-demo` in the app. The file is listed as `app` under the
+   heading *Slovak · Qt Linguist*, with the numbers *6 · 6 · 3*: of its
+   six strings, three already count as translated — the app believes the
+   German texts are Slovak. Only the strings with no text, or with empty
+   plural forms, are still to do.
 2. Hover `app` in the file list, click its **⋯** button and choose
    **Language of the existing text…**.
 
@@ -102,20 +104,21 @@ from the original.
 
 ## Expected result
 
-A run with a dedicated translation model produced this (abridged):
+A run with a dedicated translation model produced this (abridged),
+saved before any string was marked **Done**:
 
 ```xml
 <source>Filter Size</source>
-<translation>Veľkosť filtra</translation>
+<translation type="unfinished">Veľkosť filtra</translation>
 ...
 <source>&lt;b&gt;Ignore&lt;/b&gt; defects under %1 mm</source>
-<translation>&lt;b&gt;Ignoruj&lt;/b&gt; chyby menšie ako %1 mm</translation>
+<translation type="unfinished">&lt;b&gt;Ignoruj&lt;/b&gt; chyby menšie ako %1 mm</translation>
 ...
 <source>Open ParamsManager</source>
 <translation type="unfinished">Otvoriť ParamsManager</translation>
 ...
 <source>%n file(s) successfully imported.</source>
-<translation>
+<translation type="unfinished">
     <numerusform>%n súbor(ov) bol(i) úspešne importovaný(é).</numerusform>
     <numerusform>Úspešne importovaných %n súborov.</numerusform>
     <numerusform>Úspešne importovaných %n súborov.</numerusform>
@@ -129,11 +132,10 @@ the wrong case. Catching that is what the **Check** step is for.
 Slovak has three plural forms in Qt files (*one*, *few*, *other*); each
 is translated with its own example number (1, 2, 0).
 
-> **Check before you release.** A string the file had already marked as
-> finished keeps that mark when its text is replaced, so Qt's `lrelease`
-> will include the new Slovak text even while the app still lists it
-> under **Check**. Review the **Check** tab before you build a release
-> from the file.
+Every string still under **Check** is written with
+`type="unfinished"` — including those the file had marked as finished
+when they held German — so Qt's `lrelease` leaves them out of the
+compiled `.qm` by default. **Done** removes the mark when you save.
 
 ## From the command line
 

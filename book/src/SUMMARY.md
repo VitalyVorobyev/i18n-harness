@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
+[Quick start](quick-start.md)
 
 # Getting started
 
@@ -23,19 +24,11 @@
 
 # Reference
 
+- [App settings](reference/app-settings.md)
 - [The settings file](reference/settings-file.md)
 - [The glossary file](reference/glossary-file.md)
 - [Command line: harness](reference/cli.md)
 - [Command line: harness-lab](reference/lab-cli.md)
 - [Formats and placeholders](reference/formats.md)
 - [Checks](reference/checks.md)
-- [Prompt profiles](reference/profiles.md)
 - [Troubleshooting](reference/troubleshooting.md)
-
-# For developers
-
-- [Architecture](developers/architecture.md)
-- [Extending the harness](developers/extending.md)
-- [The round-trip contract](developers/round-trip.md)
-- [Building and testing](developers/building.md)
-- [Releasing](developers/releasing.md)
